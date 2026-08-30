@@ -1,0 +1,179 @@
+/* ── Notes & Decisions log ──────────────────────────────────────────────────
+   HARD RULE (same as paper.css / ChatSpaceLight.css): every COLOUR selector in
+   this file starts at `.theme-space-light`. The grouped/flat dark layouts never
+   set that class, so they keep rendering in the shipped dark palette.
+
+   STRUCTURE IS NOT SCOPED. Layout, spacing and the shape of the log must hold in
+   every theme — a stack that only stacks in one theme is a broken stack. So the
+   unscoped block below owns geometry and inherits `currentColor`, and the scoped
+   block below it owns paint.
+
+   Colour law: a note's KIND is not status, urgency or priority, so it takes none
+   of teal/amber/red. Decision and status are told apart by WEIGHT — filled ink vs
+   quiet outline — which is legible without shouting. */
+
+/* ── structure (every theme) ────────────────────────────────────────────────── */
+.notes-log {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+  /* A log is read line by line. Full-bleed prose on a 1300px panel is unreadable and
+     strands every right-aligned control a screen away from the text it belongs to, so
+     the column is capped at a measure and the panel's own padding does the rest. */
+  max-width: 720px;
+  padding: 16px 0 24px;
+}
+
+.notes-compose {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.notes-compose-kind {
+  display: inline-flex;
+  gap: 6px;
+  align-self: flex-start;
+}
+.notes-kind-choice {
+  padding: 4px 12px;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 620;
+  cursor: pointer;
+}
+.notes-compose-body {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid currentColor;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  resize: vertical;
+  min-height: 56px;
+}
+.notes-compose-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.notes-compose-foot .primary { margin-left: auto; }
+.notes-compose-hint { font-size: 12.5px; }
+.notes-error { margin: 0; font-size: 13px; }
+
+.notes-log-label { margin: 4px 0 0; }
+
+.notes-entries {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.notes-entry {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 2px;
+  border-top: 1px solid currentColor;
+  min-width: 0;
+}
+.notes-entry:first-child { border-top: 0; }
+.notes-entry-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 12.5px;
+}
+.notes-kind {
+  display: inline-block;
+  padding: 2px 9px;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: .02em;
+  white-space: nowrap;
+}
+/* The weight difference between the two kinds is STRUCTURE, not decoration: if it only
+   existed in the light theme, the dark shells would show two identical pills and the
+   distinction the product asked for would be gone. `currentColor` makes one rule work in
+   both palettes; the light theme then sharpens it below. */
+.notes-kind.decision {
+  background: color-mix(in srgb, currentColor 16%, transparent);
+  border-color: currentColor;
+}
+.notes-author { font-weight: 620; }
+.notes-body {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.45;
+}
+.notes-edit { display: flex; flex-direction: column; gap: 8px; }
+.notes-entry-actions { display: flex; gap: 8px; }
+.notes-entry-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 12.5px;
+  min-height: 0;
+}
+.notes-entry-foot:empty { display: none; }
+.notes-own-actions { display: inline-flex; gap: 6px; margin-left: auto; }
+.notes-attachment { white-space: nowrap; }
+
+/* ── paint (light theme only) ───────────────────────────────────────────────── */
+.theme-space-light .notes-compose-body {
+  background: var(--wash-2);
+  border-color: transparent;
+  color: var(--ink);
+}
+.theme-space-light .notes-compose-body::placeholder { color: var(--muted); }
+.theme-space-light .notes-compose-body:focus-visible {
+  outline: none;
+  border-color: var(--line);
+  background: var(--paper);
+}
+.theme-space-light .notes-kind-choice {
+  background: var(--wash-2);
+  border-color: transparent;
+  color: var(--muted);
+}
+.theme-space-light .notes-kind-choice:hover { border-color: var(--line); }
+/* The chosen kind is the one filled: selection is state, not decoration. */
+.theme-space-light .notes-kind-choice.active {
+  background: var(--ink);
+  color: var(--paper);
+}
+.theme-space-light .notes-compose-hint { color: var(--muted); }
+.theme-space-light .notes-error { color: var(--red-ink); }
+
+.theme-space-light .notes-entry { border-top-color: var(--line); }
+/* Status: quiet outline — a reading of the moment. */
+.theme-space-light .notes-kind {
+  background: var(--paper);
+  border-color: var(--line);
+  color: var(--muted);
+}
+/* Decision: filled ink — a settled fact. No teal/amber/red is spent on a kind. */
+.theme-space-light .notes-kind.decision {
+  background: var(--ink);
+  border-color: transparent;
+  color: var(--paper);
+}
+.theme-space-light .notes-author { color: var(--ink); }
+.theme-space-light .notes-time,
+.theme-space-light .notes-edited,
+.theme-space-light .notes-attachment { color: var(--muted); }
+.theme-space-light .notes-edited { font-style: italic; }
+.theme-space-light .notes-body { color: var(--ink); }

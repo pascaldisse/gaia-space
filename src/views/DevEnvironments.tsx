@@ -1,7 +1,15 @@
 import { createEffect, createResource, createSignal, For, Show } from "solid-js";
+import PageHeader from "../components/PageHeader";
+import ContentHead from "../components/ContentHead";
 import { api } from "../api";
 import { currentUser } from "../session";
 import { devenvApi, type DevEnvironment } from "../api/devenv";
+import EmptyState from "../components/EmptyState";
+import { Icon } from "../components/Icon";
+import { GhostPill, IconButton, PillSelect } from "../components/controls";
+import "./operatorForm.css";
+import "./devCards.css";
+import "./DevEnvironments.css";
 
 const newId = (prefix: string) => `${prefix}-${crypto.randomUUID()}`;
 const minutesAgo = (at: number) => Math.max(0, Math.round(Date.now() / 1000 - at) / 60);
@@ -59,16 +67,28 @@ const [poolTarget, setPoolTarget] = createSignal(0);
 
   return (
     <div class="view dev-environments">
-      <header class="view-header">
-        <h2>Dev environments</h2>
-        <select value={projectId()} onChange={(e) => setProjectId(e.currentTarget.value)}>
-          <For each={projects()}>{(p) => <option value={p.id}>{p.name}</option>}</For>
-        </select>
-        <button class="ghost small" onClick={() => run(() => devenvApi.sweepIdle())}>
-          Hibernate idle
-        </button>
-        <button
-          class="ghost small"
+      {/* THE HAND-ROLLED HEADER IS GONE. A <header class="view-header"> sitting
+          under a PageHeader is a second header on one screen: the project picker
+          and the three pool actions belong ON the page header's own action line,
+          which is where every other view in the app puts them. */}
+      {/* The `chips` lane is for METRICS — a value and its word — and the top-right
+         edge for those and the page's own Delete. This surface has neither, so the
+         header is title and sentence only: the picker and the three pool acts are on
+         the action row below, which is where every view keeps them now. */}
+      <PageHeader
+        icon="repo"
+        title="Dev environments"
+        subline="Cloud workspaces for this project: start one, let it hibernate, claim one from standby."
+      />
+
+      {/* THE ACTION ROW (PageHeader.css `.page-actionbar`). The three pool acts DO
+          something to the environments (hibernate, claim, refill), so they lead on the
+          left; the project decides which environments you are looking at, so it is the
+          view control at the far end. Creating an environment needs a name, a timeout
+          and two toggles — that is the band below, and the row does not repeat it. */}
+      <nav class="page-actionbar" aria-label="Dev environment actions">
+        <GhostPill onClick={() => run(() => devenvApi.sweepIdle())}>Hibernate idle</GhostPill>
+        <GhostPill
           onClick={() => {
             const pid = projectId();
             const me = actor();
@@ -76,78 +96,60 @@ const [poolTarget, setPoolTarget] = createSignal(0);
           }}
         >
           Claim standby
-        </button>
-        <button
-          class="ghost small"
+        </GhostPill>
+        <GhostPill
           onClick={() => {
             const pid = projectId();
             if (pid) run(() => devenvApi.refillStandbyPool(pid, "IntelliJ IDEA", "regular"));
           }}
         >
           Refill standby
-        </button>
-      </header>
+        </GhostPill>
+        <span class="actionbar-view-controls">
+          <PillSelect label="Project" value={projectId()} onChange={setProjectId}>
+            <For each={projects()}>{(p) => <option value={p.id}>{p.name}</option>}</For>
+          </PillSelect>
+        </span>
+      </nav>
+      {/* What this surface carries, above the things themselves. */}
+      <ContentHead icon="repo" title="Dev environments" line="Cloud workspaces for this project: start one, let it hibernate, claim one from standby." />
 
       <Show when={error()}>
         <p class="error">{error()}</p>
       </Show>
 
-      <ul class="devenv-list">
-        <For each={envs()} fallback={<li class="hint">No dev environments in this project.</li>}>
-          {(env) => (
-            <li>
-              <strong>{env.name}</strong>
-              <span class={`devenv-state devenv-${env.state.toLowerCase()}`}>{env.state}</span>
-              <span class="hint">
-                {env.ide} · {env.instance_type} · idle {env.idle_timeout_minutes}m · quiet for{" "}
-                {minutesAgo(env.last_activity_at).toFixed(0)}m
-              </span>
-              <Show when={env.persisted_home}>
-                <span class="hint">preserved: {env.persisted_home} + {env.persisted_worktree}</span>
-              </Show>
-              <button class="ghost small" onClick={() => run(() => devenvApi.touch(env.id))}>
-                Activity
-              </button>
-              <Show when={env.state === "RUNNING" || env.state === "STARTING"}>
-                <button class="ghost small" onClick={() => run(() => devenvApi.hibernate(env.id, actor()))}>
-                  Hibernate
-                </button>
-              </Show>
-              <Show when={env.state === "HIBERNATED"}>
-                <button class="ghost small" onClick={() => run(() => devenvApi.resume(env.id, actor()))}>
-                  Resume
-                </button>
-              </Show>
-              <button class="ghost small" onClick={() => run(() => devenvApi.remove(env.id, actor()))}>
-                ×
-              </button>
-            </li>
-          )}
-        </For>
-      </ul>
-
-      <form class="new-rule-form" onSubmit={create}>
-        <input placeholder="environment name" value={name()} onInput={(e) => setName(e.currentTarget.value)} />
-        <input
-          type="number"
-          min="1"
-          value={idleTimeout()}
-          onInput={(e) => setIdleTimeout(Number(e.currentTarget.value))}
-        />
-        <label>
-          <input type="checkbox" checked={standby()} onChange={(e) => setStandby(e.currentTarget.checked)} /> standby
-          pool
+      {/* READING ORDER: the band that creates an environment comes BEFORE the
+          list of environments, as on every other operator tool here (Packages,
+          Pipelines). It used to sit under the list, so an empty project showed
+          "nothing yet" floating above the very form that fixes it. */}
+      <form class="new-rule-form op-form" onSubmit={create}>
+        <input class="op-input op-grow" aria-label="Environment name" placeholder="Environment name" value={name()} onInput={(e) => setName(e.currentTarget.value)} />
+        {/* A bare number box said nothing about what it counted. It is minutes,
+            so it says minutes — the one place a caption earns its line. */}
+        <label class="op-field">
+          <span>Idle timeout (min)</span>
+          <input
+            class="op-input op-narrow"
+            type="number"
+            min="1"
+            value={idleTimeout()}
+            onInput={(e) => setIdleTimeout(Number(e.currentTarget.value))}
+          />
         </label>
-        <input
-          type="number"
-          min="0"
-          placeholder="standby target"
-          value={poolTarget()}
-          onInput={(e) => setPoolTarget(Number(e.currentTarget.value))}
-        />
-        <button
-          type="button"
-          class="ghost"
+        <label class="devenv-standby">
+          <input type="checkbox" checked={standby()} onChange={(e) => setStandby(e.currentTarget.checked)} /> Standby pool
+        </label>
+        <label class="op-field">
+          <span>Standby target</span>
+          <input
+            class="op-input op-narrow"
+            type="number"
+            min="0"
+            value={poolTarget()}
+            onInput={(e) => setPoolTarget(Number(e.currentTarget.value))}
+          />
+        </label>
+        <GhostPill
           onClick={() => {
             const pid = projectId();
             if (pid)
@@ -160,9 +162,70 @@ const [poolTarget, setPoolTarget] = createSignal(0);
           }}
         >
           Set pool target
-        </button>
-        <button class="ghost">Create</button>
+        </GhostPill>
+        {/* Creating the environment is the point of this form, so it is the
+            primary, not one more grey pill among four. */}
+        <button class="primary" type="submit">Create environment</button>
       </form>
+
+      {/* THE KNOWLEDGE CARD, not a naked row (design rollout). An environment has a
+          NAME and one quiet line of facts about it — exactly the shape the library
+          card carries — so it wears the same card, from the same tokens. The row's
+          own acts keep the place the arrow would have, because this card DOES things
+          instead of opening a page. */}
+      <ul class="devenv-list dev-card-grid">
+        {/* ONE ACTION, ONE PLACE: the band above IS "create an environment", so
+            this state names the absence and does not draw that act again. */}
+        <For each={envs()} fallback={
+          <li class="devenv-empty devenv-empty-full">
+            <EmptyState
+              title="No dev environments in this project"
+              hint="An environment is a running workspace with your IDE attached. It hibernates on its own when it goes quiet."
+            />
+          </li>
+        }>
+          {(env) => (
+            <li>
+              <div class="dev-card">
+                <span class="dev-card-icon" aria-hidden="true"><Icon name="repo" size={20} /></span>
+                <span class="dev-card-copy">
+                  <strong>{env.name}</strong>
+                  {/* ONE meta line. `preserved: …` used to be a second one; it is a
+                      fact about a hibernated environment, so it joins this line
+                      rather than starting a paragraph. */}
+                  <small>
+                    {env.ide} · {env.instance_type} · idle {env.idle_timeout_minutes}m · quiet for{" "}
+                    {minutesAgo(env.last_activity_at).toFixed(0)}m
+                    <Show when={env.persisted_home}> · preserved {env.persisted_home} + {env.persisted_worktree}</Show>
+                  </small>
+                </span>
+                <span class={`devenv-state dev-card-state devenv-${env.state.toLowerCase()}`}>{env.state}</span>
+                <span class="dev-card-actions">
+              <GhostPill class="small" onClick={() => run(() => devenvApi.touch(env.id))}>
+                Activity
+              </GhostPill>
+              <Show when={env.state === "RUNNING" || env.state === "STARTING"}>
+                <GhostPill class="small" onClick={() => run(() => devenvApi.hibernate(env.id, actor()))}>
+                  Hibernate
+                </GhostPill>
+              </Show>
+              <Show when={env.state === "HIBERNATED"}>
+                <GhostPill class="small" onClick={() => run(() => devenvApi.resume(env.id, actor()))}>
+                  Resume
+                </GhostPill>
+              </Show>
+              {/* A round × with no accessible name is a button nobody can read.
+                  IconButton makes the name mandatory. */}
+              <IconButton label={`Delete ${env.name}`} onClick={() => run(() => devenvApi.remove(env.id, actor()))}>
+                ×
+              </IconButton>
+                </span>
+              </div>
+            </li>
+          )}
+        </For>
+      </ul>
+
     </div>
   );
 }

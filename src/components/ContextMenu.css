@@ -1,0 +1,42 @@
+/* Self-scoped like the other overlays: local tokens with fallbacks, so the menu reads
+   the same in the light chat-first shell and on the dark theme. */
+.context-menu {
+  --ctxm-ink: var(--ink, #1f2328);
+  --ctxm-muted: var(--muted, #68717d);
+  --ctxm-paper: var(--paper, #ffffff);
+  --ctxm-line: var(--line, #e5ddd3);
+  --ctxm-danger: var(--danger, #c2384a);
+  position: fixed;
+  z-index: 90; /* above drawers, below the delete question it can open */
+  min-width: 12rem;
+  padding: 6px;
+  display: grid;
+  gap: 2px;
+  border: 1px solid var(--ctxm-line);
+  border-radius: 12px;
+  background: var(--ctxm-paper);
+  box-shadow: 0 18px 44px rgba(31, 35, 40, 0.22);
+  color: var(--ctxm-ink);
+  font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+.context-menu .context-item {
+  display: block;
+  width: 100%;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 0.92rem;
+  text-align: left;
+  cursor: pointer;
+}
+.context-menu .context-item:hover,
+.context-menu .context-item:focus-visible { background: color-mix(in srgb, var(--ctxm-line) 45%, transparent); outline: none; }
+.context-menu .context-item.disabled { color: var(--ctxm-muted); cursor: default; }
+/* The irreversible act is last and it is red — here it may say so at rest, because
+   the menu only exists while it is being read. */
+.context-menu .context-item.danger { color: var(--ctxm-danger); }
+.context-menu .context-item.danger:hover,
+.context-menu .context-item.danger:focus-visible { background: color-mix(in srgb, var(--ctxm-danger) 12%, transparent); }

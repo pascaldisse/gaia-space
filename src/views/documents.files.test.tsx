@@ -102,7 +102,7 @@ describe("document files", () => {
     expect(host.querySelector("a.file-download")).not.toBeNull();
   });
 
-  test("dropping files on the tree uploads them where a click would have filed them", async () => {
+  test("dropping files on the library uploads them where a click would have filed them", async () => {
     setProfileId("me");
     const uploaded: string[] = [];
     globalThis.fetch = (async (url: unknown) => {
@@ -132,7 +132,8 @@ describe("document files", () => {
     (globalThis as unknown as { XMLHttpRequest: unknown }).XMLHttpRequest = RecordingXhr;
 
     const host = await mount();
-    const tree = host.querySelector(".documents-tree") as HTMLElement;
+    // The drop target is the library surface itself now: the narrow tree column is gone.
+    const tree = host.querySelector(".documents-editor") as HTMLElement;
     const file = new File(["hello"], "a.txt", { type: "text/plain" });
     const drop = new Event("drop", { bubbles: true }) as DragEvent;
     Object.defineProperty(drop, "dataTransfer", { value: { files: [file], types: ["Files"] } });

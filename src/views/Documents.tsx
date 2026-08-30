@@ -1,10 +1,16 @@
 import { createResource, createSignal, createEffect, For, Show } from "solid-js";
+import PageHeader from "../components/PageHeader";
 import { marked } from "marked";
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import "../App.css";
 import "./Documents.css";
-import { Resizer, paneWidth } from "../components/Resizer";
-import { useDeepLink, linkContainer, linkEntity, linkProps, route } from "../router";
+import DocumentCreateDrawer, { type DocumentCreateMode } from "../components/DocumentCreateDrawer";
+import ConfirmDialog from "../components/ConfirmDialog";
+import PromptDialog from "../components/PromptDialog";
+import ContextMenu, { type ContextMenuItem } from "../components/ContextMenu";
+import DeleteButton from "../components/DeleteButton";
+import { Icon } from "../components/Icon";
+import { useDeepLink, hrefFor, linkEntity, linkProps, navigate, route } from "../router";
 import {
   documentsApi,
   newId,
@@ -21,24 +27,20 @@ import {
 import { chatApi, newId as newMessageId, type MessageView } from "../api/chat";
 import { channelFeedsApi } from "../api/channel-feeds";
 import { profileId as sessionProfileId, profileLocked, isWeb } from "../session";
+import { actingProfileId as chatActingProfileId } from "../chatIdentity";
 import { applyMarkdownCommand, sanitizeRichHtml, type MarkdownCommand } from "../richtext";
 import { blogsApi, type BlogPost } from "../api/blogs";
+import { UI_LOCALE } from "../calendar";
 
 // Two places, not three. A document lives either with a person ("My Documents") or
 // with a project ("Project Docs"); the knowledge base is not a third home, it is a
 // choice of *source* inside Project Docs (books are org-wide project-shaped shelves).
 // The storage containers are unchanged — `kb` is still its own container_type — this
 // is purely the navigation the person sees.
-const CONTAINER_TABS: { key: ContainerType; label: string }[] = [
-  { key: "my-docs", label: "My Documents" },
-  { key: "project", label: "Project Docs" },
-];
-const tabFor = (container: ContainerType): ContainerType =>
-  container === "my-docs" ? "my-docs" : "project";
 
 function when(ts: number | null) {
   if (!ts) return "";
-  return new Date(ts * 1000).toLocaleString(undefined, {
+  return new Date(ts * 1000).toLocaleString(UI_LOCALE, {
     month: "short",
     day: "2-digit",
     hour: "2-digit",
@@ -46,9 +48,26 @@ function when(ts: number | null) {
   });
 }
 
-export default function Documents() {
+export default function Documents(props: { container?: ContainerType; containerId?: string } = {}) {
   const [error, setError] = createSignal<string | null>(null);
-  const [treeW, setTreeW] = paneWidth("documents.tree.width", 260);
+  const [importOpen, setImportOpen] = createSignal(false);
+  /** ── EMBEDDED MEANS THE SCOPE IS ALREADY ANSWERED ────────────────────────
+   *
+   *  ChannelWorkspace mounts this view for a channel's "Files & Links" tab and
+   *  passes the channel's project in. In that mount there is nothing to ask: you
+   *  are in the channel, the channel belongs to the project, that IS the project.
+   *  So every control whose only job is to CHOOSE A SCOPE is not rendered at all
+   *  — not disabled, not shrunk. A disabled picker still asks the question.
+   *
+   *  Hidden when embedded: the My Documents / Project Docs container toggle, the
+   *  project + knowledge-base source picker, the book controls, the "Acting as"
+   *  identity picker, and the folder-import path field with its two buttons.
+   *  "show archived" STAYS: it filters what you see, it does not pick a scope.
+   *
+   *  The standalone `#/documents` route passes no props, so it keeps every one of
+   *  them — there the scope genuinely is unknown.
+   */
+  const embedded = () => props.container !== undefined;
   const fail = (e: unknown) => setError(String(e));
 
   // Identity law: in web mode the personal container is the *session's* profile and
@@ -63,7 +82,11 @@ export default function Documents() {
   createEffect(() => {
     if (profileLocked()) return;
     const list = profiles();
-    if (list && list.length && !localProfileId()) setLocalProfileId(list[0].id);
+    if (!list?.length || localProfileId()) return;
+    // Inherit the shell's acting profile; the first profile is only a last resort
+    // for a desktop that has not chosen one yet.
+    const inherited = chatActingProfileId() ?? sessionProfileId();
+    setLocalProfileId(list.find((person) => person.id === inherited)?.id ?? list[0].id);
   });
 
   const [projects] = createResource(() => documentsApi.listProjects());
@@ -159,7 +182,11 @@ export default function Documents() {
     if (rootId && rootId !== previousRootId) void Promise.all([refetchFolders(), refetchDocuments()]);
     return rootId;
   }, null);
-  const books = () => (allFolders() ?? []).filter((f) => f.container_type === "kb" && f.parent_id === null);
+  // Reading an errored resource THROWS in Solid. The source picker is now always
+  // mounted (it is the Project Docs control itself), so this reader must survive a
+  // failed fetch — otherwise the whole view dies and the error-bar never renders (H7).
+  const books = () =>
+    (allFolders.error ? [] : allFolders() ?? []).filter((f) => f.container_type === "kb" && f.parent_id === null);
   createEffect(() => {
     if (activeContainer() === "kb" && !selectedBookId() && books().length) setSelectedBookId(books()[0].id);
   });
@@ -169,6 +196,7 @@ const [bookSearch] = createResource(
 () => ({ bookId: selectedBookId(), query: bookQuery().trim() }),
 ({ bookId, query }) => bookId && query ? documentsApi.searchBookDocuments(bookId, query) : Promise.resolve([]),
 );
+const [bookOwners] = createResource(selectedBookId, (id) => (id ? documentsApi.listBookOwners(id).catch(() => [] as string[]) : Promise.resolve([] as string[])));
 const [bookAccess, { refetch: refetchBookAccess }] = createResource(selectedBookId, (id) =>
 id ? documentsApi.listBookAccess(id) : Promise.resolve([]),
 );
@@ -191,7 +219,101 @@ const [showArchived, setShowArchived] = createSignal(false);
     const e = allFolders.error ?? allDocuments.error;
     return e ? `Documents could not be loaded: ${String(e)}` : null;
   };
-  const isEmpty = () => !treeLoading() && !loadFailure() && displayFolders().length === 0 && scopedDocuments().length === 0;
+
+  /** Reading an errored resource throws in Solid. The library canvas must survive a
+   *  failed fetch, so it asks through this gate: no documents while loading or broken,
+   *  which keeps the error-bar the visible state (SPEC H7). */
+  const safeDocuments = () => (treeLoading() || loadFailure() ? [] : scopedDocuments());
+  const safeFolders = () => (treeLoading() || loadFailure() ? [] : displayFolders());
+
+  /** THE BIG SURFACE IS THE LIBRARY, not a leftover. It shows the level you are on —
+   *  the selected folder, or the container's root — with folders and documents as
+   *  cards, so an uploaded file is readable there instead of only as a small row in
+   *  the narrow tree. `folder_id === null` counts as root in every container, because
+   *  project and book roots are stored as a folder row while personal docs are not. */
+  const levelId = () => selectedFolderId() ?? rootParentId();
+  const atRoot = () => selectedFolderId() === null;
+  const libraryDocuments = () =>
+    safeDocuments().filter((d) => d.folder_id === levelId() || (atRoot() && d.folder_id === null));
+  const libraryFolders = () =>
+    safeFolders().filter((f) => f.parent_id === levelId() || (atRoot() && f.parent_id === null));
+  const levelFolder = () => safeFolders().find((f) => f.id === selectedFolderId()) ?? null;
+  const containerName = () => {
+    if (embedded()) return "Project library";
+    if (activeContainer() === "my-docs") return "My Documents";
+    if (activeContainer() === "kb") return books().find((b) => b.id === selectedBookId())?.name ?? "Organization library";
+    return projects()?.find((p) => p.id === selectedProjectId())?.name ?? "Project library";
+  };
+  const libraryTitle = () => levelFolder()?.name ?? containerName();
+  /** The whole way down, so a deep shelf can be left in one click at any level —
+   *  "Back" only ever answered one step and, sitting in the canvas, it answered it
+   *  from the middle of the page. */
+  const folderPath = () => {
+    const chain: DocumentFolder[] = [];
+    let current = levelFolder();
+    const guard = new Set<string>();
+    while (current && !guard.has(current.id)) {
+      guard.add(current.id);
+      chain.unshift(current);
+      const parentId = current.parent_id;
+      current = parentId && parentId !== rootParentId() ? safeFolders().find((f) => f.id === parentId) ?? null : null;
+    }
+    return chain;
+  };
+
+  /** ── THE SHELF ─────────────────────────────────────────────────────────────
+   *
+   *  Folders stand side by side like books on a shelf and are DROP TARGETS: a
+   *  document (or another folder) dragged onto one is filed inside it. This is the
+   *  structural half of the library — the part that has to exist before there is
+   *  enough material to need it. Payloads are plain text so the same handler can
+   *  tell an internal drag from a file drop (which carries `Files` instead).
+   */
+  const [dropTargetId, setDropTargetId] = createSignal<string | null>(null);
+  const folderCount = (id: string) => ({
+    documents: safeDocuments().filter((d) => d.folder_id === id).length,
+    folders: safeFolders().filter((f) => f.parent_id === id).length,
+  });
+  const shelfSubline = (id: string) => {
+    const { documents, folders } = folderCount(id);
+    if (!documents && !folders) return "Empty shelf";
+    const parts: string[] = [];
+    if (folders) parts.push(`${folders} folder${folders === 1 ? "" : "s"}`);
+    if (documents) parts.push(`${documents} document${documents === 1 ? "" : "s"}`);
+    return parts.join(" · ");
+  };
+  const isInternalDrag = (event: DragEvent) => !event.dataTransfer?.types.includes("Files");
+  /** `null` files at the level's root; the backend wants the project root row there. */
+  async function fileInto(payload: string, targetFolderId: string | null) {
+    const cid = containerId();
+    if (!cid) return;
+    const [kind, ...rest] = payload.split(":");
+    const id = rest.join(":");
+    if (!id) return;
+    const root = activeContainer() === "my-docs" ? null : rootParentId();
+    try {
+      if (kind === "document" || kind === "favorite") {
+        const doc = scopedDocuments().find((d) => d.id === id);
+        if (!doc || doc.folder_id === (targetFolderId ?? root)) return;
+        await documentsApi.moveDocument(doc.id, doc.container_type, cid, targetFolderId ?? root);
+        await refetchDocuments();
+      } else if (kind === "folder") {
+        // A shelf cannot be filed into itself, nor into a shelf it already holds.
+        if (id === targetFolderId) return;
+        const descends = (folderId: string | null): boolean => {
+          if (!folderId) return false;
+          if (folderId === id) return true;
+          const parent = safeFolders().find((f) => f.id === folderId)?.parent_id ?? null;
+          return descends(parent);
+        };
+        if (descends(targetFolderId)) return;
+        await documentsApi.moveDocumentFolder(id, targetFolderId ?? root);
+        await refetchFolders();
+      }
+    } catch (e) {
+      fail(e);
+    }
+  }
 
   const scopedFolders = () =>
     (allFolders() ?? []).filter(
@@ -212,13 +334,8 @@ const [showArchived, setShowArchived] = createSignal(false);
   const displayFolders = () => scopedFolders().filter((f) => f.id !== rootParentId());
   const projectReady = () => activeContainer() !== "project" || !!projectRoot();
   const [selectedFolderId, setSelectedFolderId] = createSignal<string | null>(null);
-  const [expanded, setExpanded] = createSignal<Set<string>>(new Set());
-  function toggleExpand(id: string) {
-    const next = new Set(expanded());
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
-    setExpanded(next);
-  }
+  // The tree column is gone (the library canvas IS the page), so nothing expands
+  // in place any more: opening a folder navigates one level, with Back to return.
 
   // ---- import (Confluence export / local notes folder) ----
   // Both are the same shape on disk; the Rust side mirrors the directory tree into folders.
@@ -303,36 +420,121 @@ const [showArchived, setShowArchived] = createSignal(false);
       fail(e);
     }
   }
+  /** Renaming is ASKED, not typed into the card: turning a tidy shelf into a bare
+   *  input with a ✓ beside it was the "old text field" showing through the new one. */
   const [renamingFolderId, setRenamingFolderId] = createSignal<string | null>(null);
   const [renameValue, setRenameValue] = createSignal("");
   function startRenameFolder(f: DocumentFolder) {
     setRenamingFolderId(f.id);
     setRenameValue(f.name);
   }
-  async function saveRenameFolder(f: DocumentFolder) {
+  async function saveRenameFolder() {
+    const id = renamingFolderId();
+    const target = id ? safeFolders().find((f) => f.id === id) : null;
     const name = renameValue().trim();
-    if (!name) return;
+    if (!target || !name) return;
     try {
-      await documentsApi.updateDocumentFolder({ ...f, name });
+      await documentsApi.updateDocumentFolder({ ...target, name });
       setRenamingFolderId(null);
       await refetchFolders();
     } catch (e) {
       fail(e);
     }
   }
-  async function toggleFolderArchived(f: DocumentFolder) {
+  /** ── DELETING ─────────────────────────────────────────────────────────────
+   *  Nothing is deleted from a click. The click only ASKS; `pendingDelete` holds
+   *  the question until it is answered, and answering "no" is the easy path. */
+  type PendingDelete = { kind: "document"; id: string; name: string } | { kind: "folder"; id: string; name: string };
+  const [pendingDelete, setPendingDelete] = createSignal<PendingDelete | null>(null);
+  const [deleting, setDeleting] = createSignal(false);
+  async function confirmDelete() {
+    const target = pendingDelete();
+    if (!target) return;
+    setDeleting(true);
     try {
-      await documentsApi.updateDocumentFolder({ ...f, archived: !f.archived });
-      await refetchFolders();
+      if (target.kind === "document") {
+        await documentsApi.deleteDocument(target.id, actingProfileId() ?? "");
+        if (selectedDocumentId() === target.id) setSelectedDocumentId(null);
+        await refetchDocuments();
+      } else {
+        await documentsApi.deleteDocumentFolder(target.id, actingProfileId() ?? "");
+        if (selectedFolderId() === target.id) setSelectedFolderId(null);
+        await refetchFolders();
+      }
+      setPendingDelete(null);
+    } catch (e) {
+      // A refusal (a folder that still holds documents) is shown, not swallowed.
+      fail(e);
+      setPendingDelete(null);
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  /** ── WHO MAY DELETE ───────────────────────────────────────────────────────
+   *  Personal documents belong to their container. A project document belongs to
+   *  its author or to the project's owner. The organization library belongs to
+   *  whoever owns the book — not to everyone who may write in it. The backend
+   *  enforces the same rule; this only decides whether the act is OFFERED, because
+   *  a rule that shows up as a failed click is a rule nobody can read.
+   */
+  const projectOwnerId = (projectId: string | null) =>
+    projectId ? projects()?.find((p) => p.id === projectId)?.created_by ?? null : null;
+  const ownsContainer = () => {
+    const me = actingProfileId();
+    if (!me) return false;
+    if (activeContainer() === "my-docs") return containerId() === me;
+    if (activeContainer() === "project") return projectOwnerId(selectedProjectId()) === me;
+    // A book's owner is the only one who may end it; editors may write, not delete.
+    return (bookOwners() ?? []).includes(me);
+  };
+  const canDeleteDocument = (doc: Document | null) => {
+    const me = actingProfileId();
+    if (!doc || !me) return false;
+    if (doc.container_type === "my-docs") return doc.container_id === me;
+    if (doc.created_by === me) return true;
+    return ownsContainer();
+  };
+
+  /** EVERY ACT A CARD HAS, IN ONE MENU. Right-click opens it where the click was;
+   *  the card's ⋯ button opens the same list for anyone not reaching for a right
+   *  mouse button. Words, not glyphs — the ✕ that archived was read as a delete. */
+  const [cardMenu, setCardMenu] = createSignal<{ x: number; y: number; items: ContextMenuItem[] } | null>(null);
+  const folderMenu = (folder: DocumentFolder): ContextMenuItem[] => [
+    { label: "Open", onSelect: () => setSelectedFolderId(folder.id) },
+    { label: "Rename…", onSelect: () => startRenameFolder(folder) },
+    { label: folder.archived ? "Restore" : "Archive", onSelect: () => void toggleFolderArchived(folder) },
+    ...(ownsContainer()
+      ? [{ label: "Delete folder…", danger: true, onSelect: () => setPendingDelete({ kind: "folder", id: folder.id, name: folder.name }) }]
+      : []),
+  ];
+  const documentMenu = (document: Document): ContextMenuItem[] => [
+    { label: "Open", onSelect: () => navigate(docRoute(document.id)) },
+    ...(document.doc_type === "file" ? [{ label: "Download…", onSelect: () => void downloadFile(document) }] : []),
+    { label: document.archived ? "Restore" : "Archive", onSelect: () => void archiveDocumentRow(document) },
+    ...(canDeleteDocument(document)
+      ? [{ label: "Delete document…", danger: true, onSelect: () => setPendingDelete({ kind: "document", id: document.id, name: document.title }) }]
+      : []),
+  ];
+  const openCardMenu = (event: MouseEvent, items: ContextMenuItem[]) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setCardMenu({ x: event.clientX, y: event.clientY, items });
+  };
+
+  /** The row's own archive, so the menu works on a card that is not open. */
+  async function archiveDocumentRow(doc: Document) {
+    try {
+      await documentsApi.archiveDocument(doc.id, !doc.archived);
+      await refetchDocuments();
     } catch (e) {
       fail(e);
     }
   }
-  async function moveFolderTo(f: DocumentFolder, newParentId: string) {
-    const parentId = newParentId === "" ? rootParentId() : newParentId;
-    if (parentId === f.id) return; // no-op: can't be its own parent
+
+  async function toggleFolderArchived(f: DocumentFolder) {
     try {
-      await documentsApi.moveDocumentFolder(f.id, parentId);
+      await documentsApi.updateDocumentFolder({ ...f, archived: !f.archived });
       await refetchFolders();
     } catch (e) {
       fail(e);
@@ -382,10 +584,6 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
   // in-app click would have opened (tab + project/book selection), not just the id.
   const docRoute = (id:string, container:ContainerType = activeContainer(), cid:string|null = containerId()) =>
     ({ view:"Documents", entityType:"document", entityId:id, containerType:container, containerId:cid ?? undefined });
-  const containerRoute = (container:ContainerType) => ({
-    view: "Documents", containerType: container,
-    containerId: (container === "my-docs" ? actingProfileId() : container === "project" ? selectedProjectId() : selectedBookId()) ?? undefined,
-  });
   const applyContainer = (container:string, cid?:string) => {
     if (container !== activeContainer()) setActiveContainer(container as ContainerType);
     if (!cid) return;
@@ -401,6 +599,14 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
     const r = route();
     if (r.view !== "Documents" || !r.containerType) return;
     applyContainer(r.containerType, r.containerId);
+  });
+  // embedded -> container switch. The channel workspace mounts this same view for its
+  // "Dateien und Links" tab, where the container comes from the channel's project instead
+  // of from the URL (the URL is the channel's). No route is written: the address bar keeps
+  // naming the channel.
+  createEffect(() => {
+    if (!props.container) return;
+    applyContainer(props.container, props.containerId);
   });
   useDeepLink("document", (id) => {
     setSelectedDocumentId(id);
@@ -569,6 +775,91 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
       setUploading(false);
     }
   }
+  /** Desktop upload without typing a path.
+   *
+   *  `upload_document_file` names a path on the BACKEND filesystem — it takes a
+   *  path, not bytes — so in the desktop build the honest way to "just upload a
+   *  file" is the native picker, which hands back a real path. That is also why
+   *  drag-and-drop of dropped bytes stays gated on `isWeb()` further down: the
+   *  web transport can post the bytes, the invoke command cannot receive them.
+   *  Nothing here fakes a path for a dropped file. */
+  /** ── TAKE A COPY WITH YOU ──────────────────────────────────────────────────
+   *  Opening a file in the window was the whole story until now: the bytes live
+   *  beside the database, so nothing outside the app could ever use them. On the
+   *  desktop the native save dialog names the destination and the backend copies
+   *  the stored file there; in the browser the same act is the server's own file
+   *  route, which sends the bytes with their filename. */
+  const [downloading, setDownloading] = createSignal(false);
+  async function downloadFile(doc: Document) {
+    if (doc.doc_type !== "file") return;
+    const name = filePreview()?.filename ?? doc.title;
+    if (isWeb()) {
+      const link = window.document.createElement("a");
+      link.href = documentsApi.fileDownloadUrl(doc.id);
+      link.download = name;
+      link.rel = "noopener";
+      window.document.body.appendChild(link);
+      link.click();
+      link.remove();
+      return;
+    }
+    setDownloading(true);
+    try {
+      const target = await saveDialog({ defaultPath: name, title: `Save ${name}` });
+      if (typeof target !== "string") return;
+      await documentsApi.exportFile(doc.id, target);
+    } catch (e) {
+      fail(e);
+    } finally {
+      setDownloading(false);
+    }
+  }
+
+  async function pickAndUploadFile() {
+    try {
+      const picked = await openDialog({ directory: false, multiple: false, title: "Upload a file" });
+      if (typeof picked !== "string") return;
+      setUploadPath(picked);
+      await uploadFile();
+    } catch (e) {
+      fail(e);
+    }
+  }
+
+  // The embedded surface offers two acts, so the few facts each needs are asked
+  // in a drawer at the moment you ask for them, not in a permanent column.
+  const [createMode, setCreateMode] = createSignal<DocumentCreateMode | null>(null);
+  const [creating, setCreating] = createSignal(false);
+  const openCreate = (mode: DocumentCreateMode) => {
+    if (mode === "document") setNewDocTitle(""); else setNewFolderName("");
+    setCreateMode(mode);
+  };
+  async function submitCreate() {
+    const mode = createMode();
+    if (!mode) return;
+    setCreating(true);
+    setError(null);
+    try {
+      if (mode === "document") await createDocument();
+      else await createFolder();
+      // createDocument/createFolder report their own failure through `fail()`;
+      // the drawer closes only when nothing was reported.
+      if (!error()) setCreateMode(null);
+    } finally {
+      setCreating(false);
+    }
+  }
+  // Where a new item lands, as a sentence — the destination is a fact here, not a picker.
+  const createScopeLabel = () => {
+    const folder = selectedFolderId() ? scopedFolders().find((f) => f.id === selectedFolderId())?.name : null;
+    const place = activeContainer() === "project"
+      ? projects()?.find((p) => p.id === containerId())?.name ?? "this project"
+      : activeContainer() === "kb"
+        ? books().find((b) => b.id === containerId())?.name ?? "this book"
+        : "your documents";
+    return folder ? `${place} / ${folder}` : place;
+  };
+
   const [filePreview] = createResource(
     () => (selectedDocument()?.doc_type === "file" ? selectedDocumentId() : null),
     (id) => (id ? documentsApi.readDocumentFile(id) : Promise.resolve(null)),
@@ -1020,95 +1311,6 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
     );
   }
 
-  function FolderRow(props: { folder: DocumentFolder; depth: number }) {
-    const f = () => props.folder;
-    const childFolders = () => displayFolders().filter((c) => c.parent_id === f().id);
-    const childDocs = () => scopedDocuments().filter((d) => d.folder_id === f().id);
-    const isOpen = () => expanded().has(f().id);
-    return (
-      <>
-        <li
-          class="folder-row"
-          role="treeitem"
-          aria-expanded={isOpen()}
-          aria-selected={selectedFolderId() === f().id}
-          style={{ "padding-left": `${props.depth * 1.1 + 0.4}em` }}
-        >
-          {/* A real button: Enter/Space expand the folder with no key handler of our own. */}
-          <button
-            type="button"
-            class="folder-toggle"
-            aria-expanded={isOpen()}
-            aria-label={`${isOpen() ? "Collapse" : "Expand"} ${f().name}`}
-            onClick={() => toggleExpand(f().id)}
-          >
-            {isOpen() ? "▾" : "▸"}
-          </button>
-          <Show
-            when={renamingFolderId() === f().id}
-            fallback={
-              <button
-                type="button"
-                class="folder-name"
-                classList={{ active: selectedFolderId() === f().id, archived: f().archived }}
-                onClick={() => setSelectedFolderId(f().id)}
-              >
-                {f().name}
-              </button>
-            }
-          >
-            <input
-              class="folder-rename-input"
-              value={renameValue()}
-              onInput={(e) => setRenameValue(e.currentTarget.value)}
-              onKeyDown={(e) => e.key === "Enter" && saveRenameFolder(f())}
-            />
-            <button class="ghost small" onClick={() => saveRenameFolder(f())}>
-              ✓
-            </button>
-          </Show>
-          <span class="folder-actions">
-            <button class="ghost small" title="rename" onClick={() => startRenameFolder(f())}>
-              ✎
-            </button>
-            <select
-              class="folder-move-select"
-              title="move to…"
-              value=""
-              onChange={(e) => e.currentTarget.value && moveFolderTo(f(), e.currentTarget.value)}
-            >
-              <option value="">move…</option>
-              <option value="">root</option>
-              <For each={displayFolders().filter((o) => o.id !== f().id)}>
-                {(o) => <option value={o.id}>{o.name}</option>}
-              </For>
-            </select>
-            <button class="ghost small" title="archive/unarchive" onClick={() => toggleFolderArchived(f())}>
-              {f().archived ? "restore" : "archive"}
-            </button>
-          </span>
-        </li>
-        <Show when={isOpen()}>
-          <For each={childDocs()}>
-            {(d) => (
-              <li style={{ "padding-left": `${(props.depth + 1) * 1.1 + 0.4}em` }}>
-                <a
-                  class="doc-row"
-                  classList={{ active: d.id === selectedDocumentId(), archived: d.archived }}
-                  {...linkProps(docRoute(d.id))}
-                >
-                  <span class="doc-icon">📄</span>
-                  <span class="doc-title">{d.title}</span>
-                  <span class="doc-version">v{d.version}</span>
-                </a>
-              </li>
-            )}
-          </For>
-          <For each={childFolders()}>{(c) => <FolderRow folder={c} depth={props.depth + 1} />}</For>
-        </Show>
-      </>
-    );
-  }
 
   return (
     <section class="documents-view">
@@ -1118,76 +1320,58 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
         </div>
       </Show>
 
-      <header class="documents-head">
-        <div>
-          <h1>Documents</h1>
-          <p>Yours first — what you wrote and what you starred. Project docs and knowledge-base books live under one picker.</p>
-        </div>
-        <Show when={!profileLocked()}>
-        <label>
-          Acting as
-          <select value={actingProfileId() ?? ""} onChange={(e) => {
-            const id = e.currentTarget.value || null;
-            setActingProfileId(id);
-            if (activeContainer() === "my-docs") linkContainer("my-docs", id ?? undefined);
-          }}>
-            <For each={profiles()?.filter((p) => !p.archived)}>{(p) => <option value={p.id}>{p.display_name}</option>}</For>
-          </select>
-        </label>
+      {/* "Yours first" is a true statement about the personal container and a false
+         one inside a project's Files & Links tab, where everything shown belongs to
+         the project. The title is unchanged; only the subline tells the truth. */}
+      {/* L1 (audit §3.1): identity is INHERITED, never asked again on a page. The
+         shell owns the one "Acting as" control; this was the second one, and on the
+         standalone route it was the last bare select left here. The acting profile
+         is still switchable — in the shell — and this view follows it. */}
+      {/* THE PAGE'S OWN DELETE SITS IN THE PAGE HEADER, TOP RIGHT — the same place
+          the conversation keeps it. It names what is open (the document you are
+          reading, or the shelf you are standing in) and it is absent for anyone who
+          does not own the library, rather than present and refusing. */}
+      <PageHeader
+        icon="books"
+        title="Knowledge"
+        subline={embedded() ? "Files and documents in this project" : "Yours first — what you wrote and starred"}
+        actions={
+<Show when={selectedDocument() ?? levelFolder()}>
+      <span class="documents-delete-slot">
+        <Show
+          when={selectedDocument()}
+          fallback={
+            <DeleteButton
+              label={`Delete folder ${levelFolder()?.name ?? ""}`}
+              canDelete={ownsContainer()}
+              deniedReason={`Only the owner of ${containerName()} can delete this`}
+              onRequest={() => {
+                const folder = levelFolder();
+                if (folder) setPendingDelete({ kind: "folder", id: folder.id, name: folder.name });
+              }}
+            />
+          }
+        >
+          {(doc) => (
+            <DeleteButton
+              label={`Delete document ${doc().title}`}
+              canDelete={canDeleteDocument(doc())}
+              deniedReason={`Only the owner of ${containerName()} can delete this`}
+              onRequest={() => setPendingDelete({ kind: "document", id: doc().id, name: doc().title })}
+            />
+          )}
         </Show>
-      </header>
+      </span>
+    </Show>
+        }
+      />
 
       <nav class="container-tabs">
-        <For each={CONTAINER_TABS}>
-          {(t) => (
-            <a
-              class="container-tab"
-              classList={{ active: tabFor(activeContainer()) === t.key }}
-              {...linkProps(containerRoute(t.key))}
-              onClick={(event) => {
-                linkProps(containerRoute(t.key)).onClick(event);
-                if (event.defaultPrevented) {
-                  setSelectedFolderId(null);
-                  setSelectedDocumentId(null);
-                }
-              }}
-            >
-              {t.label}
-            </a>
-          )}
-        </For>
-
-        {/* One picker for the whole "somewhere other than mine" half: projects and
-            knowledge-base books in a single list, because to the reader they are the
-            same question — *whose docs am I looking at?* */}
-        <Show when={tabFor(activeContainer()) === "project"}>
-          <select
-            aria-label="Documents source"
-            value={`${activeContainer()}:${activeContainer() === "kb" ? selectedBookId() ?? "" : selectedProjectId() ?? ""}`}
-            onChange={(e) => {
-              const [kind, ...rest] = e.currentTarget.value.split(":");
-              const id = rest.join(":") || null;
-              if (kind === "kb") {
-                setActiveContainer("kb");
-                setSelectedBookId(id);
-                linkContainer("kb", id ?? undefined);
-              } else {
-                setActiveContainer("project");
-                setSelectedProjectId(id);
-                linkContainer("project", id ?? undefined);
-              }
-              setSelectedFolderId(null);
-              setSelectedDocumentId(null);
-            }}
-          >
-            <optgroup label="Projects">
-              <For each={projects()}>{(p) => <option value={`project:${p.id}`}>{p.name}</option>}</For>
-            </optgroup>
-            <optgroup label="Knowledge base">
-              <For each={books()}>{(b) => <option value={`kb:${b.id}`}>{b.name}</option>}</For>
-            </optgroup>
-          </select>
-        </Show>
+        {/* Every scope control below is wrapped, not disabled: see `embedded`. */}
+        <Show when={!embedded()}>
+        {/* THE SOURCE IS CHOSEN IN THE SHELL. My Documents, the organization's books
+            and every project library are rows in the Knowledge sidebar now, so this
+            page carries no picker of its own: one act, one place. */}
 
         <Show when={activeContainer() === "kb"}>
           <input placeholder="New book name" value={newBookName()} onInput={(e) => setNewBookName(e.currentTarget.value)} />
@@ -1200,36 +1384,149 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
           </Show>
         </Show>
 
-        <label class="import-folder">
-          Import folder
-          <input
-            placeholder="path to a markdown / Confluence-export folder"
-            value={importPath()}
-            onInput={(e) => setImportPath(e.currentTarget.value)}
-          />
-        </label>
-        <button class="ghost small" onClick={chooseImportFolder}>Choose folder…</button>
-        <button class="ghost small" onClick={runImport} disabled={importing() || !importPath().trim() || !containerId() || !projectReady()}>
-          {importing() ? "Importing…" : "Import"}
-        </button>
-        <Show when={importSummary()}>
-          {(summary) => (
-            <span class="hint import-summary">
-              {summary().documents_created} page(s), {summary().folders_created} folder(s)
-              {summary().skipped.length ? ` · skipped ${summary().skipped.length}: ${summary().skipped.join("; ")}` : ""}
-            </span>
-          )}
         </Show>
 
+        {/* THE ACTS, ONE ROW, THE SAME ROW EVERYWHERE, ALWAYS REACHABLE. Upload and
+            New document lead; New folder and Import library are quiet beside them in
+            the same dress — they used to be two differently-styled leftovers at the
+            foot of a column that no longer exists. They live in the page's action bar
+            rather than in the empty canvas, so they stay available while a document
+            is open, which is what the old tree column had been carrying them for. */}
+        <div class="doc-actions documents-actionbar">
+            <Show when={!isWeb()}>
+              {/* Desktop: the native picker returns a real path, which is what
+                  `upload_document_file` takes. No path is ever typed. */}
+              <button class="primary doc-action-primary" onClick={pickAndUploadFile} disabled={uploading() || !projectReady()}>
+                <span class="doc-action-icon" aria-hidden="true">↑</span>
+                <span class="doc-action-copy"><strong>{uploading() ? "Uploading…" : "Upload file"}</strong><small>Choose a file from your computer</small></span>
+              </button>
+            </Show>
+            <Show when={isWeb()}>
+              {/* In the browser there is no path to name, so the same primary act
+                  is a real file input wearing the same button. */}
+              <label class="primary doc-action-primary doc-action-file">
+                <span class="doc-action-icon" aria-hidden="true">↑</span>
+                <span class="doc-action-copy"><strong>{uploading() ? "Uploading…" : "Upload file"}</strong><small>Choose a file or drop it here</small></span>
+                <input
+                  type="file"
+                  aria-label="File to upload"
+                  disabled={uploading() || !projectReady()}
+                  onChange={(e) => {
+                    const picked = e.currentTarget.files?.[0];
+                    e.currentTarget.value = "";
+                    if (picked) void uploadBrowserFile(picked);
+                  }}
+                />
+              </label>
+            </Show>
+            {/* No `.ghost` here on purpose. `.theme-space-light button.ghost`
+                strips fill and border, which made this read as plain text. This
+                button is new, so no dark rule depends on `.ghost` for it, and
+                `.doc-action-secondary` styles both themes on its own. */}
+            <button class="doc-action-secondary" onClick={() => openCreate("document")} disabled={!projectReady()}>
+              New document
+            </button>
+            {/* FOUR ACTS, FOUR BUTTONS, ONE RANK ORDER. Upload leads; the other three
+                are equals and are dressed as equals — two of them used to be underlined
+                text, which reads as a link into somewhere else, not as an act done here.
+                Import is offered in EVERY library, including a project's: the command
+                takes the container it is called from, so withholding it there was an
+                arbitrary difference, not a rule. */}
+            <button class="doc-action-secondary" onClick={() => openCreate("folder")} disabled={!projectReady()}>
+              New folder
+            </button>
+            <button class="doc-action-secondary" onClick={() => setImportOpen((open) => !open)} aria-expanded={importOpen()}>
+              {importOpen() ? "Close import" : "Import library"}
+            </button>
+            <Show when={importOpen()}>
+                <div class="import-library-panel">
+                  <p>Import a local Markdown or Confluence export.</p>
+                  <input
+                    aria-label="Import folder"
+                    placeholder="Choose a folder to import"
+                    value={importPath()}
+                    onInput={(e) => setImportPath(e.currentTarget.value)}
+                  />
+                  <div class="import-library-actions">
+                    <button class="doc-action-secondary" onClick={chooseImportFolder}>Choose folder</button>
+                    <button class="primary" onClick={runImport} disabled={importing() || !importPath().trim() || !containerId() || !projectReady()}>
+                      {importing() ? "Importing…" : "Import"}
+                    </button>
+                  </div>
+                  <Show when={importSummary()}>
+                    {(summary) => <span class="hint">{summary().documents_created} page(s), {summary().folders_created} folder(s)</span>}
+                  </Show>
+                </div>
+            </Show>
+        </div>
+
+        {/* A filter, not a scope: it survives the embedded mount. */}
         <label class="show-archived">
           <input type="checkbox" checked={showArchived()} onChange={(e) => setShowArchived(e.currentTarget.checked)} />
           show archived
         </label>
       </nav>
 
-      <div class="documents-body" style={{ "--col-tree": treeW() + "px" }}>
-        <aside
-          class="documents-tree"
+      {/* WHERE YOU ARE LIVES AT THE TOP, NOT IN THE MIDDLE. The path is the way out of
+          a shelf — one click to any level above — and each crumb takes a drop, so
+          moving something out is the same gesture as moving it in. */}
+      <Show when={folderPath().length > 0}>
+        <nav class="documents-breadcrumb" aria-label="Library path">
+          <button
+            class="documents-crumb documents-library-up"
+            classList={{ "drop-into": dropTargetId() === "__root" }}
+            title={`Back to ${containerName()} — or drop here to move an item out`}
+            onClick={() => setSelectedFolderId(null)}
+            onDragOver={(event) => {
+              if (!isInternalDrag(event)) return;
+              event.preventDefault();
+              setDropTargetId("__root");
+            }}
+            onDragLeave={() => setDropTargetId((current) => (current === "__root" ? null : current))}
+            onDrop={(event) => {
+              const payload = event.dataTransfer?.getData("text/plain") ?? "";
+              setDropTargetId(null);
+              if (!payload) return;
+              event.preventDefault();
+              void fileInto(payload, null);
+            }}
+          >
+            <span aria-hidden="true">←</span> {containerName()}
+          </button>
+          <For each={folderPath()}>
+            {(folder, index) => (
+              <>
+                <span class="documents-crumb-sep" aria-hidden="true">/</span>
+                <button
+                  class="documents-crumb"
+                  classList={{ current: index() === folderPath().length - 1, "drop-into": dropTargetId() === `__crumb:${folder.id}` }}
+                  aria-current={index() === folderPath().length - 1 ? "true" : undefined}
+                  onClick={() => setSelectedFolderId(folder.id)}
+                  onDragOver={(event) => {
+                    if (!isInternalDrag(event)) return;
+                    event.preventDefault();
+                    setDropTargetId(`__crumb:${folder.id}`);
+                  }}
+                  onDragLeave={() => setDropTargetId((current) => (current === `__crumb:${folder.id}` ? null : current))}
+                  onDrop={(event) => {
+                    const payload = event.dataTransfer?.getData("text/plain") ?? "";
+                    setDropTargetId(null);
+                    if (!payload) return;
+                    event.preventDefault();
+                    void fileInto(payload, folder.id);
+                  }}
+                >
+                  {folder.name}
+                </button>
+              </>
+            )}
+          </For>
+        </nav>
+      </Show>
+
+      <div class="documents-body">
+        <section
+          class="documents-editor"
           classList={{ "drop-target": dragOver() }}
           onDragOver={(event) => {
             if (!isWeb() || !event.dataTransfer?.types.includes("Files")) return;
@@ -1239,216 +1536,250 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
           onDragLeave={() => setDragOver(false)}
           onDrop={onTreeDrop}
         >
-          <Show when={dragOver()}>
-            <p class="drop-hint" role="status">Drop to upload into {selectedFolderId() ? "this folder" : "the root"}</p>
-          </Show>
-          <Show when={uploadProgress()}>
-            {(progress) => (
-              <div class="upload-progress">
-                <p class="hint">Uploading {progress().name}… {Math.round(progress().fraction * 100)}%</p>
-                <progress
-                  aria-label={`Upload progress for ${progress().name}`}
-                  max="1"
-                  value={progress().fraction}
-                />
-              </div>
-            )}
-          </Show>
-          {/* Three states stay distinct: a fetch in flight is not emptiness, and a failed
-              fetch is never rendered as an empty tree (H7). */}
-          <Show when={!loadFailure()} fallback={<p class="error-bar" role="alert">{loadFailure()}</p>}>
-          <Show when={!treeLoading()} fallback={<p class="hint pad" role="status">Loading…</p>}>
-          <Show
-            when={containerId()}
-            fallback={<p class="hint pad">{activeContainer() === "kb" ? "Pick or create a book above." : "No personal container yet."}</p>}
-          >
-            {/* Favourites head the personal tree: the documents you follow, wherever they
-                live, above the documents you own. Each row links into its own container,
-                so opening one lands in the project or book that owns it. */}
-            <Show when={activeContainer() === "my-docs" && (favorites() ?? []).length > 0}>
-              <div class="favorites-section">
-                <p class="tree-heading">★ Favourites</p>
-                <For each={favoriteShelves()}>
-                  {(shelf) => (
-                    <div class="favorite-shelf">
-                      <p class="shelf-name">{shelf.name ?? "Unfiled"}</p>
-                      <ul
-                        class="favorite-list"
-                        role="list"
-                        aria-label={shelf.name ? `Favourites on ${shelf.name}` : "Favourite documents"}
-                      >
-                        <For each={shelf.items}>
-                          {(d, index) => (
-                            <li
-                              class="favorite-row"
-                              draggable={true}
-                              onDragStart={(event) => event.dataTransfer?.setData("text/plain", `favorite:${d.id}`)}
-                            >
-                              <a
-                                class="doc-row"
-                                classList={{ active: d.id === selectedDocumentId() }}
-                                {...linkProps(docRoute(d.id, d.container_type as ContainerType, d.container_id))}
-                              >
-                                <span class="doc-icon">{d.doc_type === "file" ? "📎" : "★"}</span>
-                                <span class="doc-title">{d.title}</span>
-                              </a>
-                              {/* Ordering is keyboard-operable, not drag-only: a list you
-                                  can only sort with a mouse is a list some people cannot
-                                  sort at all. */}
-                              <button
-                                class="ghost tiny"
-                                aria-label={`Move ${d.title} up`}
-                                disabled={index() === 0}
-                                onClick={() => void moveFavorite(d, -1)}
-                              >↑</button>
-                              <button
-                                class="ghost tiny"
-                                aria-label={`Move ${d.title} down`}
-                                disabled={index() === shelf.items.length - 1}
-                                onClick={() => void moveFavorite(d, 1)}
-                              >↓</button>
-                              <select
-                                class="shelf-picker"
-                                aria-label={`Shelf for ${d.title}`}
-                                value={d.group_name ?? ""}
-                                onChange={(event) => {
-                                  const value = event.currentTarget.value;
-                                  if (value === "__new") {
-                                    setNewShelfFor(d.id);
-                                    event.currentTarget.value = d.group_name ?? "";
-                                    return;
-                                  }
-                                  void fileFavorite(d, value || null);
-                                }}
-                              >
-                                <option value="">Unfiled</option>
-                                <For each={favoriteGroups()}>{(name) => <option value={name}>{name}</option>}</For>
-                                <option value="__new">New shelf…</option>
-                              </select>
-                              <Show when={newShelfFor() === d.id}>
-                                <input
-                                  class="shelf-new"
-                                  aria-label={`New shelf name for ${d.title}`}
-                                  placeholder="Shelf name…"
-                                  autofocus
-                                  onKeyDown={(event) => {
-                                    if (event.key === "Escape") setNewShelfFor(null);
-                                    if (event.key !== "Enter") return;
-                                    const name = event.currentTarget.value.trim();
-                                    setNewShelfFor(null);
-                                    if (name) void fileFavorite(d, name);
-                                  }}
-                                />
-                              </Show>
-                            </li>
-                          )}
-                        </For>
-                      </ul>
+          <Show when={selectedDocument()} fallback={
+            <div class="documents-empty-canvas" classList={{ "has-library": libraryFolders().length + libraryDocuments().length > 0 }}>
+              <div class="documents-empty-card" classList={{ "has-library": libraryFolders().length + libraryDocuments().length > 0 }}>
+                <Show when={dragOver()}>
+                  <p class="drop-hint" role="status">Drop to upload into {selectedFolderId() ? "this folder" : "the root"}</p>
+                </Show>
+                <Show when={uploadProgress()}>
+                  {(progress) => (
+                    <div class="upload-progress">
+                      <p class="hint">Uploading {progress().name}… {Math.round(progress().fraction * 100)}%</p>
+                      <progress aria-label={`Upload progress for ${progress().name}`} max="1" value={progress().fraction} />
                     </div>
                   )}
-                </For>
-              </div>
-            </Show>
-            <button
-              type="button"
-              class="tree-root"
-              classList={{ active: selectedFolderId() === null }}
-              onClick={() => setSelectedFolderId(null)}
-            >
-              {activeContainer() === "project" ? "Documents" : "(root)"}
-            </button>
-            <Show when={activeContainer() === "kb" && bookQuery().trim()}>
-<div class="book-search-results" role="list" aria-label="Book search results">
-<Show when={!bookSearch.loading} fallback={<p class="hint">Searching…</p>}>
-<For each={bookSearch()}>{(hit) => <a role="listitem" class="doc-row" {...linkProps(docRoute(hit.id, "kb", selectedBookId()))} title={hit.snippet}><span class="doc-icon">⌕</span><span class="doc-title">{hit.title}</span></a>}</For>
-<Show when={(bookSearch() ?? []).length === 0}><p class="hint">No matching articles.</p></Show>
-</Show>
-</div>
-</Show>
-<ul class="folder-tree" role="tree" aria-label="Document folders">
-              <For each={scopedDocuments().filter((d) => d.folder_id === rootParentId())}>
-                {(d) => (
-                  <li style={{ "padding-left": "0.4em" }}>
-                    <a
-                      class="doc-row"
-                      classList={{ active: d.id === selectedDocumentId(), archived: d.archived }}
-                      {...linkProps(docRoute(d.id))}
-                    >
-                      <span class="doc-icon">📄</span>
-                      <span class="doc-title">{d.title}</span>
-                      <span class="doc-version">v{d.version}</span>
-                    </a>
-                  </li>
-                )}
-              </For>
-              <For each={displayFolders().filter((f) => f.parent_id === rootParentId())}>
-                {(f) => <FolderRow folder={f} depth={0} />}
-              </For>
-            </ul>
-            <Show when={isEmpty()}>
-              <p class="empty-state">This container has no folders or documents yet.</p>
-            </Show>
-            <div class="new-item-forms">
-              <div class="new-item-row">
-                <input placeholder="New folder name" value={newFolderName()} onInput={(e) => setNewFolderName(e.currentTarget.value)} />
-                <button class="ghost small" onClick={createFolder} disabled={!newFolderName().trim() || !projectReady()}>
-                  + Folder
-                </button>
-              </div>
-              <div class="new-item-row">
-                <input placeholder="New document title" value={newDocTitle()} onInput={(e) => setNewDocTitle(e.currentTarget.value)} />
-                <select aria-label="Document body type" value={newDocBodyFormat()} onChange={(e) => setNewDocBodyFormat(e.currentTarget.value as DocumentBodyFormat)}>
-                  <option value="text">Text / Markdown</option><option value="rich-text">Rich text</option><option value="checklist">Checklist</option><option value="code">Code</option>
-                </select>
-                <button class="primary small" onClick={createDocument} disabled={!newDocTitle().trim() || !projectReady()}>
-                  + Document
-                </button>
-              </div>
-              <div class="new-item-row">
+                </Show>
+                {/* Three states stay distinct: a fetch in flight is not emptiness, and a
+                    failed fetch is never rendered as an empty library (H7). */}
+                <Show when={!loadFailure()} fallback={<p class="error-bar" role="alert">{loadFailure()}</p>}>
+                <Show when={!treeLoading()} fallback={<p class="hint pad" role="status">Loading…</p>}>
                 <Show
-                  when={isWeb()}
-                  fallback={
-                    <>
-                      <input
-                        placeholder="path to a file to upload"
-                        aria-label="File to upload"
-                        value={uploadPath()}
-                        onInput={(e) => setUploadPath(e.currentTarget.value)}
-                      />
-                      <button class="ghost small" onClick={uploadFile} disabled={uploading() || !uploadPath().trim() || !projectReady()}>
-                        {uploading() ? "Uploading…" : "↑ Upload"}
-                      </button>
-                    </>
-                  }
+                  when={containerId()}
+                  fallback={<p class="hint pad">{activeContainer() === "kb" ? "Pick or create a book above." : "No personal container yet."}</p>}
                 >
-                  <label class="upload-picker">
-                    {uploading() ? "Uploading…" : "↑ Upload a file"}
-                    <input
-                      type="file"
-                      aria-label="File to upload"
-                      disabled={uploading() || !projectReady()}
-                      onChange={(e) => {
-                        const picked = e.currentTarget.files?.[0];
-                        e.currentTarget.value = ""; // same file twice must still upload
-                        if (picked) void uploadBrowserFile(picked);
-                      }}
-                    />
-                  </label>
+                {/* The library states itself once, at its own top-left, the way every
+                    other page in the product does. Only a genuinely EMPTY library keeps
+                    the centred card — there it is the whole content, not a header. */}
+                <div class="documents-library-head">
+                  <span class="documents-empty-icon" aria-hidden="true"><Icon name="books" size={26} /></span>
+                  <div class="documents-library-headtext">
+                    <h2>{libraryTitle()}</h2>
+                    <p>
+                      {libraryFolders().length + libraryDocuments().length
+                        ? "Open a document, or drag it onto a shelf to file it."
+                        : "This container has no folders or documents yet — upload a file or create a document to start."}
+                    </p>
+                  </div>
+                </div>
+
+
+
+                <Show when={activeContainer() === "kb" && bookQuery().trim()}>
+    <div class="book-search-results" role="list" aria-label="Book search results">
+    <Show when={!bookSearch.loading} fallback={<p class="hint">Searching…</p>}>
+    <For each={bookSearch()}>{(hit) => <a role="listitem" class="doc-row" {...linkProps(docRoute(hit.id, "kb", selectedBookId()))} title={hit.snippet}><span class="doc-icon">⌕</span><span class="doc-title">{hit.title}</span></a>}</For>
+    <Show when={(bookSearch() ?? []).length === 0}><p class="hint">No matching articles.</p></Show>
+    </Show>
+    </div>
+    </Show>
+
+                {/* Favourites head the personal tree: the documents you follow, wherever they
+                    live, above the documents you own. Each row links into its own container,
+                    so opening one lands in the project or book that owns it. */}
+                <Show when={activeContainer() === "my-docs" && (favorites() ?? []).length > 0}>
+                  <div class="favorites-section">
+                    <p class="tree-heading">★ Favourites</p>
+                    <For each={favoriteShelves()}>
+                      {(shelf) => (
+                        <div class="favorite-shelf">
+                          <p class="shelf-name">{shelf.name ?? "Unfiled"}</p>
+                          <ul
+                            class="favorite-list"
+                            role="list"
+                            aria-label={shelf.name ? `Favourites on ${shelf.name}` : "Favourite documents"}
+                          >
+                            <For each={shelf.items}>
+                              {(d, index) => (
+                                <li
+                                  class="favorite-row"
+                                  draggable={true}
+                                  onDragStart={(event) => event.dataTransfer?.setData("text/plain", `favorite:${d.id}`)}
+                                >
+                                  <a
+                                    class="doc-row"
+                                    classList={{ active: d.id === selectedDocumentId() }}
+                                    {...linkProps(docRoute(d.id, d.container_type as ContainerType, d.container_id))}
+                                  >
+                                    <span class="doc-icon">{d.doc_type === "file" ? "📎" : "★"}</span>
+                                    <span class="doc-title">{d.title}</span>
+                                  </a>
+                                  {/* Ordering is keyboard-operable, not drag-only: a list you
+                                      can only sort with a mouse is a list some people cannot
+                                      sort at all. */}
+                                  <button
+                                    class="ghost tiny"
+                                    aria-label={`Move ${d.title} up`}
+                                    disabled={index() === 0}
+                                    onClick={() => void moveFavorite(d, -1)}
+                                  >↑</button>
+                                  <button
+                                    class="ghost tiny"
+                                    aria-label={`Move ${d.title} down`}
+                                    disabled={index() === shelf.items.length - 1}
+                                    onClick={() => void moveFavorite(d, 1)}
+                                  >↓</button>
+                                  <select
+                                    class="shelf-picker"
+                                    aria-label={`Shelf for ${d.title}`}
+                                    value={d.group_name ?? ""}
+                                    onChange={(event) => {
+                                      const value = event.currentTarget.value;
+                                      if (value === "__new") {
+                                        setNewShelfFor(d.id);
+                                        event.currentTarget.value = d.group_name ?? "";
+                                        return;
+                                      }
+                                      void fileFavorite(d, value || null);
+                                    }}
+                                  >
+                                    <option value="">Unfiled</option>
+                                    <For each={favoriteGroups()}>{(name) => <option value={name}>{name}</option>}</For>
+                                    <option value="__new">New shelf…</option>
+                                  </select>
+                                  <Show when={newShelfFor() === d.id}>
+                                    <input
+                                      class="shelf-new"
+                                      aria-label={`New shelf name for ${d.title}`}
+                                      placeholder="Shelf name…"
+                                      autofocus
+                                      onKeyDown={(event) => {
+                                        if (event.key === "Escape") setNewShelfFor(null);
+                                        if (event.key !== "Enter") return;
+                                        const name = event.currentTarget.value.trim();
+                                        setNewShelfFor(null);
+                                        if (name) void fileFavorite(d, name);
+                                      }}
+                                    />
+                                  </Show>
+                                </li>
+                              )}
+                            </For>
+                          </ul>
+                        </div>
+                      )}
+                    </For>
+                  </div>
+                </Show>
+
+                <Show when={libraryFolders().length + libraryDocuments().length > 0}>
+                  <div class="documents-library">
+                    {/* SHELVES FIRST, SIDE BY SIDE. Each one takes what you drag onto it. */}
+                    <Show when={libraryFolders().length > 0}>
+                      <p class="documents-library-heading">Shelves</p>
+                      <div class="documents-shelf-grid" aria-label={`${libraryTitle()} shelves`}>
+                        <For each={libraryFolders()}>
+                          {(folder) => (
+                            <div
+                              class="documents-shelf folder-row"
+                              classList={{ archived: folder.archived, "drop-into": dropTargetId() === folder.id }}
+                              draggable={renamingFolderId() !== folder.id}
+                              onDragStart={(event) => event.dataTransfer?.setData("text/plain", `folder:${folder.id}`)}
+                              onContextMenu={(event) => openCardMenu(event, folderMenu(folder))}
+                              onDragOver={(event) => {
+                                if (!isInternalDrag(event)) return;
+                                event.preventDefault();
+                                event.stopPropagation();
+                                setDropTargetId(folder.id);
+                              }}
+                              onDragLeave={() => setDropTargetId((current) => (current === folder.id ? null : current))}
+                              onDrop={(event) => {
+                                const payload = event.dataTransfer?.getData("text/plain") ?? "";
+                                setDropTargetId(null);
+                                if (!payload) return;
+                                event.preventDefault();
+                                event.stopPropagation();
+                                void fileInto(payload, folder.id);
+                              }}
+                            >
+                              <button class="documents-shelf-open folder-name" onClick={() => setSelectedFolderId(folder.id)}>
+                                <span class="documents-shelf-icon" aria-hidden="true"><Icon name="folder" size={20} /></span>
+                                <span class="documents-library-card-copy">
+                                  <strong>{folder.name}</strong>
+                                  <small>{shelfSubline(folder.id)}</small>
+                                </span>
+                              </button>
+                              <button
+                                class="card-menu-button"
+                                aria-label={`Actions for ${folder.name}`}
+                                title="Actions"
+                                onClick={(event) => openCardMenu(event, folderMenu(folder))}
+                              >
+                                ⋯
+                              </button>
+                            </div>
+                          )}
+                        </For>
+                      </div>
+                    </Show>
+
+                    <Show when={libraryDocuments().length > 0}>
+                      <p class="documents-library-heading">Documents</p>
+                      <div class="documents-library-grid" aria-label={`${libraryTitle()} library`}>
+                        <For each={libraryDocuments()}>
+                          {(document) => (
+                            <div class="documents-library-card-row">
+                              <a
+                                class="documents-library-card"
+                                classList={{ archived: document.archived }}
+                                draggable={true}
+                                onDragStart={(event) => {
+                                  // Two payloads, two audiences: the library's own shelves read
+                                  // the short form; a surface OUTSIDE Knowledge — a conversation —
+                                  // needs the title and the way back to the document.
+                                  event.dataTransfer?.setData("text/plain", `document:${document.id}`);
+                                  event.dataTransfer?.setData(
+                                    "application/x-gaia-document",
+                                    JSON.stringify({ id: document.id, title: document.title, path: hrefFor(docRoute(document.id)) }),
+                                  );
+                                }}
+                                onContextMenu={(event) => openCardMenu(event, documentMenu(document))}
+                                {...linkProps(docRoute(document.id))}
+                              >
+                                <span class="documents-library-type" aria-hidden="true">
+                                  <Icon name={document.doc_type === "file" ? "upload" : "doc"} size={16} />
+                                </span>
+                                <span class="documents-library-card-copy"><strong>{document.title}</strong><small>{document.doc_type === "file" ? "Uploaded file" : "Document"} · v{document.version}</small></span>
+                                <span class="documents-library-open" aria-hidden="true">→</span>
+                              </a>
+                              <button
+                                class="card-menu-button"
+                                aria-label={`Actions for ${document.title}`}
+                                title="Actions"
+                                onClick={(event) => openCardMenu(event, documentMenu(document))}
+                              >
+                                ⋯
+                              </button>
+                            </div>
+                          )}
+                        </For>
+                      </div>
+                    </Show>
+                  </div>
+                </Show>
+                {/* Inside a project the wider organization library is one click away; on
+                    the standalone route the sidebar already lists every library. */}
+                <Show when={embedded()}>
+                  <a class="documents-library-link" {...linkProps(books().length ? { view: "Documents", containerType: "kb", containerId: books()[0].id } : { view: "Documents" })}>
+                    Open organization library <span aria-hidden="true">→</span>
+                  </a>
+                </Show>
+                </Show>
+                </Show>
                 </Show>
               </div>
-              <p class="hint">
-                Creating into: {selectedFolderId() ? scopedFolders().find((f) => f.id === selectedFolderId())?.name ?? "(root)" : "(root)"}
-              </p>
             </div>
-          </Show>
-          </Show>
-          </Show>
-        </aside>
-
-        <Resizer width={treeW} setWidth={setTreeW} min={190} max={480} />
-
-        <section class="documents-editor">
-          <Show when={selectedDocument()} fallback={<p class="hint pad">Select or create a document.</p>}>
+          }>
             {(doc) => (
               <>
                 <div class="editor-toolbar">
@@ -1475,6 +1806,12 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
                     <option value={activeContainer() === "project" ? rootParentId() ?? "" : ""}>{activeContainer() === "project" ? "Documents" : "(root)"}</option>
                     <For each={displayFolders()}>{(f) => <option value={f.id}>{f.name}</option>}</For>
                   </select>
+                  {/* A file you can only look at is a file you do not have. */}
+                  <Show when={doc().doc_type === "file"}>
+                    <button class="ghost small" disabled={downloading()} onClick={() => void downloadFile(doc())}>
+                      {downloading() ? "Saving…" : "Download"}
+                    </button>
+                  </Show>
                   <button class="ghost small" onClick={toggleArchiveDocument}>
                     {doc().archived ? "unarchive" : "archive"}
                   </button>
@@ -1629,6 +1966,54 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
           </aside>
         </Show>
       </div>
+
+      <Show when={cardMenu()}>
+        {(menu) => <ContextMenu x={menu().x} y={menu().y} items={menu().items} onClose={() => setCardMenu(null)} />}
+      </Show>
+
+      <PromptDialog
+        open={!!renamingFolderId()}
+        title="Rename folder"
+        label="Folder name"
+        value={renameValue()}
+        setValue={setRenameValue}
+        confirmLabel="Save name"
+        onConfirm={() => void saveRenameFolder()}
+        onCancel={() => setRenamingFolderId(null)}
+      />
+
+      <ConfirmDialog
+        open={!!pendingDelete()}
+        title={pendingDelete()?.kind === "folder" ? "Delete folder?" : "Delete document?"}
+        body={
+          <>
+            <strong>{pendingDelete()?.name}</strong>{" "}
+            {pendingDelete()?.kind === "folder"
+              ? "is deleted for everyone. A folder that still holds documents is refused, so nothing disappears with it."
+              : "is deleted for everyone, with every saved version of it. This cannot be undone."}
+          </>
+        }
+        confirmLabel={pendingDelete()?.kind === "folder" ? "Delete folder" : "Delete document"}
+        busy={deleting()}
+        onConfirm={() => void confirmDelete()}
+        onCancel={() => setPendingDelete(null)}
+      />
+
+      <Show when={createMode()}>
+        {(mode) => (
+          <DocumentCreateDrawer
+            mode={mode()}
+            scopeLabel={createScopeLabel()}
+            name={mode() === "document" ? newDocTitle() : newFolderName()}
+            setName={mode() === "document" ? setNewDocTitle : setNewFolderName}
+            bodyFormat={newDocBodyFormat()}
+            setBodyFormat={setNewDocBodyFormat}
+            busy={creating()}
+            onSubmit={() => void submitCreate()}
+            onClose={() => setCreateMode(null)}
+          />
+        )}
+      </Show>
     </section>
   );
 }

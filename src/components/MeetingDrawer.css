@@ -1,0 +1,130 @@
+/* Self-scoped like WorkItemDrawer.css: every prototype token is redeclared here
+   with a fallback, so the drawer looks the same mounted in the light chat-first
+   shell or on top of the old dark theme, and nothing leaks out to repaint either.
+   Specificity note: `.mtd-root .mtd-input` (0,2,0) outranks the view-wide
+   `.meetings-view input` (0,1,1), so the drawer keeps its own control shape even
+   though it renders inside that section. */
+.mtd-root {
+  --mtd-ink: var(--ink, #1f2328);
+  --mtd-muted: var(--muted, #68717d);
+  --mtd-paper: var(--paper, #ffffff);
+  --mtd-wash: var(--wash, #faf8f4);
+  --mtd-line: var(--line, #e5ddd3);
+  --mtd-teal: var(--teal, #00bfa6);
+  --mtd-teal-dark: var(--teal-dark, #008d7b);
+  --mtd-teal-soft: var(--teal-soft, #dcf7f2);
+  --mtd-red: var(--red, #bd3f3f);
+  --mtd-red-soft: var(--red-soft, #fbe3e0);
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  color: var(--mtd-ink);
+  font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+.mtd-root * { box-sizing: border-box; }
+
+.mtd-root .mtd-backdrop { position: absolute; inset: 0; background: rgba(25, 16, 30, 0.28); }
+
+.mtd-root .mtd-panel {
+  position: absolute;
+  top: 0; right: 0;
+  height: 100%;
+  width: 440px;
+  max-width: 92vw;
+  background: var(--mtd-paper);
+  box-shadow: -22px 0 60px rgba(31, 35, 40, 0.18);
+  padding: 22px;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  gap: 16px;
+  overflow: hidden;
+  animation: mtd-slide-in 180ms ease-out;
+}
+@keyframes mtd-slide-in { from { transform: translateX(24px); opacity: 0; } to { transform: none; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .mtd-root .mtd-panel { animation: none; } }
+
+.mtd-root .mtd-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.mtd-root .mtd-head h2 { margin: 0; font-size: 22px; letter-spacing: -0.04em; font-weight: 720; color: var(--mtd-ink); }
+.mtd-root .mtd-head p { margin: 6px 0 0; color: var(--mtd-muted); font-size: 14px; line-height: 1.45; }
+.mtd-root .mtd-close {
+  border: 0; background: transparent; color: var(--mtd-muted);
+  font-size: 24px; line-height: 1; padding: 2px 6px; cursor: pointer; border-radius: 9px;
+}
+.mtd-root .mtd-close:hover { background: var(--mtd-wash); color: var(--mtd-ink); }
+
+.mtd-root .mtd-form { display: grid; gap: 14px; align-content: start; overflow-y: auto; padding-right: 2px; }
+.mtd-root .mtd-field { display: grid; gap: 6px; margin: 0; min-width: 0; }
+/* `:not(.mtd-hint)` — the caption of a field is uppercase; the sentence of help
+   underneath it is not. Without this the RRULE hint shouted in caps like a label. */
+/* Sentence case since stage 13: a form caption names its field, it does not
+   shout it. Same voice as WorkItemDrawer.css — one idiom for every drawer. */
+.mtd-root .mtd-field > span:not(.mtd-hint) {
+  color: var(--mtd-muted); font-size: 12.5px; font-weight: 620;
+  text-transform: none; letter-spacing: 0;
+}
+.mtd-root span.mtd-hint { text-transform: none; letter-spacing: 0; font-weight: 400; }
+.mtd-root .mtd-input {
+  min-height: 40px; width: 100%;
+  border: 1px solid var(--mtd-line); border-radius: 11px;
+  padding: 10px 11px;
+  background: #fbfaf8; color: var(--mtd-ink);
+  font: inherit; font-size: 14px;
+}
+/* One silhouette for every control in this form: the PillMenus (visibility,
+   who-can-edit, repeat) take the field's shape, and the native selects that
+   stay native get the chevron that says "this opens". */
+.mtd-root select.mtd-input,
+.mtd-root .mtd-organizer .picker select {
+  appearance: none; -webkit-appearance: none;
+  padding-right: 34px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.5 6 8l3.5-3.5' fill='none' stroke='%2368717d' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 12px center; background-size: 12px 12px;
+  cursor: pointer;
+}
+.mtd-root .mtd-form .pill-menu {
+  display: flex; width: 100%; min-height: 40px;
+  border: 1px solid var(--mtd-line); border-radius: 11px;
+  background: #fbfaf8; color: var(--mtd-ink);
+  font-size: 14px; font-weight: 400;
+}
+.mtd-root .mtd-form .pill-menu:hover { border-color: var(--mtd-line); background: #fbfaf8; }
+.mtd-root .mtd-form .pill-menu-trigger {
+  width: 100%; height: 38px; padding: 0 12px 0 11px;
+  border-radius: inherit; background: transparent; color: inherit; font: inherit;
+}
+.mtd-root textarea.mtd-input { min-height: 92px; resize: vertical; }
+.mtd-root .mtd-input:focus-visible { outline: 2px solid var(--mtd-teal); outline-offset: 1px; }
+
+/* Two native datetime inputs have a wide intrinsic size; `auto-fit` with a floor
+   stacks them when the panel is narrow instead of pushing out of the drawer. */
+.mtd-root .mtd-when { display: grid; grid-template-columns: repeat(auto-fit, minmax(11.5rem, 1fr)); gap: 10px; }
+
+.mtd-root .mtd-organizer .picker select {
+  min-height: 40px; width: 100%;
+  border: 1px solid var(--mtd-line); border-radius: 11px; padding: 9px 10px;
+  background: #fbfaf8; color: var(--mtd-ink); font: inherit; font-size: 14px;
+}
+.mtd-root .mtd-organizer .picker {
+  display: grid; gap: 6px;
+  font-size: 12.5px; font-weight: 620; text-transform: none; letter-spacing: 0; color: var(--mtd-muted);
+}
+/* Participants are CHOSEN FROM A LIST, the same control TaskDrawer gives assignees:
+   a scrolling column of checkboxes, so the answer to "who is coming" is read rather
+   than typed. A fieldset carries the caption because a `<legend>` is what names a
+   group of checkboxes; it is stripped of the browser's box and re-dressed as a field. */
+.mtd-root .mtd-caption { font-size: 12px; font-weight: 700; letter-spacing: .02em; }
+/* Chips, not a panel: each chosen person is one small removable fact, so the field
+   grows by a line instead of a box and the drawer's own actions stay in reach. */
+.mtd-root .mtd-invitees { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 0; padding: 0; list-style: none; }
+.mtd-root .mtd-invitee {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 6px 4px 10px;
+  border: 1px solid var(--mtd-line); border-radius: 999px;
+  background: var(--mtd-paper); font-size: 12.5px; font-weight: 600;
+}
+.mtd-root .mtd-invitee button {
+  display: grid; place-items: center; width: 18px; height: 18px; padding: 0;
+  border: 0; border-radius: 999px; background: none;
+  color: var(--mtd-muted); font-size: 14px; line-height: 1; cursor: pointer;
+}
+.mtd-root .mtd-invitee button:hover { background: var(--mtd-wash); color: var(--mtd-red, #c2384a); }

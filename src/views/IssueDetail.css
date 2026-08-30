@@ -57,3 +57,48 @@
 .comment-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; }
 .comment-form textarea { min-height: 56px; resize: vertical; }
 .issue-transfer-backdrop{position:fixed;inset:0;z-index:30;display:grid;place-items:center;background:#0008}.issue-transfer-dialog{display:grid;gap:.8rem;min-width:20rem;padding:1rem;border-radius:.5rem;background:var(--surface,#fff);box-shadow:0 .5rem 2rem #0005}.issue-transfer-dialog label{display:grid;gap:.35rem}.issue-transfer-dialog select{min-width:16rem}
+
+/* ── light theme: the ticket detail joins the control language (stage 9a) ────
+   ADDED BEYOND THE BRIEFED FILE SET, and CSS-ONLY on purpose. The detail pane
+   is the other half of the screen the complaint was about — with a ticket open,
+   "old bordered boxes" was still true. But its captions ("Status", "Due date",
+   "Priority") are FORM labels, not filter furniture: they name a field you are
+   about to change, and the value alone ("None") does not. So the words stay and
+   only the SHAPE changes, and because not one line of markup moves, no test
+   that selects on this pane can break.
+
+   Scoped to `.theme-space-light`; the dark detail pane is untouched. */
+.theme-space-light .idp-fields label,
+.theme-space-light .idp-field {
+  color: var(--muted);
+  font-family: var(--font-head);
+  font-size: 11.5px;
+  font-weight: 680;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+}
+.theme-space-light .idp-fields :is(select, input, textarea),
+.theme-space-light .idp-field :is(select, input, textarea) {
+  min-height: var(--pillctl-h);
+  border: 1px solid transparent;
+  border-radius: var(--pillctl-r);
+  background: var(--wash-2);
+  color: var(--ink);
+  font-size: var(--pillctl-font);
+  font-weight: var(--pillctl-weight);
+  letter-spacing: normal;
+  text-transform: none;
+}
+.theme-space-light .idp-fields :is(select, input, textarea):hover,
+.theme-space-light .idp-field :is(select, input, textarea):hover {
+  background: var(--paper);
+  border-color: var(--line-strong);
+}
+.theme-space-light .idp-fields :is(select, input, textarea):focus-visible,
+.theme-space-light .idp-field :is(select, input, textarea):focus-visible {
+  outline: 2px solid var(--teal);
+  outline-offset: 2px;
+}
+/* A multi-line field cannot be a pill — it gets the card radius instead. */
+.theme-space-light .idp-fields textarea,
+.theme-space-light .idp-field textarea { border-radius: 14px; }

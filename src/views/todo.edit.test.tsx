@@ -62,15 +62,15 @@ describe("editing an existing task", () => {
     const host = await mount();
 
     // Not editable yet: no edit surface, just the read-only card.
-    expect(host.querySelector(".task-card-editing")).toBeNull();
-    const openButton = host.querySelector<HTMLButtonElement>("button.task-body-edit");
+    expect(host.querySelector(".task-open")).toBeNull();
+    const openButton = host.querySelector<HTMLButtonElement>("button.task-tile-body");
     expect(openButton).not.toBeNull();
     expect(openButton!.textContent).toContain("Buy milk");
 
     openButton!.click();
     await settle();
 
-    const editing = host.querySelector(".task-card-editing");
+    const editing = host.querySelector(".task-open");
     expect(editing).not.toBeNull();
     const titleInput = editing!.querySelector<HTMLInputElement>(".composer-title");
     expect(titleInput?.value).toBe("Buy milk");
@@ -101,7 +101,7 @@ describe("editing an existing task", () => {
     expect(update!.args.todo.done).toBe(false);
 
     // The edit surface closes and the card reflects the saved content.
-    expect(host.querySelector(".task-card-editing")).toBeNull();
+    expect(host.querySelector(".task-open")).toBeNull();
     expect(host.textContent).toContain("Buy oat milk");
   });
 
@@ -115,10 +115,10 @@ describe("editing an existing task", () => {
       return [];
     };
     const host = await mount();
-    host.querySelector<HTMLButtonElement>("button.task-body-edit")!.click();
+    host.querySelector<HTMLButtonElement>("button.task-tile-body")!.click();
     await settle();
 
-    const editing = host.querySelector(".task-card-editing")!;
+    const editing = host.querySelector(".task-open")!;
     const titleInput = editing.querySelector<HTMLInputElement>(".composer-title")!;
     titleInput.value = "Something else entirely";
     titleInput.dispatchEvent(new Event("input", { bubbles: true }));
@@ -129,7 +129,7 @@ describe("editing an existing task", () => {
     await settle();
 
     expect(calls.some((c) => c.cmd === "update_todo")).toBe(false);
-    expect(host.querySelector(".task-card-editing")).toBeNull();
+    expect(host.querySelector(".task-open")).toBeNull();
     expect(host.textContent).toContain("Buy milk");
     expect(host.textContent).not.toContain("Something else entirely");
   });
@@ -144,10 +144,10 @@ describe("editing an existing task", () => {
       return [];
     };
     const host = await mount();
-    host.querySelector<HTMLInputElement>(".task-check")!.click();
+    host.querySelector<HTMLButtonElement>(".task-tile-check")!.click();
     await settle();
     // Ticking the checkbox is a completion write, never an edit-open.
     expect(calls.some((c) => c.cmd === "set_todo_completion")).toBe(true);
-    expect(host.querySelector(".task-card-editing")).toBeNull();
+    expect(host.querySelector(".task-open")).toBeNull();
   });
 });

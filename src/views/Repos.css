@@ -1,0 +1,161 @@
+/* Repositories — a PAGE whose body happens to be three panes.
+ *
+ * The panes still come from App.css (`.app`, `.sidebar`, `.center`, `.detail`,
+ * the two `.resizer`s), so every rule the dark grouped/flat layouts rely on is
+ * untouched. This file adds the page frame around them and turns the panes into
+ * paper: an inset canvas, three cards, hairlines that stop at a card edge
+ * instead of running off the window.
+ *
+ * STRUCTURE (sizes, radii, padding, positioning) is UNSCOPED so the dark
+ * layouts get the same geometry. COLOUR goes through tokens with a dark
+ * fallback — `var(--line, #243050)`, `var(--paper, #0e1626)` — which is the
+ * same rule as scoping it to `.theme-space-light`, minus the chance of the two
+ * themes drifting apart.
+ */
+
+.repos-view {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  color: var(--text);
+}
+
+/* The view root pads nothing itself (the panes have to reach the bottom), so
+   the shared header carries the inset, exactly like the other body-scrolling
+   views listed in PageHeader.css. */
+/* The inset itself now comes from PageHeader.css, where every body-scrolling view
+   is listed together — one place decides the page inset. Only the gap below the
+   header is this view's own business. */
+.repos-view > .page-header { margin-bottom: 14px; }
+
+.repos-error {
+  margin: 0 var(--view-pad-x) 12px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  cursor: pointer;
+  background: var(--status-danger-bg);
+  border: 1px solid var(--status-danger-ink);
+  color: var(--status-danger-ink);
+}
+
+/* NOTHING YET: one lead card, centred on the canvas, at the top of the page —
+   not stretched down the whole window. */
+.repos-lead {
+  padding: 0 var(--view-pad-x) var(--view-pad-bottom);
+  max-width: 560px;
+}
+
+/* ── the three panes ─────────────────────────────────────────────────────── */
+.repos-panes {
+  flex: 1;
+  min-height: 0;
+  padding: 0 var(--view-pad-x) 22px;
+  gap: 0;
+  box-sizing: border-box;
+}
+
+/* Cards, not columns: each pane owns its own outline and clips its content, so
+   a commit row's hairline ends at the card and nothing bleeds to the window. */
+.repos-panes > .sidebar,
+.repos-panes > .center,
+.repos-panes > .detail {
+  border: 1px solid var(--line, #243050);
+  border-radius: 14px;
+  background: var(--paper, #0e1626);
+  overflow: hidden;
+  min-height: 0;
+}
+.repos-panes > .sidebar { overflow-y: auto; padding: 8px 0; }
+.repos-panes > .center { display: flex; flex-direction: column; }
+.repos-panes > .detail { display: flex; flex-direction: column; overflow: auto; }
+
+/* The resizers used to be the vertical rules themselves. They are the GAP
+   between two cards now: invisible at rest, teal under the hand. */
+.repos-panes > .resizer {
+  background: transparent;
+  margin: 0 3px;
+  border-radius: 6px;
+}
+.repos-panes > .resizer:hover,
+.repos-panes > .resizer:focus-visible,
+.repos-panes > .resizer.dragging { background: var(--accent, #00c2a8); }
+
+/* The pane head is inside its card now, so its rule is a hairline across the
+   card, not across the screen. */
+.repos-panes .topbar { border-bottom: 1px solid var(--line, #243050); }
+.repos-panes .working-row { border-bottom: 1px solid var(--line, #243050); }
+.repos-panes .commits li:last-child { border-bottom: 0; }
+.repos-panes .commit-box { border-bottom: 1px solid var(--line, #243050); }
+
+/* An empty state inside a pane is a card in a card: keep the frame, drop the
+   second box's weight. */
+.repos-panes .empty-lead {
+  margin: 14px;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+/* A row's forget-button is a hover affordance in a dense list, not a control
+   that should claim the rail's full control height. */
+.sidebar .repo-list .icon-button { min-height: 22px; width: 22px; padding: 0; }
+
+/* ── The repository list is Knowledge's card now (devCards.css) ────────────
+   App.css styles `.repo-list li` as a bare flex line with its own hover; the
+   <li> is only a slot for the card here, so those five declarations are undone
+   in one place instead of the card fighting them on every property. The card's
+   own frame, padding, radius and hover come from devCards.css — nothing about
+   the geometry is restated. */
+.repos-view .repo-list li { display: block; padding: 0; background: none; border-radius: var(--dk-radius-lg); }
+.repos-view .repo-list li:hover { background: none; }
+.repos-view .repo-list li.active { background: none; color: inherit; }
+/* The name+path is the way INTO the repository, so it is the pressable part and
+   fills the card; the forget-button keeps the far edge. `font` metrics are named
+   one by one — the repo forbids `font: inherit`, and no --btn-* token is touched. */
+.repos-view .repo-open {
+  flex: 1 1 auto; min-width: 0;
+  display: flex; align-items: center; gap: var(--dk-space-md);
+  padding: 0; border: 0; background: none; color: inherit; text-align: left; cursor: pointer;
+  font-family: inherit; font-size: inherit; font-weight: inherit; line-height: inherit;
+}
+
+/* The centre pane's head is one line: name, branch, path. The branch chip used
+   to wrap to three lines inside a narrow pane and push the path out of sight. */
+.repos-panes .topbar { flex-wrap: nowrap; }
+.repos-panes .topbar > strong { white-space: nowrap; }
+.repos-panes .branch-chip { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 40%; }
+.repos-panes .topbar .path { flex: 1; min-width: 0; }
+
+/* A commit row: summary first, then one muted line of facts. Side by side the
+   summary lost every pixel to the sha and the date and read "Ho…". */
+.repos-panes .commits li { display: block; padding: 9px 12px; }
+.repos-panes .commits .summary {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.repos-panes .commits .meta {
+  display: block;
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.repos-panes .commits .meta .sha { margin-right: 8px; }
+
+/* Nothing to show in a pane: the words sit in the middle of the card, quietly,
+   instead of as a filled slab pinned under its top edge. */
+.repos-panes > .detail > .empty-lead,
+.repos-panes > .center > .empty-lead { margin: auto; background: transparent; }
+
+/* ── THE INTRODUCTION KEEPS ITS RHYTHM ───────────────────────────────────────
+   This view's root carries no padding of its own, so PageHeader.css gives the header
+   the page inset with a `padding: … 0` shorthand — and that shorthand also lands on
+   the bottom, overruling the rule that keeps a gap between the header and the action
+   row beneath it. The row then sat glued to the subline. Restated here, for this root
+   only, with the same token the shared rule uses. Structure, unscoped. */
+.repos-view > .page-header:has(+ .page-actionbar) { padding-bottom: var(--view-head-gap, 22px); }

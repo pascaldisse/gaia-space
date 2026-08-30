@@ -1,13 +1,30 @@
 import { createResource, createSignal, For, Show, onMount } from "solid-js";
 import { platformApi, type Role, type Right, type RoleAssignment, type ScopeType, type CfDefinition, type CfType } from "../api/platform";
+import "../components/paper.css";
 import "./Admin.css";
-import { WorkspaceHeader } from "../components/WorkspaceHeader";
+import "./operatorForm.css";
+import PageHeader, { Chip } from "../components/PageHeader";
+import EmptyState from "../components/EmptyState";
+import { GhostPill, PillSelect } from "../components/controls";
 
 const SCOPE_TYPES: ScopeType[] = ["global", "project", "team", "profile", "channel", "document", "documentFolder"];
 const CF_ENTITY_TYPES = ["issue", "profile", "team", "membership"];
 const CF_TYPES: CfType[] = ["text", "text_list", "int", "int_list", "enum", "enum_list", "open_enum", "open_enum_list", "bool", "date", "datetime", "percentage", "fraction", "profile", "profile_list", "team", "location", "project", "url", "contact", "contact_list", "autonumber", "issue", "issue_list"];
 const blankRole = () => ({ name: "", description: "" });
 const blankCf = () => ({ entity_type: "issue", cf_type: "text" as CfType, name: "", constraints: "" });
+/** These lists are stored values AND, until now, the label the user read. Only the
+ *  label follows the Issue→Ticket rename; the value stays `issue` / `issue_list`,
+ *  because it is what the server persists and compares. */
+const cfLabel = (value: string) => value.replace(/^issue$/, "ticket").replace(/^issue_list$/, "ticket_list");
+/** A picker's resting VALUE is its label, so the value has to be a word a human
+ *  reads. `documentFolder` and `text_list` are wire identifiers; they were being
+ *  printed at the user unchanged. The stored value is untouched — only the text. */
+const scopeLabel = (scope: ScopeType): string =>
+  scope === "global" ? "Everywhere"
+  : scope === "documentFolder" ? "In one document folder"
+  : `In one ${scope}`;
+const cfTypeLabel = (type: string): string =>
+  cfLabel(type).replace(/_list$/, " list").replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
 
 export default function Admin() {
   const [error, setError] = createSignal("");
@@ -120,27 +137,42 @@ export default function Admin() {
   const toggleArchiveCf = async (d: CfDefinition) => { try { await platformApi.archiveCfDefinition(d.id, !d.archived); reloadCfDefs(); } catch (e) { setError(String(e)); } };
 
   return <section class="admin-view">
-    <WorkspaceHeader icon="settings" title="Admin">Roles, rights, scoped assignments, and the custom fields engine. Rights catalog seeded: {seeded()} rows.</WorkspaceHeader>
+    {/* Settings owns the cog. Admin is the RIGHTS door, so it carries the key —
+        two surfaces with one mark is the ambiguity the marks exist to remove. */}
+    <PageHeader icon="key" title="Admin" subline="Roles, rights and the operator tools behind this workspace." chips={<Show when={seeded()}><Chip value={seeded()} label="rights seeded" /></Show>} />
     <Show when={error()}><p class="admin-error">{error()}</p></Show>
 
     <div class="admin-grid">
       <section class="admin-panel">
         <div class="panel-title"><h2>Roles</h2></div>
-        <form class="inline-form-col" onSubmit={saveRole}>
-          <input placeholder="New role name" value={roleForm().name} onInput={e => setRoleForm({ ...roleForm(), name: e.currentTarget.value })} />
+        <form class="inline-form-col op-form" onSubmit={saveRole}>
+          <input class="op-input op-grow" aria-label="New role name" placeholder="New role name" value={roleForm().name} onInput={e => setRoleForm({ ...roleForm(), name: e.currentTarget.value })} />
           <button class="primary">Add role</button>
         </form>
+        {/* A ROLE LIST IS A PAGE-FILLING PANEL, so it gets a real empty state.
+            The form that fixes it is one line above and already focused-able,
+            so the action points at the form instead of describing where it is. */}
+        <Show when={!roles.loading && roles()?.length === 0}>
+          <EmptyState
+            title="No roles yet"
+            hint="A role is a named bundle of rights. People and teams are granted roles, never single rights."
+            actions={<button class="primary" type="button" onClick={() => document.querySelector<HTMLInputElement>('.admin-view input[aria-label="New role name"]')?.focus()}>Add the first role</button>}
+          />
+        </Show>
         <ul class="entity-list compact"><For each={roles()}>{r =>
           <li classList={{ active: selectedRole()?.id === r.id, archived: r.archived }} onClick={() => setSelectedRole(r)}>
             <div><strong>{r.name}</strong><span class="muted">{r.role_type}</span></div>
-            <button class="ghost small" onClick={(ev) => { ev.stopPropagation(); toggleArchiveRole(r); }}>{r.archived ? "Restore" : "Archive"}</button>
+            <GhostPill class="small" onClick={(ev: MouseEvent) => { ev.stopPropagation(); toggleArchiveRole(r); }}>{r.archived ? "Restore" : "Archive"}</GhostPill>
           </li>
         }</For></ul>
       </section>
 
       <section class="admin-panel rights-matrix">
         <div class="panel-title"><h2>Rights matrix</h2></div>
-        <Show when={selectedRole()} fallback={<p class="hint pad">Select a role to edit its rights.</p>}>
+        {/* NOT an empty store — a missing SELECTION. There is nothing to create
+            here, so no action is drawn: a button that cannot do the thing is a
+            worse empty state than an empty one. */}
+        <Show when={selectedRole()} fallback={<EmptyState variant="no-match" title="No role selected" hint="Pick a role on the left to see and edit the rights it carries." />}>
           {role => <>
             <p class="muted">{role().name}</p>
             <div class="matrix-groups"><For each={groupedRights()}>{([type, list]) =>
@@ -157,53 +189,69 @@ export default function Admin() {
 
       <section class="admin-panel">
         <div class="panel-title"><h2>Role assignments</h2></div>
-        <div class="inline-form-col">
-          <select value={targetKind()} onChange={e => { setTargetKind(e.currentTarget.value as "profile" | "team"); setTargetId(""); }}>
+        {/* THE GRANT ROW. This form STAYS on the surface: Admin is an operator
+            tool and an administrator grants many roles in a row — a drawer would
+            cost a click per repetition (L3 relaxed). What is not relaxed is L4:
+            four pickers and a field now share one height and one radius, so the
+            row reads as one line instead of five stacked boxes with words
+            floating above them. */}
+        <div class="inline-form-col op-form">
+          <PillSelect label="Grant to" value={targetKind()} onChange={value => { setTargetKind(value as "profile" | "team"); setTargetId(""); }}>
             <option value="profile">Assign to profile</option><option value="team">Assign to team</option>
-          </select>
-          <select value={targetId()} onChange={e => setTargetId(e.currentTarget.value)}>
+          </PillSelect>
+          <PillSelect label={targetKind() === "profile" ? "Profile" : "Team"} value={targetId()} onChange={setTargetId}>
             <option value="">Choose {targetKind()}…</option>
             <For each={targetKind() === "profile" ? profiles() : teams()}>{t => <option value={t.id}>{"display_name" in t ? t.display_name : t.name}</option>}</For>
-          </select>
-          <select value={assignRoleId()} onChange={e => setAssignRoleId(e.currentTarget.value)}>
+          </PillSelect>
+          <PillSelect label="Role" value={assignRoleId()} onChange={setAssignRoleId}>
             <option value="">Choose role…</option><For each={roles()}>{r => <option value={r.id}>{r.name}</option>}</For>
-          </select>
-          <select value={scopeType()} onChange={e => setScopeType(e.currentTarget.value as ScopeType)}>
-            <For each={SCOPE_TYPES}>{s => <option value={s}>{s}</option>}</For>
-          </select>
-          <Show when={scopeType() !== "global"}><input placeholder="Scope id (e.g. project id)" value={scopeId()} onInput={e => setScopeId(e.currentTarget.value)} /></Show>
+          </PillSelect>
+          <PillSelect label="Scope" value={scopeType()} onChange={value => setScopeType(value as ScopeType)}>
+            <For each={SCOPE_TYPES}>{s => <option value={s}>{scopeLabel(s)}</option>}</For>
+          </PillSelect>
+          <Show when={scopeType() !== "global"}><input class="op-input op-grow" aria-label="Scope id" placeholder="Scope id (e.g. project id)" value={scopeId()} onInput={e => setScopeId(e.currentTarget.value)} /></Show>
           <button class="primary" onClick={createAssignment}>Grant</button>
         </div>
         <ul class="entity-list"><For each={assignments()}>{a =>
-          <li><div><strong>{roleName(a.role_id)}</strong><span class="muted">{targetLabel(a)} @ {a.scope_type}{a.scope_id ? `:${a.scope_id}` : ""}</span></div><button class="ghost" onClick={() => removeAssignment(a)}>Revoke</button></li>
+          <li><div><strong>{roleName(a.role_id)}</strong><span class="muted">{targetLabel(a)} · {scopeLabel(a.scope_type as ScopeType)}{a.scope_id ? ` ${a.scope_id}` : ""}</span></div><GhostPill onClick={() => removeAssignment(a)}>Revoke</GhostPill></li>
         }</For></ul>
-        <Show when={assignments()?.length === 0}><p class="empty-state">No assignments yet.</p></Show>
+        <Show when={assignments()?.length === 0}>
+          <EmptyState title="Nobody has been granted a role yet" hint="Until a role is granted, everyone has only the rights their account type gives them." />
+        </Show>
 
         <div class="panel-title"><h2>Check right</h2></div>
-        <div class="inline-form-col">
-          <select value={checkProfileId()} onChange={e => setCheckProfileId(e.currentTarget.value)}><option value="">Profile…</option><For each={profiles()}>{p => <option value={p.id}>{p.display_name}</option>}</For></select>
-          <select value={checkRightCode()} onChange={e => setCheckRightCode(e.currentTarget.value)}><option value="">Right…</option><For each={rights()}>{r => <option value={r.code}>{r.code}</option>}</For></select>
-          <select value={checkScopeType()} onChange={e => setCheckScopeType(e.currentTarget.value as ScopeType)}><For each={SCOPE_TYPES}>{s => <option value={s}>{s}</option>}</For></select>
-          <Show when={checkScopeType() !== "global"}><input placeholder="Scope id" value={checkScopeId()} onInput={e => setCheckScopeId(e.currentTarget.value)} /></Show>
-          <button onClick={runCheck}>Check</button>
-          <Show when={checkResult() !== null}><p class:result-true={checkResult() === true} class:result-false={checkResult() === false}>{checkResult() ? "GRANTED" : "DENIED"}</p></Show>
+        <div class="inline-form-col op-form">
+          <PillSelect label="Profile to check" value={checkProfileId()} onChange={setCheckProfileId}><option value="">Profile…</option><For each={profiles()}>{p => <option value={p.id}>{p.display_name}</option>}</For></PillSelect>
+          <PillSelect label="Right to check" value={checkRightCode()} onChange={setCheckRightCode}><option value="">Right…</option><For each={rights()}>{r => <option value={r.code}>{r.code}</option>}</For></PillSelect>
+          <PillSelect label="Scope to check" value={checkScopeType()} onChange={value => setCheckScopeType(value as ScopeType)}><For each={SCOPE_TYPES}>{s => <option value={s}>{scopeLabel(s)}</option>}</For></PillSelect>
+          <Show when={checkScopeType() !== "global"}><input class="op-input" aria-label="Scope id to check" placeholder="Scope id" value={checkScopeId()} onInput={e => setCheckScopeId(e.currentTarget.value)} /></Show>
+          <GhostPill onClick={runCheck}>Check</GhostPill>
+          {/* GRANTED/DENIED is the answer to a question the operator just asked,
+              so it is a result pill, not a status: teal reads "open/allowed",
+              red reads "blocked". Nothing else on this row carries colour. */}
+          <Show when={checkResult() !== null}><span class="paper-pill" classList={{ teal: checkResult() === true, red: checkResult() === false }}>{checkResult() ? "Granted" : "Denied"}</span></Show>
         </div>
       </section>
 
       <section class="admin-panel">
         <div class="panel-title"><h2>Custom fields</h2></div>
-        <div class="cf-tabs"><For each={CF_ENTITY_TYPES}>{t => <button classList={{ active: cfEntityType() === t }} onClick={() => setCfEntityType(t)}>{t}</button>}</For></div>
-        <div class="inline-form-col">
-          <input placeholder="Field name" value={cfForm().name} onInput={e => setCfForm({ ...cfForm(), name: e.currentTarget.value })} />
-          <select value={cfForm().cf_type} onChange={e => setCfForm({ ...cfForm(), cf_type: e.currentTarget.value as CfType })}><For each={CF_TYPES}>{t => <option value={t}>{t}</option>}</For></select>
-          <Show when={(cfForm().cf_type === "enum" || cfForm().cf_type === "enum_list")}><input placeholder="Comma-separated options" value={cfForm().constraints} onInput={e => setCfForm({ ...cfForm(), constraints: e.currentTarget.value })} /></Show>
-          <Show when={cfForm().cf_type === "int" || cfForm().cf_type === "text"}><input placeholder='Constraints JSON e.g. {"min":0,"max":100}' value={cfForm().constraints} onInput={e => setCfForm({ ...cfForm(), constraints: e.currentTarget.value })} /></Show>
+        <div class="cf-tabs"><For each={CF_ENTITY_TYPES}>{t => <button classList={{ active: cfEntityType() === t }} onClick={() => setCfEntityType(t)}>{cfLabel(t)}</button>}</For></div>
+        <div class="inline-form-col op-form">
+          <input class="op-input op-grow" aria-label="Field name" placeholder="Field name" value={cfForm().name} onInput={e => setCfForm({ ...cfForm(), name: e.currentTarget.value })} />
+          <PillSelect label="Field type" value={cfForm().cf_type} onChange={value => setCfForm({ ...cfForm(), cf_type: value as CfType })}><For each={CF_TYPES}>{t => <option value={t}>{cfTypeLabel(t)}</option>}</For></PillSelect>
+          <Show when={(cfForm().cf_type === "enum" || cfForm().cf_type === "enum_list")}><input class="op-input op-grow" aria-label="Enum options" placeholder="Comma-separated options" value={cfForm().constraints} onInput={e => setCfForm({ ...cfForm(), constraints: e.currentTarget.value })} /></Show>
+          <Show when={cfForm().cf_type === "int" || cfForm().cf_type === "text"}><input class="op-input op-grow" aria-label="Constraints JSON" placeholder='Constraints JSON e.g. {"min":0,"max":100}' value={cfForm().constraints} onInput={e => setCfForm({ ...cfForm(), constraints: e.currentTarget.value })} /></Show>
           <button class="primary" onClick={saveCfDefinition}>Add field</button>
         </div>
         <ul class="entity-list"><For each={cfDefs()}>{d =>
-          <li classList={{ archived: d.archived }}><div><strong>{d.name}</strong><span class="muted">{d.cf_type}{d.constraints_json ? ` · ${d.constraints_json}` : ""}</span></div><button class="ghost" onClick={() => toggleArchiveCf(d)}>{d.archived ? "Restore" : "Archive"}</button></li>
+          <li classList={{ archived: d.archived }}><div><strong>{d.name}</strong><span class="muted">{cfTypeLabel(d.cf_type)}{d.constraints_json ? ` · ${d.constraints_json}` : ""}</span></div><GhostPill onClick={() => toggleArchiveCf(d)}>{d.archived ? "Restore" : "Archive"}</GhostPill></li>
         }</For></ul>
-        <Show when={cfDefs()?.length === 0}><p class="empty-state">No custom fields defined for "{cfEntityType()}" yet.</p></Show>
+        {/* The old line named the internal entity key — it said `issue` while
+            every other surface in the app says ticket. `cfLabel` is the display
+            name and already existed; it was simply not used here. */}
+        <Show when={cfDefs()?.length === 0}>
+          <EmptyState title={`No custom fields on a ${cfLabel(cfEntityType())} yet`} hint="A custom field adds one extra column of your own to every record of this kind." />
+        </Show>
       </section>
     </div>
   </section>;

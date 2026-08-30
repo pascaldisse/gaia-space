@@ -16,19 +16,33 @@
 .task-add-plus{display:grid;place-items:center;width:20px;height:20px;border-radius:6px;background:var(--accent-soft);color:var(--accent-text);font-size:15px;line-height:1}
 
 /* ── task composer — one calm surface, not fragmented boxes ── */
-.task-composer{margin:0 0 26px;padding:18px 20px;border:1px solid var(--surface-border);border-radius:14px;background:linear-gradient(160deg,var(--surface-raised),var(--surface) 72%);box-shadow:0 8px 26px rgba(0,0,0,.24);display:grid;gap:14px}
+.task-composer{margin:0 0 20px;padding:14px 16px;border:1px solid var(--surface-border);border-radius:14px;background:linear-gradient(160deg,var(--surface-raised),var(--surface) 72%);box-shadow:0 8px 26px rgba(0,0,0,.24);display:grid;gap:10px}
+/* CAPTURE IS ONE LINE: the title takes the width, the primary sits on its end.
+   STRUCTURE, so it must not be scoped to a theme (an earlier lane broke the dark
+   layout three times doing that). */
+.composer-line{display:flex;align-items:center;gap:10px}
+.composer-line .composer-title{flex:1 1 auto;min-width:0}
 .composer-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:-2px 0 -4px}
 .composer-head-label{font-family:var(--font-head);font-size:11px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:#93a0bb}
 .composer-close{font-size:12px!important;color:#93a0bb!important}
 .composer-close:hover{color:var(--text-strong)!important}
-.composer-title{width:100%;background:transparent!important;border:none!important;border-radius:0!important;padding:4px 2px 12px!important;font-family:var(--font-head);font-size:21px!important;font-weight:600!important;color:var(--text-strong);border-bottom:1px solid var(--surface-border)!important;box-shadow:none!important}
+.composer-title{width:100%;background:transparent!important;border:none!important;border-radius:0!important;padding:4px 2px 9px!important;font-family:var(--font-head);font-size:19px!important;font-weight:600!important;color:var(--text-strong);border-bottom:1px solid var(--surface-border)!important;box-shadow:none!important}
 .composer-title::placeholder{color:#6d7c99;font-weight:500}
 .composer-title:focus{outline:none;border-bottom-color:var(--accent)!important;box-shadow:0 1px 0 0 var(--accent)!important}
 
 /* metadata row: three equal, generous, same-colour popover controls */
 .composer-meta{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;align-items:stretch}
 .composer-actions{display:flex;justify-content:flex-end}
-.composer-submit{height:42px;padding:0 26px;border-radius:999px;font-size:13.5px}
+.composer-submit{height:38px;padding:0 22px;border-radius:999px;font-size:13.5px;white-space:nowrap}
+
+/* The fold: everything that is EDITING rather than capture. Closed at rest, so the
+   list is the first thing under the composer. */
+.composer-more{padding-top:2px}
+.composer-more summary{cursor:pointer;font-family:var(--font-head);font-size:12px;font-weight:600;letter-spacing:.03em;color:#93a0bb;list-style:none}
+.composer-more summary::-webkit-details-marker{display:none}
+.composer-more summary::before{content:"+ ";color:#6d7c99}
+.composer-more[open] summary::before{content:"\2212 "}
+.composer-more-body{display:grid;gap:10px;margin-top:10px}
 
 .composer-source{border-top:1px solid #223052;padding-top:12px;color:#aeb1b8}
 .composer-source summary{cursor:pointer;font-family:var(--font-head);font-size:12px;font-weight:600;letter-spacing:.03em;color:#93a0bb;list-style:none}
@@ -84,3 +98,161 @@ button.task-body-edit:focus-visible{outline:2px solid var(--accent);outline-offs
 .task-notes { margin: 2px 0 0; color: var(--text-dim, #7b8194); font-size: 12px; line-height: 1.45; white-space: pre-wrap; }
 .todo-field-notes { grid-column: 1 / -1; }
 .composer-notes { width: 100%; resize: vertical; font: inherit; }
+
+/* ══ Space-light restyle ═══════════════════════════════════════════════════
+   To-do was the closest of the four to the new Home already, but it still
+   carried the dark theme's literals — navy card fills, a blue left-border stub
+   per task, and four differently-coloured meta chips. Under the colour law only
+   teal, amber and red mean anything, so the chips become paper pills and the
+   due date is the only one allowed to take a colour. */
+
+.theme-space-light .personal-view { background: var(--wash); color: var(--ink); }
+
+/* Group heading: `.task-group-title` had no rule at all, so "Today" and its
+   count rendered as one word ("Today0"). It is a section label now. */
+.theme-space-light .task-group-title {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 680;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+}
+.theme-space-light .task-group-title .rail-count {
+  margin-left: 0;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--wash-2);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 680;
+  letter-spacing: 0;
+}
+.theme-space-light .task-list { gap: 0; margin-bottom: 26px; }
+
+/* ── task card → paper row ────────────────────────────────────────────────── */
+.theme-space-light .task-card {
+  padding: 14px 12px;
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-left: 0;
+  border-radius: 12px;
+  background: transparent;
+  transition: background .12s ease;
+}
+.theme-space-light .task-list .task-card:first-of-type { border-top: 0; }
+.theme-space-light .task-card:hover { border-color: var(--line); border-left-color: transparent; background: var(--wash); }
+.theme-space-light .task-card.focused,
+/* Paper, not a tinted block — the shared rule in TaskRowEdit.css owns the look now,
+   so this only stops the old left accent from returning. */
+.theme-space-light .task-card-editing { border-left-color: transparent; }
+.theme-space-light .task-title { font-size: 14.5px; font-weight: 710; letter-spacing: -.015em; color: var(--ink); }
+.theme-space-light .task-card.done { opacity: .55; border-left-color: transparent; }
+.theme-space-light .task-card.done .task-title { color: var(--quiet); }
+.theme-space-light .task-notes { color: var(--muted); }
+
+.theme-space-light .task-tag {
+  padding: 3px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--paper);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 680;
+}
+/* Only the date carries a colour, and only because a date can be late. */
+.theme-space-light .task-tag.due { background: var(--amber-soft); color: var(--amber-ink); border-color: transparent; }
+.theme-space-light .task-tag.project,
+.theme-space-light .task-tag.assignee,
+.theme-space-light .task-tag.source { background: var(--paper); color: var(--muted); border-color: var(--line); }
+
+/* ── composer ─────────────────────────────────────────────────────────────── */
+.theme-space-light .task-composer {
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: var(--paper);
+  box-shadow: 0 16px 36px rgba(31, 35, 40, .06);
+  padding: 20px 22px;
+}
+.theme-space-light .composer-head-label,
+.theme-space-light .composer-more summary,
+.theme-space-light .composer-source summary { color: var(--muted); }
+.theme-space-light .composer-more summary::before { color: var(--quiet); }
+.theme-space-light .composer-close { color: var(--muted) !important; }
+.theme-space-light .composer-close:hover { color: var(--ink) !important; }
+.theme-space-light .composer-title { color: var(--ink); border-bottom-color: var(--line) !important; }
+.theme-space-light .composer-title::placeholder { color: var(--quiet); }
+.theme-space-light .composer-source { border-top-color: var(--line); color: var(--muted); }
+.theme-space-light .composer-source summary::before { color: var(--quiet); }
+.theme-space-light .assignee-chip {
+  background: var(--wash);
+  color: var(--muted);
+  border-color: var(--line);
+}
+.theme-space-light .assignee-chip button { color: var(--quiet); }
+.theme-space-light .assignee-chip button:hover { color: var(--ink); }
+.theme-space-light .task-add-trigger {
+  border: 1px dashed var(--line-strong);
+  border-radius: 14px;
+  background: transparent;
+  color: var(--muted);
+}
+.theme-space-light .task-add-trigger:hover { border-color: var(--teal); background: var(--wash); color: var(--ink); }
+.theme-space-light .task-add-plus { background: var(--teal-soft); color: var(--teal-ink); }
+
+/* ── the row must LOOK like the thing you click ───────────────────────────────
+   Observed by the product owner: a task read as "four words, a date, and an ×
+   a world away on the right", with no sense that anything here is operable.
+   Three causes, three fixes — none of them a mandatory description field, which
+   would only buy rows that say "test" twice.
+   1. The row stretched the full window, so its own ends stopped belonging together.
+   2. Nothing marked it as pressable until the pointer was already on the title.
+   3. Row actions sat permanently at the far edge, competing with the content and
+      putting delete one stray click from a title.                               */
+.theme-space-light .task-list { max-width: 880px; }
+.theme-space-light .task-card {
+  /* NOT centre: the body grows downwards (title, description, tags), so centring
+     drops the checkbox to the middle of a tall row and it reads as belonging to
+     the line BELOW the title. It aligns to the first line, which is the line it
+     is about. (Regression introduced with the row-affordance pass.) */
+  align-items: start;
+  gap: 12px;
+  padding-inline: 12px;
+  border-radius: 10px;
+  cursor: pointer;
+}
+/* The whole row lifts, not just the words in it. */
+.theme-space-light .task-card:hover { background: var(--wash-2); }
+/* Keyboard focus lands on the row's own button; show it on the ROW. */
+.theme-space-light .task-card:focus-within { background: var(--wash-2); box-shadow: inset 0 0 0 1px var(--line-strong); }
+/* The checkbox sits on the title's optical line, not on the row's midpoint. */
+.theme-space-light .task-card > .task-check { margin-top: 2px; }
+.theme-space-light button.task-body-edit:focus-visible { outline: none; }
+.theme-space-light button.task-body-edit:hover .task-title { color: var(--ink); }
+
+/* A title with nothing under it says the task is thin. Offer the line instead of
+   demanding it: the hint appears on hover, costs nothing, and one click writes it. */
+.theme-space-light .task-body-edit .task-notes:empty { display: none; }
+/* Always drawn, never loud. An invitation that only exists while the pointer is on
+   it is not an invitation — and worse, an invisible line still HELD its row, so a
+   task with no description showed a gap where nothing was. */
+.theme-space-light .task-card .task-note-hint {
+  margin: 2px 0 0; font-size: 12px; color: var(--quiet);
+}
+.theme-space-light .task-card:hover .task-note-hint { color: var(--muted); }
+
+/* Actions belong to the row, so they arrive with it and leave with it. Delete is
+   destructive: it never sits ready under an idle pointer. */
+.theme-space-light .task-row-actions { gap: 4px; opacity: 0; transition: opacity .12s ease; }
+.theme-space-light .task-card:hover .task-row-actions,
+.theme-space-light .task-card:focus-within .task-row-actions { opacity: 1; }
+.theme-space-light .task-row-actions .ghost { border-color: transparent; }
+.theme-space-light .task-row-actions .ghost:hover { border-color: var(--line); background: var(--paper); }
+.theme-space-light .task-delete:hover { color: var(--red-ink); border-color: var(--red-soft); background: var(--red-soft); }
+
+/* The opened task's facts, and the one act that removes them all — beside them,
+   on its own line so it can never be hit while reaching for Save. */
+.task-danger-row { display: flex; justify-content: flex-end; align-items: center; margin-top: 10px; }

@@ -1,0 +1,169 @@
+/* Locations — the little that is genuinely local to this view.
+ *
+ * Everything with a shape already lives elsewhere: the card is `paper-card`,
+ * the fields are `operatorForm.css`, the pickers are `PillSelect`, the sections
+ * and the disclosure are `blocks.tsx`, the rows are `paper-row`. What is left
+ * here is the spacing BETWEEN those blocks — which is structure, so it is
+ * UNSCOPED and both themes get it. Only the two colour rules at the bottom are
+ * scoped, and the validation message deliberately is not: it uses the
+ * theme-agnostic `--status-danger-*` tokens, so an error stays legible in dark.
+ */
+
+/* The page uses the page's width. `.settings-card` caps itself at `--rail-max`
+   (720px) because it was written for the Settings RAIL — a narrow column beside
+   something else. Here there is nothing beside it, so the cap turned a 1338px
+   surface into an 840px strip with half the screen blank. The measure belongs to
+   the page, not to a card borrowed from another one. */
+.locations-view .locations-grid > .settings-card { max-width: none; }
+.locations-view .locations-grid { max-width: var(--view-max, 1160px); margin-inline: var(--view-pad-x); }
+
+/* Two columns where there is room: the form is a tool, the list is the point, and
+   a form that fills the page while the list is nowhere reads as if the page were a
+   form. Below 1100px they stack, form last. */
+.locations-grid { display: grid; gap: 18px; grid-template-columns: minmax(0, 1fr); }
+/* The editor only exists while it is open, so the grid follows it: one column when
+   the list has the page to itself, two when you are editing something. */
+@media (min-width: 1100px) {
+  .theme-space-light .locations-grid:has(> form) { grid-template-columns: minmax(0, 420px) minmax(0, 1fr); align-items: start; }
+}
+
+/* A field is now a COLUMN — label, control, explanation — where it used to be a
+   bare control on a flex line. Without this the hint would wrap under the whole
+   row instead of under the input it describes. */
+.locations-field { display: flex; flex-direction: column; gap: 3px; flex: 0 1 auto; min-width: 0; }
+.locations-field.grow { flex: 1 1 240px; }
+.locations-field.wide { flex: 1 1 100%; }
+.locations-field .op-field { margin: 0; }
+.locations-field .op-hint { margin: 0; }
+.locations-field textarea.op-input { width: 100%; resize: vertical; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+/* Sections are the map through the form; the first one must not push the card's
+   own heading away. */
+.locations-section { margin-top: 20px; }
+.locations-section:first-of-type { margin-top: 10px; }
+
+/* `Settings.css` carries an old blanket `.settings-card h2 { uppercase }`, which
+   lands on the SHIPPED SectionHeading at equal specificity and shouts it. This
+   restores the component's own voice inside this view only — it does not touch
+   the component, and it does not touch Settings. Typography, so unscoped: the
+   dark theme inherits the same leak and needs the same repair. */
+.locations-view .section-heading h2 {
+  text-transform: none;
+  letter-spacing: -.01em;
+  font-size: 16px;
+  color: var(--text-strong);
+}
+
+/* Each field carries its own explanation, and a long explanation must NOT be
+   what decides how wide its input is — which is exactly what a flex row does
+   with a text child. A grid gives every field the same column instead, so the
+   hints wrap inside the field rather than stretching it. */
+.locations-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  align-items: start;
+  gap: 10px 12px;
+}
+.locations-row .locations-field.wide { grid-column: 1 / -1; }
+
+.locations-view .op-hint { margin-top: 6px; }
+.locations-lede { margin-top: 0; margin-bottom: 10px; }
+
+/* The persistent example sits with the field it explains, and its Use-this-
+   example pill must sit ON the text line rather than starting a new block. */
+.locations-example { margin-top: 8px; line-height: 1.9; }
+.locations-example .ghost-pill { vertical-align: middle; }
+
+.locations-reading { margin-top: 4px; }
+
+.locations-problem { margin: 8px 0 0; padding: 8px 10px; border-radius: 8px; font-size: 13px; }
+
+.locations-filter { margin-bottom: 10px; }
+
+/* The coordinates fold out full width so their two narrow boxes and the
+   sentence above them do not fight the seven controls on the desk line. */
+.locations-map { flex: 1 1 100%; margin: 4px 0 2px; }
+.locations-map .op-form { margin-top: 8px; }
+
+.locations-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
+
+/* The desk form is several controls, and once each one carries an explanation
+   a flex row wraps by TEXT length — "Desk label" grew to twice the width of
+   "From" because its hint is longer. Same grid as the location form, so the
+   controls line up on a column instead of on their prose. */
+.locations-desk-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  align-items: start;
+  gap: 10px 12px;
+  margin-bottom: 4px;
+}
+.locations-desk-form .locations-map,
+.locations-desk-form > button[type="submit"] { grid-column: 1 / -1; }
+.locations-desk-form > button[type="submit"] { justify-self: start; }
+
+/* A desk row is a record, not a link: no pointer, no hover lift — only the
+   Remove pill inside it is actionable. */
+.locations-desk-row { cursor: default; }
+.theme-space-light .locations-desk-row:hover { background: transparent; }
+
+/* Theme-agnostic on purpose: a syntax error must read in dark too, and these
+   tokens are defined for both (see Meetings.css, which uses them unscoped). */
+.locations-problem {
+  border: 1px solid var(--status-danger-ink);
+  background: var(--status-danger-bg);
+  color: var(--status-danger-ink);
+}
+
+/* Inline code inside a hint is a value, not a block of source. */
+.theme-space-light .locations-view .op-hint code,
+.theme-space-light .locations-view .locations-problem code {
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: var(--wash-2);
+  color: var(--ink);
+  font-size: 12px;
+}
+
+/* The desk form is one line of fields, not a column of them. Stacked, it made a
+   short tool look like a long questionnaire and pushed its own list off screen. */
+.locations-desk-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px 14px; align-items: end; }
+/* Every field owns the same box, hint included, so the row keeps ONE baseline
+   instead of stepping up and down with the length of each explanation. */
+.locations-desk-form > .op-field { min-width: 0; display: flex; flex-direction: column; justify-content: flex-start; }
+.locations-desk-form { align-items: start; }
+.locations-desk-form .op-hint { grid-column: 1 / -1; margin-top: 0; }
+
+/* ── THE LOCATION CARD ────────────────────────────────────────────────────────
+   Same card the Knowledge library uses (`.documents-library-card`, Documents.css):
+   icon tile left, name bold, ONE quiet meta line, arrow right. Only the measures
+   are repeated here — the tokens are the same ones, so there is no second raster.
+   UNSCOPED: this is structure, and both themes get it. */
+.locations-view .locations-card {
+  display: flex; align-items: center; gap: var(--dk-space-md); min-width: 0;
+  padding: var(--dk-space-lg); border: var(--dk-hairline) solid var(--surface-border);
+  border-radius: var(--dk-radius-lg); background: var(--surface);
+}
+.locations-view .locations-card + .locations-card { margin-top: var(--dk-space-sm); }
+.locations-view .locations-card:hover {
+  border-color: var(--accent); box-shadow: 0 8px 20px color-mix(in srgb, var(--accent) 10%, transparent);
+}
+.locations-card-icon {
+  display: grid; place-items: center; flex: 0 0 auto; width: 2.25rem; height: 2.25rem;
+  border-radius: var(--dk-radius-md); background: var(--accent-soft); color: var(--accent-text);
+}
+.locations-card-copy { display: grid; min-width: 0; gap: 0.15rem; }
+.locations-card-copy .paper-row-title,
+.locations-card-copy .paper-row-meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
+.locations-card-copy .paper-row-meta { color: var(--text-muted); font-size: var(--dk-fs-xs); }
+.locations-card-open { margin-left: auto; color: var(--accent-text); }
+.locations-view .locations-card .paper-pill { margin-left: auto; }
+.locations-view .locations-card .paper-pill + .locations-card-open { margin-left: var(--dk-space-md); }
+
+/* Light theme only re-inks; the hairline and the meta line follow the light tokens. */
+.theme-space-light .locations-view .locations-card { border-color: var(--line); background: var(--paper); }
+.theme-space-light .locations-card-copy .paper-row-meta { color: var(--muted); }
+/* The card's type is the Knowledge card's type: title at body size, bold; ONE
+   meta line at the small step. `.paper-row-title` carries the paper kit's own
+   15px/710, which is a different card's scale. */
+.locations-card-copy .paper-row-title { font-size: 1rem; font-weight: 700; }

@@ -1,0 +1,116 @@
+/* ── THE TASK CARD ───────────────────────────────────────────────────────────
+   The same object Knowledge introduced for documents, said in the vocabulary of
+   work: an icon tile on the left, the name in bold, ONE quiet meta line under it,
+   and the state on the right. Every value here is the library's own — the tokens,
+   not new numbers — so the two surfaces cannot drift apart.
+
+   Shared by My tasks, Team tasks and a project's task list. Nothing in this file
+   is scoped to a theme: colour comes from tokens that both themes define. */
+
+/* The action row closes the introduction, so it carries the page's one hairline and
+   the breathing room the content needs under it. */
+/* Doubled class: `.documents-actionbar` (loaded later) zeroes the padding, and this
+   row needs room under it because it carries the page's one line. */
+.task-actionbar.task-actionbar {
+  padding: 0 0 var(--view-head-gap, 22px);
+  border-bottom: var(--dk-hairline) solid var(--dk-line);
+  margin-bottom: var(--view-head-gap, 22px);
+}
+.task-board { width: 100%; display: grid; gap: var(--dk-space-sm); }
+.task-board > .content-head { margin-bottom: var(--dk-space-sm); }
+
+
+.task-group-heading {
+  display: flex; align-items: center; gap: var(--dk-space-sm);
+  margin: var(--dk-space-lg) 0 calc(-1 * var(--dk-space-xs));
+  color: var(--text-muted);
+  font-size: var(--dk-fs-xs); font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+}
+.task-group-heading .count {
+  display: inline-grid; place-items: center; min-width: 1.35rem; height: 1.35rem; padding: 0 0.35rem;
+  border-radius: 999px; background: var(--accent-soft); color: var(--accent-text);
+  font-size: var(--dk-fs-xs); font-weight: 700; letter-spacing: 0;
+}
+
+.task-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(21rem, 1fr));
+  gap: var(--dk-space-sm); width: 100%;
+}
+/* An opened task is an editor, not a tile: it takes the whole row so the fields
+   have the width they need. */
+.task-grid > .task-open { grid-column: 1 / -1; }
+
+.task-tile {
+  position: relative; display: flex; align-items: flex-start; gap: var(--dk-space-md); min-width: 0;
+  padding: var(--dk-space-lg); border: var(--dk-hairline) solid var(--surface-border);
+  border-radius: var(--dk-radius-lg); background: var(--surface); color: inherit;
+  cursor: grab;
+}
+.task-tile:hover { border-color: var(--accent); box-shadow: 0 8px 20px color-mix(in srgb, var(--accent) 10%, transparent); }
+.task-tile.done { opacity: 0.62; }
+
+/* The check IS the icon tile: the one thing you do to a task without opening it. */
+.task-tile-check {
+  flex: 0 0 auto; display: grid; place-items: center; width: 2.25rem; height: 2.25rem; padding: 0;
+  border: var(--dk-hairline) solid var(--surface-border); border-radius: var(--dk-radius-md);
+  /* Open work is a quiet "!" on the page's own paper; a tick, and the teal fill that
+     comes with it, is reserved for the finished thing. */
+  background: var(--dk-field-bg); color: var(--text-muted); cursor: pointer;
+}
+.task-tile-check:hover { border-color: var(--accent); }
+/* HOW MUCH ROOM IS LEFT, said by the mark itself (statusTone.deadlineBand):
+   teal = more than a week · amber = inside the week · red = today, tomorrow or past.
+   No deadline stays grey, because colouring it would invent one. */
+.task-tile-check.teal { background: var(--accent-soft); color: var(--accent-text); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
+.task-tile-check.amber { background: color-mix(in srgb, var(--amber, #b8791f) 16%, transparent); color: var(--amber-ink, #8a5a12); border-color: color-mix(in srgb, var(--amber, #b8791f) 40%, transparent); }
+.task-tile-check.red { background: color-mix(in srgb, var(--danger, #c2384a) 14%, transparent); color: var(--danger, #c2384a); border-color: color-mix(in srgb, var(--danger, #c2384a) 42%, transparent); }
+.task-tile-check[aria-pressed="true"] { background: var(--brand-teal, var(--accent)); color: var(--brand-navy, #04302a); }
+.task-tile-check:disabled { cursor: not-allowed; opacity: 0.5; }
+
+.task-tile-body {
+  flex: 1 1 auto; min-width: 0; display: grid; gap: 0.2rem; padding: 0;
+  border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer;
+}
+.task-tile-title { font-size: var(--dk-fs-md); font-weight: 700; overflow-wrap: anywhere; }
+.task-tile.done .task-tile-title { text-decoration: line-through; }
+/* ONE meta line, never a stack: project, people, origin — whatever exists, in that
+   order, separated by the same middle dot the library uses. */
+.task-tile-meta {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem;
+  color: var(--text-muted); font-size: var(--dk-fs-xs);
+}
+.task-tile-meta .sep { opacity: 0.5; }
+
+.task-tile-edge { flex: 0 0 auto; display: flex; align-items: center; gap: var(--dk-space-xs); }
+/* The due date is the one fact that earns colour, and only when it is late or near:
+   statusTone decides, this file only paints. */
+.task-due {
+  display: inline-flex; align-items: center; padding: 0.15rem 0.5rem;
+  border-radius: 999px; background: var(--dk-field-bg); color: var(--text-muted);
+  font-size: var(--dk-fs-xs); font-weight: 650; white-space: nowrap;
+}
+.task-due.overdue { background: color-mix(in srgb, var(--danger, #c2384a) 14%, transparent); color: var(--danger, #c2384a); }
+.task-due.today, .task-due.soon { background: color-mix(in srgb, var(--amber, #b8791f) 16%, transparent); color: var(--amber-ink, #8a5a12); }
+
+.task-tile-menu {
+  /* Same as .card-menu-button: a text glyph needs the button padding cancelled. */
+  padding: 0;
+  line-height: 1;
+  position: absolute; top: 50%; right: var(--dk-space-sm); transform: translateY(-50%);
+  display: grid; place-items: center; width: 1.9rem; height: 1.9rem;
+  border: var(--dk-hairline) solid transparent; border-radius: var(--dk-radius-sm);
+  background: none; color: var(--text-muted); font-size: 1.05rem; line-height: 1; cursor: pointer;
+  opacity: 0;
+}
+.task-tile:hover .task-tile-menu,
+.task-tile:focus-within .task-tile-menu,
+.task-tile-menu:focus-visible { opacity: 1; }
+.task-tile-menu:hover { border-color: var(--surface-border); background: var(--surface); color: var(--accent-text); }
+.task-tile:hover .task-tile-edge { padding-right: 1.9rem; }
+
+/* THE CATEGORY ON A TILE IS A WORD, AND ONLY A WORD. No badge, no dot, no hue: the
+   state mark and the due date already carry this card's colour and both come from
+   deadlineBand()/urgencyOf(). A category palette beside them would be a second
+   colour rule on one tile, and "what kind of work" would start competing with
+   "how late". It reads as slight emphasis inside the muted meta line instead. */
+.task-tile-cat { font-weight: 620; }

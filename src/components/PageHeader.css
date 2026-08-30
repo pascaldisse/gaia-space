@@ -1,0 +1,281 @@
+/* ── Page header (redesign stage 6a) ────────────────────────────────────────
+   One idiom for every view. Values are the prototype's `.page-header` /
+   `.title-row` / `.kicker` / `h1` / `.subtitle` / `.metric-pill` block, read
+   through the light token layer (spaceTheme.css) rather than hardcoded, so
+   the same markup renders correctly in the shipped dark theme too — the
+   colour tokens used here (--text-strong, --text-muted, --ctl-*) are defined
+   by BOTH :root (dark) and .theme-space-light.
+
+   Structure only, no decoration: no icon lozenge, no explanatory paragraph. */
+
+/* ── THE INTRODUCTION ENDS IN A LINE ─────────────────────────────────────────
+   Every surface now names itself: mark, title, one sentence. That block is the
+   page's introduction, and it ends where the content begins — Knowledge drew that
+   hairline first and it is the reason its top reads calmly instead of stacking four
+   things on top of each other.
+   ONE line per page, never two: when an action row follows the header immediately
+   (Knowledge's four acts, My tasks' New task), the row belongs to the introduction,
+   so the line moves down to IT and the header keeps none. */
+.page-header {
+  margin-bottom: var(--view-head-gap, 22px);
+  padding-bottom: var(--view-head-gap, 22px);
+  border-bottom: var(--dk-hairline, 1px) solid var(--dk-line, var(--line, #e5ddd3));
+}
+.page-header:has(+ .container-tabs),
+.page-header:has(+ .page-actionbar),
+.page-header:has(+ .documents-actionbar),
+.page-header:has(+ .task-actionbar) {
+  margin-bottom: 0;
+  /* The row is part of the introduction, but it is not glued to the sentence above
+     it: the gap here is the same rhythm the header keeps from any other content. */
+  padding-bottom: var(--view-head-gap, 22px);
+  border-bottom: 0;
+}
+/* An embedded header is a label inside somebody else's page, not an introduction. */
+.page-header.embedded { padding-bottom: 0; border-bottom: 0; }
+
+/* Some view roots deliberately carry no padding — they scroll their own body and
+   each block pads itself. Their old bespoke header carried that inset; the shared
+   one has to carry it too, or the kicker sits flush against the command bar. */
+/* HAND-KEPT LISTS DRIFT, and this one had: `.dev-environments` DOES pad its own
+   root, so it received the inset twice and its heading sat 28px right and 18px
+   below every sibling. The list now carries only roots whose padding is genuinely
+   zero — verified in the running app, not assumed — and the rule states the test so
+   the next addition is checked rather than guessed. */
+.documents-view > .page-header,
+.packages-view > .page-header,
+.pipelines-view > .page-header,
+.reviews-view > .page-header,
+.repos-view > .page-header,
+.locations-view > .page-header {
+  padding: var(--view-pad-y) var(--view-pad-x) 0;
+}
+
+/* THE SURFACE'S MARK. Knowledge introduced the tile (a round-cornered square in the
+   accent wash) and it reads better than a bare title: the eye finds the area before it
+   reads the word. It lives HERE so every view gets the same one from the same rail
+   glyph, instead of each view inventing an ornament of its own. */
+.pgh-lead { display: flex; align-items: flex-start; gap: 14px; min-width: 0; }
+.pgh-icon {
+  flex: 0 0 auto;
+  display: grid; place-items: center;
+  width: 44px; height: 44px;
+  margin-top: 14px;
+  border-radius: 13px;
+  border: 1px solid var(--surface-border, var(--line, #e5ddd3));
+  background: var(--accent-soft, var(--teal-soft, #dcf7f2));
+  color: var(--accent-text, var(--teal-ink, #0a7264));
+}
+
+.pgh-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 22px;
+}
+
+.pgh-title { min-width: 0; }
+
+/* .kicker's type voice is owned by spaceLightType.css (12px / 680 / .08em
+   uppercase). Restated structurally here so the dark layouts get the same
+   micro-label instead of inheriting body type. */
+.page-header .kicker {
+  margin-bottom: 5px;
+  color: var(--text-muted);
+  font-family: var(--font-head);
+  font-size: var(--type-kicker, 12px);
+  font-weight: var(--type-kicker-weight, 680);
+  letter-spacing: var(--type-kicker-ls, .08em);
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.page-header h1 {
+  margin: 0;
+  font-size: var(--type-h1, 27px);
+  line-height: var(--type-h1-lh, 1.12);
+  letter-spacing: var(--type-h1-ls, -.045em);
+  font-weight: var(--type-weight-head, 720);
+  color: var(--text-strong);
+}
+
+/* ONE line. If a view needs more than this, the words belong next to the
+   control they describe — that is the whole point of stage 6a. */
+.page-header .subtitle {
+  margin: 6px 0 0;
+  color: var(--text-muted);
+  font-size: var(--type-sub, 14px);
+  line-height: 1.4;
+  max-width: 62ch;
+}
+
+.pgh-edge {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  flex: none;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.header-metrics { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+/* A picker in the action edge is label-over-control, a button is just a
+   control — align on the BOTTOM edge so they share one baseline. */
+.pgh-actions { display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
+.pgh-actions .picker { min-width: 0; }
+/* A button on the action edge is ONE LINE. Time off's `+ Record time off` had
+   wrapped its own plus sign onto a second line: the button was a plain block
+   flex item, so the icon and the words were two wrappable children inside a box
+   the row was free to squeeze. Structure, unscoped — a button that breaks its
+   own label is broken in every theme. */
+.pgh-actions > button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  flex: none;
+  white-space: nowrap;
+}
+
+.metric-pill {
+  min-height: 34px;
+  border: 1px solid var(--ctl-border, var(--surface-line));
+  border-radius: var(--ctl-radius-sm, 10px);
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 10px;
+  background: var(--ctl-bg, transparent);
+  color: var(--text-muted);
+  font-size: var(--type-meta, 13px);
+  white-space: nowrap;
+}
+.metric-pill strong { color: var(--text-strong); font-weight: var(--type-weight-strong, 700); }
+
+/* Tone on a metric chip. `Chip` only ever sets one of these when the value is
+   non-empty (statusTone.ts `metricTone`) — zero is untoned by construction. */
+.metric-pill.teal { border-color: transparent; background: var(--teal-soft); color: var(--teal-ink, #006b5e); }
+.metric-pill.amber { border-color: transparent; background: var(--amber-soft); color: var(--amber-ink, #7b5207); }
+.metric-pill.red { border-color: transparent; background: var(--red-soft); color: var(--red-ink, #8a1c1c); }
+.metric-pill.done { color: var(--text-muted); }
+.metric-pill.teal strong, .metric-pill.amber strong, .metric-pill.red strong { color: inherit; }
+
+/* ── Embedded form (audit §3.5) ─────────────────────────────────────
+   No kicker, no title — the host already wrote both. What is left is the chips +
+   actions row, and it aligns with the host's tab bar instead of starting a new
+   title block. Structure only, so the dark layouts get the same geometry. */
+.page-header.embedded {
+  margin-bottom: var(--view-head-gap-embedded, 14px);
+}
+.page-header.embedded .pgh-row {
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+}
+/* A subline is a fact about the surface, not a repeat of the scope, so it survives
+   — pushed left, sharing the row's single baseline with the actions. */
+.page-header.embedded .pgh-title { flex: 1 1 auto; }
+.page-header.embedded .subtitle { margin: 0; }
+.page-header.embedded .pgh-edge { align-items: center; }
+
+@media (max-width: 720px) {
+  .pgh-row { flex-direction: column; }
+  .page-header.embedded .pgh-row { align-items: flex-start; }
+  .pgh-edge { justify-content: flex-start; }
+  .header-metrics, .pgh-actions { justify-content: flex-start; }
+}
+
+/* Filter bars are NOT here: the paper-card filter idiom lives with the rest of
+   the paper surfaces, in components/paper.css (`.paper-filters` / `.filter-row`),
+   scoped to .theme-space-light. One idiom, one home. */
+
+
+/* ── THE ACTION ROW ──────────────────────────────────────────────────────────
+   WHERE AN ACT LIVES IS DECIDED BY ITS KIND, not by the view it happens to be in.
+   Until now half the app put "New …" in the header's top-right corner and half put
+   it under the introduction, so the same act had two addresses.
+
+     · MAKES SOMETHING          → this row, left. New task, Upload file, New
+       project, New meeting, New ticket. They may be several, they carry words,
+       and they rank themselves: primary · secondary · quiet.
+     · CHANGES WHAT YOU SEE     → this row, right. Filters, "show archived",
+       "Show done". A filter acts on your view, not on the thing.
+     · FACTS AND THE ONE        → the header's top-right edge: metric chips, and
+       IRREVERSIBLE ACT           the red Delete of the page's own subject.
+
+   The row belongs to the introduction, so it carries the page's single hairline
+   (see .page-header:has(+ .page-actionbar) above). */
+.page-actionbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--dk-space-sm, 8px);
+  margin: 0 0 var(--view-head-gap, 22px);
+  padding: 0 0 var(--view-head-gap, 22px);
+  border-bottom: var(--dk-hairline, 1px) solid var(--dk-line, var(--line, #e5ddd3));
+}
+/* Views whose root has no padding of its own (they pad each block) need the inset
+   here too, exactly as their header gets it above. */
+.documents-view > .page-actionbar,
+.packages-view > .page-actionbar,
+.pipelines-view > .page-actionbar,
+.reviews-view > .page-actionbar,
+.repos-view > .page-actionbar,
+.locations-view > .page-actionbar {
+  padding-left: var(--view-pad-x);
+  padding-right: var(--view-pad-x);
+}
+/* Everything that changes the view rather than the content sits at the far end. */
+.page-actionbar > .actionbar-view-controls {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--dk-space-sm, 8px);
+}
+
+
+/* ── ONE SIZE FOR EVERY CONTROL IN THE ROW ───────────────────────────────────
+   The button rule (spaceTheme.css `--btn-*`) only reached controls that opted in,
+   so one row could hold six heights at once — measured in the running app:
+   34 · 35 · 36 · 37 · 39 · 40 px, and two type sizes (13 / 13.5). A row of controls
+   that do the same kind of work must be one row, not a staircase.
+
+   SIZE is enforced here for everything in an action row; SHAPE is not. A pill is
+   still a pill and a button still a button — that difference carries meaning (a
+   filter vs. an act), the height difference carried none. */
+/* A picker is a `<span class="pill-select">` wrapping the real `<select>`; the
+   wrapper must take the height too, or the row shows a 34px control in a 37px line. */
+/* The pill primitives take the row's height from the one size system (see
+   controls.css: `--pillctl-h` now reads `--btn-height`), so nothing is restated
+   here — only the wrapper needs telling, because it is not a control itself. */
+.page-actionbar :is(.pill-select, .pill-menu),
+.documents-actionbar :is(.pill-select, .pill-menu),
+.container-tabs :is(.pill-select, .pill-menu) { min-height: var(--btn-height, 37px); }
+.page-actionbar :is(button, .btn, a.ghost-pill, label, select),
+.documents-actionbar :is(button, .btn, a.ghost-pill, label, select),
+.task-actionbar :is(button, .btn, a.ghost-pill, label, select),
+.container-tabs :is(button, .btn, a.ghost-pill, label, select),
+.page-actionbar input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+.documents-actionbar input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+.container-tabs input:not([type="checkbox"]):not([type="radio"]):not([type="file"]) {
+  min-height: var(--btn-height, 37px);
+  height: auto;
+  font-size: var(--btn-font-size, 13px);
+  line-height: 1.15;
+}
+.page-actionbar :is(button, .btn, a.ghost-pill),
+.documents-actionbar :is(button, .btn, a.ghost-pill),
+.task-actionbar :is(button, .btn, a.ghost-pill),
+.container-tabs :is(button, .btn, a.ghost-pill) {
+  font-weight: var(--btn-font-weight, 650);
+}
+/* A checkbox label is a control too: it sits on the row's baseline instead of
+   floating at 22px in a 37px row, and it reads at the row's own size. */
+.page-actionbar label:has(input[type="checkbox"]),
+.documents-actionbar label:has(input[type="checkbox"]),
+.container-tabs label:has(input[type="checkbox"]) {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+}

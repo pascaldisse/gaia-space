@@ -1,12 +1,29 @@
-.leads-view{height:100%;overflow:auto;padding:var(--view-pad-y) var(--view-pad-x) var(--view-pad-bottom);max-width:var(--view-canvas);color:var(--text)}
-.leads-count,.leads-loading,.leads-empty{margin:0 0 14px;color:var(--text-muted)}
-.leads-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px}
-.lead-card{display:grid;gap:11px;padding:16px;background:var(--surface);border:1px solid var(--surface-border);border-radius:10px;overflow-wrap:anywhere}
-.lead-card header{display:flex;gap:12px;justify-content:space-between;align-items:flex-start}
-.lead-card h2,.lead-card p{margin:0}.lead-card h2{font-size:17px}.lead-card header p,.lead-card time,.lead-intent{font-size:12px;color:var(--text-muted)}
-.lead-card time{flex:none;text-align:right}.lead-intent strong{text-transform:capitalize;color:var(--brand-teal)}
-.lead-card address{font-style:normal;font-size:13px;line-height:1.5;white-space:pre-line}
-.lead-contact{display:grid;gap:5px;padding-top:10px;border-top:1px solid var(--surface-border)}
-.lead-contact a{color:var(--brand-teal);text-decoration:none}.lead-contact a:hover{text-decoration:underline}
-.leads-error{margin:0;background:var(--status-danger-bg);color:var(--status-danger-ink);padding:8px 12px;border-radius:8px}
-@media(max-width:600px){.lead-card header{display:grid}.lead-card time{text-align:left}}
+/* Leads speaks the redesign's language: the page frame and the card come from
+   paper.css / PageHeader.css, so only the card's INTERNAL grid lives here.
+   Nothing below re-inks a surface — that is the theme's job, in both themes. */
+.leads-view { height: 100%; overflow: auto; padding: var(--view-pad-y) var(--view-pad-x) var(--view-pad-bottom); max-width: var(--view-canvas); color: var(--text); }
+.leads-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }
+.lead-card { display: grid; gap: 11px; overflow-wrap: anywhere; }
+.lead-card header { display: flex; gap: 12px; justify-content: space-between; align-items: flex-start; }
+.lead-card h2, .lead-card p { margin: 0; }
+.lead-card h2 { font-size: 16px; font-weight: 640; }
+.lead-card header p, .lead-card time, .lead-intent { font-size: 12.5px; color: var(--text-muted); }
+.lead-card time { flex: none; text-align: right; }
+/* The enquiry subject is a FACT about the lead, not a status: emphasis, no tone. */
+.lead-intent strong { text-transform: capitalize; color: var(--text); font-weight: 640; }
+.lead-card address { font-style: normal; font-size: 13px; line-height: 1.5; white-space: pre-line; }
+.lead-contact { display: grid; gap: 5px; padding-top: 10px; border-top: 1px solid var(--surface-border); }
+.lead-contact a { color: var(--brand-teal); text-decoration: none; }
+.lead-contact a:hover { text-decoration: underline; }
+.leads-error { margin: 0 0 14px; background: var(--status-danger-bg); color: var(--status-danger-ink); padding: 8px 12px; border-radius: 8px; }
+@media (max-width: 600px) { .lead-card header { display: grid; } .lead-card time { text-align: left; } }
+
+/* ── Space-light ────────────────────────────────────────────────────────────
+   `.paper-card` gives the card its paper, hairline and shadow; the ink of the
+   quiet lines is re-pointed at the light theme's own muted tokens. */
+.theme-space-light .lead-card header p,
+.theme-space-light .lead-card time,
+.theme-space-light .lead-intent { color: var(--muted); }
+.theme-space-light .lead-contact { border-top-color: var(--line); }
+.theme-space-light .lead-contact a { color: var(--teal-ink); }
+.theme-space-light .leads-error { background: var(--red-soft); color: var(--red-ink); }

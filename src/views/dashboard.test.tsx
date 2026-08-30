@@ -74,7 +74,7 @@ describe("dashboard", () => {
     expect(host.textContent).toContain("No open tasks.");
     expect(host.textContent).toContain("No upcoming deadlines.");
     expect(host.textContent).toContain("No upcoming meetings.");
-    expect(host.textContent).toContain("No issues assigned to you yet.");
+    expect(host.textContent).toContain("No tickets assigned to you yet.");
     expect(host.textContent).toContain("Your inbox is clear.");
     expect(host.textContent).toContain("Nobody is away right now.");
   });

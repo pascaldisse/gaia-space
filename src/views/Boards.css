@@ -8,20 +8,25 @@
 
 .boards-view { min-width: 0; }
 
-/* ── tier 1: which board ─────────────────────────────────────────────────── */
-.board-bar { display: flex; align-items: center; gap: 12px; padding-bottom: 10px; border-bottom: 1px solid var(--surface-border); margin-bottom: 12px; }
+/* ── tier 1: which board ───────────────────────────────────────────────────
+   `.board-bar` is GONE. It was a row with a hairline of its own directly under the
+   page header's, i.e. two separators for one introduction; its two halves now sit in
+   the shared `.page-actionbar` (New board / New sprint / New swimlane on the left,
+   the board tabs at the view-control end). ONE line per page, and it is the row's. */
 .board-tabs { display: flex; align-items: center; gap: 4px; min-width: 0; overflow-x: auto; scrollbar-width: thin; padding: 3px; background: var(--surface-sunken); border: 1px solid var(--surface-line); border-radius: var(--radius-control); }
 .board-tabs button { flex: none; background: transparent; border: 1px solid transparent; border-radius: var(--ctl-radius-sm); padding: 0.42em 0.85em; font-size: 13px; font-weight: 600; color: var(--text-faint); }
 .board-tabs button:hover { color: var(--text-strong); background: var(--surface-hover); border-color: transparent; }
 .board-tabs button.active { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-text); }
-.board-bar .bar-empty { padding: 0.42em 0.7em; font-size: 12.5px; color: var(--text-dim); }
-.board-bar .chip-wrap { margin-left: auto; }
+/* The tab strip is a view control on the action row: it may scroll, it must not
+   push the acts off the left of the line. */
+.page-actionbar > .actionbar-view-controls > .board-tabs { max-width: min(52vw, 620px); }
 
 /* ── tier 2: how this board is read ──────────────────────────────────────── */
 .board-viewbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 14px; }
+/* A chip group used to be a picker welded to a ＋ button, so the two halves gave up
+   their facing corners. The ＋ is an ACT and moved to the action row, so the picker
+   is a whole pill again and keeps all four. */
 .chip-group { display: flex; align-items: center; gap: 0; }
-.chip-group > .chip-select { border-top-right-radius: 0; border-bottom-right-radius: 0; }
-.chip-group > .chip-wrap > .chip-icon { border-top-left-radius: 0; border-bottom-left-radius: 0; margin-left: -1px; }
 
 .chip {
   display: inline-flex; align-items: center; gap: 7px;
@@ -54,7 +59,7 @@
   box-shadow: 0 18px 40px rgba(0,0,0,.45);
   animation: pop-in .12s ease-out;
 }
-.board-bar .popover, .board-viewbar > .chip-wrap:last-of-type .popover { left: auto; right: 0; }
+.board-viewbar > .chip-wrap:last-of-type .popover { left: auto; right: 0; }
 @keyframes pop-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) { .popover { animation: none; } }
 .pop-field { display: grid; gap: 5px; font-size: 12px; color: var(--text-muted); }
@@ -164,13 +169,10 @@
 .column-menu-map label { display: flex; align-items: center; gap: 7px; padding: 3px 0; }
 .column-menu-map i { width: 8px; height: 8px; border-radius: 50%; }
 
-/* ── matrix report: a disclosure, not a permanent table ─────────────────── */
-.board-report { margin-top: 18px; background: var(--surface); border: 1px solid var(--surface-border); border-radius: var(--radius-control); }
-.board-report > summary { cursor: pointer; list-style: none; padding: 11px 14px; font-family: var(--font-head); font-size: 12.5px; font-weight: 600; letter-spacing: .03em; color: var(--text-faint); }
-.board-report > summary::-webkit-details-marker { display: none; }
-.board-report > summary::before { content: "▸"; display: inline-block; margin-right: 8px; color: var(--text-dim); transition: transform .12s ease; }
-.board-report[open] > summary::before { transform: rotate(90deg); }
-.board-matrix { padding: 0 14px 14px; overflow-x: auto; }
+/* ── matrix report ──────────────────────────────────────────────────────────
+   The frame, the chevron and the sentence case are the shared Disclosure
+   (components/blocks.css). Only the table inside it is local. */
+.board-matrix { padding: 0; overflow-x: auto; }
 .board-matrix table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 12.5px; }
 .board-matrix th, .board-matrix td { padding: 6px 10px; border-bottom: 1px solid var(--surface-line); text-align: right; font-variant-numeric: tabular-nums; }
 .board-matrix thead th { color: var(--text-dim); font-weight: 600; }
@@ -185,3 +187,48 @@
   .board-column, .add-column { width: 232px; }
   .chip-select select { max-width: 120px; }
 }
+
+/* ── light theme: the board toolbar joins the control language (stage 9a) ────
+   Everything below is scoped to `.theme-space-light`; the dark board keeps the
+   boxed `--ctl-*` chips defined above, untouched.
+
+   The chips KEEP their visible words — "Sprint", "Lane", "Group". This is not
+   an oversight and not an exception to the floating-label sweep: that sweep
+   removes a caption the VALUE already gives you ("Project" above "Demo Project
+   (DEMO)"). Here the value does not give it to you — "No swimlane" and "No
+   grouping" are two different controls that read almost identically, and
+   "Sprint 4" alone does not say it is a filter. A caption that carries meaning
+   the value cannot is a label, not furniture. What changes is the SHAPE: same
+   height, same radius, same soft fill as every other control on the page. */
+.theme-space-light .chip {
+  min-height: var(--pillctl-h);
+  border: 1px solid transparent;
+  border-radius: var(--pillctl-r);
+  background: var(--wash-2);
+  color: var(--ink);
+  font-size: var(--pillctl-font);
+  font-weight: var(--pillctl-weight);
+}
+.theme-space-light .chip:hover { background: var(--paper); border-color: var(--line-strong); color: var(--ink); }
+.theme-space-light .chip > span { color: var(--muted); font-weight: 620; }
+.theme-space-light .chip > small { background: var(--paper); color: var(--muted); }
+.theme-space-light .chip-select select {
+  height: calc(var(--pillctl-h) - 8px);
+  background: transparent;
+  color: var(--ink);
+  font-size: var(--pillctl-font);
+  font-weight: var(--pillctl-weight);
+}
+.theme-space-light .chip-select select:hover { background-color: transparent; }
+/* Round like the rail `+`, not a lozenge. */
+.theme-space-light .chip-icon { width: var(--pillctl-h); color: var(--muted); }
+.theme-space-light .chip-primary,
+.theme-space-light .chip-toggle.active,
+.theme-space-light .chip[aria-expanded="true"] { background: var(--teal-soft); border-color: transparent; color: var(--teal-ink); }
+.theme-space-light .chip-primary:hover { background: var(--teal-soft); border-color: var(--teal); color: var(--teal-ink); }
+.theme-space-light .chip:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+/* The joined select+`+` pair: only the outer corners stay round. */
+.theme-space-light .board-tabs { background: var(--wash-2); border-color: transparent; border-radius: var(--pillctl-r); }
+.theme-space-light .board-tabs button { border-radius: var(--pillctl-r); color: var(--muted); font-weight: 650; }
+.theme-space-light .board-tabs button:hover { background: var(--paper); color: var(--ink); }
+.theme-space-light .board-tabs button.active { background: var(--teal-soft); border-color: transparent; color: var(--teal-ink); }

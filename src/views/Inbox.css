@@ -20,6 +20,8 @@
 .inbox-cats button { display: inline-flex; align-items: center; gap: 5px; font: inherit; font-size: 12px; color: #9aa3b8; background: var(--surface); border: 1px solid var(--surface-border); padding: 4px 10px; border-radius: 999px; cursor: pointer; transition: border-color .14s ease, color .14s ease, background .14s ease; }
 .inbox-cats button:hover { border-color: var(--surface-border-hover); color: var(--text-strong); }
 .inbox-cats button.on { color: var(--text-strong); background: var(--surface-hover); border-color: var(--surface-border-hover); }
+/* A count of 0 carries no tone (statusTone.ts::metricTone). */
+.inbox-cats em.zero { color: var(--text-dim); background: transparent; }
 .inbox-cats em { font-style: normal; font-size: 10.5px; color: #7fb8b0; background: #1f2740; padding: 0 6px; border-radius: 9px; margin-left: 1px; }
 
 /* Groups */
@@ -94,3 +96,26 @@
   .inbox-view { padding: 20px 16px; }
   .inbox-meta time { margin-left: 0; }
 }
+
+/* ── TWO STREAMS, TOLD APART BY WEIGHT ──────────────────────────────────────
+   The worklist keeps the lit, bordered rows above; the organisation feed sits
+   below as quieter, hairline-separated lines: it is read, never worked, so it
+   must not compete with the thing that actually needs a person.
+   STRUCTURE IS UNSCOPED on purpose — every colour below is a token the light
+   theme re-points, and scoping the geometry is what broke the dark layout
+   three times before. */
+.inbox-needs { display: grid; gap: 12px; }
+.inbox-org { margin-top: 30px; display: grid; gap: 10px; }
+.inbox-earlier { margin-top: 22px; }
+
+.inbox-feed { gap: 0; }
+.inbox-feed .inbox-feed-row { border: none; border-radius: 0; background: transparent; padding: 11px 4px; align-items: flex-start; gap: 11px; border-bottom: 1px solid var(--surface-border); }
+.inbox-feed .inbox-feed-row:last-child { border-bottom: none; }
+.inbox-feed .inbox-feed-row:hover { background: var(--surface-hover); }
+.inbox-feed .inbox-line { flex-wrap: wrap; gap: 5px; }
+.inbox-feed .inbox-line strong { font-size: 13.5px; }
+.inbox-verb { color: var(--text-dim); font-size: 13.5px; }
+.inbox-object { color: var(--text-strong); font-size: 13.5px; text-decoration: none; border-bottom: 1px solid transparent; }
+a.inbox-object:hover { border-bottom-color: var(--surface-border-hover); }
+.inbox-feed-detail { font-size: 11.5px; color: var(--text-faint); }
+.inbox-feed .inbox-ic { width: 26px; height: 26px; border-radius: 7px; }

@@ -1,11 +1,19 @@
 .packages-view { height: 100%; overflow: auto; display: flex; flex-direction: column; color: var(--text); }
+/* The create band was the ONE direct child not on this list, so it ran edge to
+   edge under a header that is inset by 30px — and its primary was clipped by
+   the window. It is a block on the page like the others; it gets the page's
+   gutter. Structure, so unscoped: dark was clipped in exactly the same way. */
 .packages-view > .packages-error,
 .packages-view > .packages-toolbar,
+.packages-view > .new-repo-form,
 .packages-view > .packages-body { padding-left: 30px; padding-right: 30px; }
 .packages-body { padding-bottom: 60px; }
 
 .packages-view textarea { font-family: ui-monospace, monospace; font-size: 12px; width: 100%; box-sizing: border-box; }
-.packages-view button { background: var(--ctl-bg-raised); border: 1px solid var(--surface-border); color: var(--text); border-radius: var(--ctl-radius-sm); padding: 5px 10px; cursor: pointer; }
+/* `:not(.dev-card)` because a card that happens to be a <button> is a CARD: this
+   blanket rule would otherwise repaint its frame, its radius and its padding and
+   the repository list would silently leave the one raster. */
+.packages-view button:not(.dev-card) { background: var(--ctl-bg-raised); border: 1px solid var(--surface-border); color: var(--text); border-radius: var(--ctl-radius-sm); padding: 5px 10px; cursor: pointer; }
 .packages-view button.primary { background: var(--accent); border-color: var(--accent); color: var(--brand-navy); }
 .packages-view button.ghost { background: transparent; }
 .packages-view button.ghost.small { padding: 2px 7px; font-size: 11px; }
@@ -15,16 +23,15 @@
 
 .packages-toolbar { margin-top: 16px; }
 .new-repo-open { display: inline-flex; align-items: center; gap: 6px; }
-.new-repo-form { padding: 12px 14px; border: 1px solid var(--surface-border); border-radius: 8px; background: var(--surface); display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; }
-.new-repo-form input.grow { flex: 1; min-width: 180px; }
+.new-repo-form { padding: 12px 14px; border: 1px solid var(--surface-border); border-radius: 8px; background: var(--surface); display: flex; align-items: center; gap: 10px; flex-wrap: wrap; box-sizing: border-box; }
+.new-repo-form input.grow, .new-repo-form .op-grow { flex: 1 1 180px; min-width: 180px; }
 .new-repo-form .field { display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: var(--text-muted); }
 
 .packages-body { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 18px; margin-top: 18px; }
 .repos-list .section-label { margin-bottom: 8px; }
-.repos-list ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-.repos-list li { border: 1px solid var(--surface-border); border-radius: 6px; padding: 8px 10px; background: var(--surface); cursor: pointer; display: flex; flex-direction: column; gap: 3px; }
-.repos-list li.active { border-color: var(--accent); background: var(--accent-soft); }
-.repos-list li.archived { opacity: 0.55; }
+/* The repository list is Knowledge's card in one column now (devCards.css):
+   the frame, the padding, the radius and the hover all live there, so nothing
+   about the row's geometry is restated here. */
 .repo-meta { color: var(--text-dim); font-size: 11px; }
 .repos-list li.active .repo-meta { color: #8fdccb; }
 .tag { color: var(--text-dim); font-size: 10px; border: 1px solid var(--surface-border); border-radius: 4px; padding: 0 5px; }
@@ -54,7 +61,7 @@
 .publish-row input { flex: 1; min-width: 140px; }
 
 .versions-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.versions-head .search { min-width: 220px; }
+.versions-head .search, .versions-head .quiet-search { min-width: 220px; flex: 0 1 260px; }
 .versions-table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 8px; }
 .versions-table th { text-align: left; color: var(--text-dim); font-size: 11px; text-transform: uppercase; padding: 4px 8px; border-bottom: 1px solid var(--surface-border); }
 .versions-table td { padding: 6px 8px; border-bottom: 1px solid var(--ctl-bg-raised); }
@@ -68,3 +75,6 @@
 .detail-list dt { font-weight: 600; opacity: 0.75; }
 .detail-list dd { margin: 0; }
 .detail-list ul { margin: 0; padding-left: 1rem; }
+
+/* NOTHING YET is a page lead, not a card in the narrow list column. */
+.packages-lead { padding: 0 30px 60px; max-width: 560px; }

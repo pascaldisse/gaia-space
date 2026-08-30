@@ -1,10 +1,9 @@
 import { createEffect, createResource, createSignal, For, Show, type JSX } from "solid-js";
 import { personalApi, type Follow } from "../api/personal";
 import { platformApi } from "../api/platform";
-import { calendarEntries, dateKey } from "../calendar";
+import { calendarEntries, dateKey, UI_LOCALE} from "../calendar";
 import MiniCalendar from "../components/MiniCalendar";
-import { ProfilePicker } from "../components/Pickers";
-import { WorkspaceHeader } from "../components/WorkspaceHeader";
+import PageHeader from "../components/PageHeader";
 import { DASHBOARD_WIDGETS, hiddenWidgets, loadDashboardPrefs, toggleWidget, widgetVisible } from "../dashboardPrefs";
 import { navigate } from "../router";
 import { humanError, profileId } from "../session";
@@ -18,13 +17,13 @@ const dayStart = (date = new Date()) =>
   new Date(date.getFullYear(), date.getMonth(), date.getDate());
 const stamp = (date: Date) => Math.floor(date.getTime() / 1000);
 const dayLabel = (seconds: number) =>
-  new Date(seconds * 1000).toLocaleDateString(undefined, {
+  new Date(seconds * 1000).toLocaleDateString(UI_LOCALE, {
     weekday: "short",
     month: "short",
     day: "numeric",
   });
 const timeLabel = (seconds: number) =>
-  new Date(seconds * 1000).toLocaleTimeString(undefined, {
+  new Date(seconds * 1000).toLocaleTimeString(UI_LOCALE, {
     hour: "2-digit",
     minute: "2-digit",
   });
@@ -87,9 +86,10 @@ const [dashboard, { refetch: refetchDashboard }] = createResource(
 
   return (
     <section class="dashboard-view">
-      <WorkspaceHeader icon="home" title="Overview" actions={<ProfilePicker locked />}>
-        Your work, calendar, notification feed, and organization availability.
-      </WorkspaceHeader>
+      {/* Superseded by Home and kept for continuity (reachable under "More"), so this
+         view gets the sweep and nothing more: no second identity control (L1), no
+         teal lozenge with a geometric character in it (L4). */}
+      <PageHeader icon="home" title="Overview" subline="Today at a glance — what is due, what is waiting and what changed." />
       <Show when={actionError()}>
         <p class="dashboard-error" role="alert">{actionError()}</p>
       </Show>
@@ -117,8 +117,7 @@ const [dashboard, { refetch: refetchDashboard }] = createResource(
           <section class="today-next">
             <header class="tn-head">
               <div class="tn-title">
-                <span class="tn-icon">◷</span>
-                <div><h2>Today & next</h2><p>Work requiring your attention.</p></div>
+                <div><h2>Today & next</h2></div>
               </div>
             </header>
             <div class="tn-grid">
@@ -152,7 +151,7 @@ const [dashboard, { refetch: refetchDashboard }] = createResource(
 
           <Show when={widgetVisible("calendar")}>
           <section class="calendar-overview">
-            <header class="co-head"><div class="co-title"><span class="co-icon">□</span><div><h2>Calendar</h2><p>Your rolling schedule.</p></div></div></header>
+            <header class="co-head"><div class="co-title"><div><h2>Calendar</h2></div></div></header>
             <div class="co-body">
               <MiniCalendar cursor={cursor()} items={items()} selected={selected()} onPrev={() => move(-1)} onNext={() => move(1)} onToday={() => { setCursor(dayStart()); setSelected(undefined); }} onPick={setSelected} />
               <aside class="co-agenda">
@@ -166,9 +165,9 @@ const [dashboard, { refetch: refetchDashboard }] = createResource(
           </section>
           </Show>
 
-          <section class="ov-section"><header><h2>Following</h2><span class="ov-count">{follows()?.length ?? 0}</span></header><div class="ov-cards"><p class="ov-empty">Follow people and teams to personalize your overview signals.</p><For each={(followProfiles() ?? []).filter(p => p.id !== profileId() && !p.archived).slice(0, 6)}>{person => <button class="ghost" aria-pressed={followsSubject("profile", person.id)} onClick={() => void toggleFollow("profile", person.id)}>{followsSubject("profile", person.id) ? "Following" : "Follow"} {person.display_name}</button>}</For><For each={(followTeams() ?? []).filter(team => !team.archived).slice(0, 6)}>{team => <button class="ghost" aria-pressed={followsSubject("team", team.id)} onClick={() => void toggleFollow("team", team.id)}>{followsSubject("team", team.id) ? "Following" : "Follow"} {team.name}</button>}</For></div></section>
+          <section class="ov-section"><header><h2>Following</h2><span class="ov-count">{follows()?.length ?? 0}</span></header><div class="ov-cards"><Show when={!follows()?.length}><p class="ov-empty">Follow people and teams to personalize your overview signals.</p></Show><For each={(followProfiles() ?? []).filter(p => p.id !== profileId() && !p.archived).slice(0, 6)}>{person => <button class="ghost" aria-pressed={followsSubject("profile", person.id)} onClick={() => void toggleFollow("profile", person.id)}>{followsSubject("profile", person.id) ? "Following" : "Follow"} {person.display_name}</button>}</For><For each={(followTeams() ?? []).filter(team => !team.archived).slice(0, 6)}>{team => <button class="ghost" aria-pressed={followsSubject("team", team.id)} onClick={() => void toggleFollow("team", team.id)}>{followsSubject("team", team.id) ? "Following" : "Follow"} {team.name}</button>}</For></div></section>
 <div class="dashboard-grid">
-            <Show when={widgetVisible("issues")}><DashboardSection title="Assigned issues" count={data().assigned_issues.length} empty="No issues assigned to you yet." target="Issues">
+            <Show when={widgetVisible("issues")}><DashboardSection title="Assigned tickets" count={data().assigned_issues.length} empty="No tickets assigned to you yet." target="Issues">
               <For each={data().assigned_issues}>{(issue) => <article class="ov-card"><strong class="ov-card-title">#{issue.number} {issue.title}</strong><Show when={issue.due_date}><span class="ov-tag due">Due {issue.due_date}</span></Show></article>}</For>
             </DashboardSection></Show>
             <Show when={widgetVisible("inbox")}><DashboardSection title="Inbox" count={data().unread_notifications.length} empty="Your inbox is clear." target="Inbox">

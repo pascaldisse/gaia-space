@@ -2,7 +2,9 @@ import { For, Show, createMemo, createSignal, createUniqueId, onCleanup, onMount
 import type { JSX } from "solid-js";
 import { Avatar } from "./Avatar";
 import { Icon, type IconName } from "./Icon";
+import DateField from "./DateField";
 import "./TaskMeta.css";
+import { UI_LOCALE } from "../calendar";
 
 /**
  * One shell for every piece of metadata a task carries. The three composer
@@ -72,8 +74,10 @@ export type MetaPerson = { id: string; label: string; sub?: string };
 /** Project chooser — one project or none (a personal task). */
 export function ProjectControl(props: { value: string; projects: MetaProject[]; onChange: (id: string) => void }) {
   const selected = createMemo(() => props.projects.find(project => project.id === props.value));
+  // The mark of a PROJECT is the rail's own layers glyph — `grid` was a generic
+  // placeholder that said nothing about the thing it stands for.
   return (
-    <MetaControl icon="grid" label="Project" placeholder="No project — personal"
+    <MetaControl icon="layers" label="Project" placeholder="No project — personal"
       value={selected()?.name} set={Boolean(props.value)} menuLabel="Choose project">
       {close => (
         <ul class="tm-list" role="listbox" aria-label="Project">
@@ -104,7 +108,7 @@ export const readableDate = (iso: string) => {
   if (!iso) return "";
   const parsed = new Date(iso + "T00:00:00");
   if (Number.isNaN(parsed.getTime())) return iso;
-  return parsed.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+  return parsed.toLocaleDateString(UI_LOCALE, { weekday: "short", month: "short", day: "numeric" });
 };
 export const isoInDays = (days: number, from = new Date()) => {
   const day = new Date(from);
@@ -127,14 +131,55 @@ export function DueDateControl(props: { value: string; onChange: (iso: string) =
                 onMouseDown={event => { event.preventDefault(); props.onChange(iso); close(); }}>{label}</button>}
             </For>
           </div>
-          <label class="tm-date-field">
-            <span class="tm-date-caption">Pick a date</span>
-            <input type="date" aria-label="Due date" value={props.value} onInput={event => props.onChange(event.currentTarget.value)} />
-          </label>
+          {/* The product's own month grid, not the operating system's (DateField). */}
+          <div class="tm-date-field">
+            <DateField label="Due date" value={props.value} onChange={value => { props.onChange(value); if (value) close(); }} placeholder="Pick a date" />
+          </div>
           <Show when={props.value}>
             <button type="button" class="tm-clear" onMouseDown={event => { event.preventDefault(); props.onChange(""); close(); }}>Clear due date</button>
           </Show>
         </div>
+      )}
+    </MetaControl>
+  );
+}
+
+/**
+ * Category chooser — what KIND of act this task is. Optional by design: most tasks
+ * never get one, and a task without a category must never look unfinished, so the
+ * resting state is a plain "No category" and the control offers a way back to it.
+ *
+ * The list is CLOSED and lives in one place (`api/personal`), shared with the server
+ * that validates it. A free text field here would produce "Review", "review" and
+ * "Reviewing" within a week and no two of them would group together.
+ */
+export function CategoryControl(props: {
+  value: string;
+  options: readonly { id: string; label: string }[];
+  onChange: (id: string) => void;
+}) {
+  const selected = createMemo(() => props.options.find(option => option.id === props.value));
+  return (
+    <MetaControl icon="tag" label="Category" placeholder="No category"
+      value={selected()?.label} set={Boolean(props.value)} menuLabel="Choose category">
+      {close => (
+        <ul class="tm-list" role="listbox" aria-label="Category">
+          <li role="option" aria-selected={props.value === ""}
+            classList={{ "tm-opt": true, selected: props.value === "" }}
+            onMouseDown={event => { event.preventDefault(); props.onChange(""); close(); }}>
+            <span class="tm-opt-text"><span class="tm-opt-name">No category</span></span>
+            <Show when={props.value === ""}><span class="tm-check" aria-hidden="true"><Icon name="check" size={13} /></span></Show>
+          </li>
+          <For each={props.options}>{option =>
+            <li role="option" aria-selected={option.id === props.value}
+              classList={{ "tm-opt": true, selected: option.id === props.value }}
+              onMouseDown={event => { event.preventDefault(); props.onChange(option.id); close(); }}>
+              <span class={`tm-cat-dot cat-${option.id}`} aria-hidden="true" />
+              <span class="tm-opt-text"><span class="tm-opt-name">{option.label}</span></span>
+              <Show when={option.id === props.value}><span class="tm-check" aria-hidden="true"><Icon name="check" size={13} /></span></Show>
+            </li>}
+          </For>
+        </ul>
       )}
     </MetaControl>
   );
@@ -148,8 +193,16 @@ export function DueDateControl(props: { value: string; onChange: (iso: string) =
 export function AssigneeControl(props: {
   value: string[]; people: MetaPerson[]; onToggle: (id: string) => void;
   disabled?: boolean; disabledReason?: string; emptyNote?: string;
+  /** NAMING IS NOT THE SAME QUESTION AS ASSIGNING. `people` is who you MAY assign —
+   *  the project's members — but a task already assigned to somebody outside that
+   *  list (a personal task, or a member since removed) still has to say WHO. Without
+   *  this resolver the control fell back to the raw `profile-19fe6e19f53`, while the
+   *  chip row beside it read "Jannes": one fact, two answers, one of them a database
+   *  key shown to a person. */
+  nameOf?: (id: string) => string;
 }) {
-  const names = createMemo(() => props.value.map(id => props.people.find(person => person.id === id)?.label ?? id));
+  const names = createMemo(() => props.value.map(id =>
+    props.people.find(person => person.id === id)?.label ?? props.nameOf?.(id) ?? id));
   const summary = createMemo(() => {
     const list = names();
     if (!list.length) return "";

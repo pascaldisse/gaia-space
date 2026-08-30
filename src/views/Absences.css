@@ -54,6 +54,15 @@
 .timeoff-empty-card h2 { margin: 0; font-size: 17px; font-weight: 650; color: #e6e8ee; }
 .timeoff-empty-card p { max-width: 560px; margin: 0; color: var(--text-muted); line-height: 1.5; }
 .timeoff-empty-cta { margin-top: 4px; display: inline-flex; align-items: center; gap: 6px; }
+/* One column while empty — the rail summarises records, and there are none.
+
+   THE 640px CAP IS GONE. It was meant to keep the lead "where reading starts", but
+   `EmptyState` centres itself (`justify-items: center; text-align: center`), so the
+   cap did not left-align anything: it centred a 423px box inside a 640px column that
+   was itself pinned left, landing the whole thing off-centre on a 1282px page —
+   aligned to neither edge nor middle. Every other surface lets the same component
+   centre across the page's own measure; this one now does too. */
+.timeoff-onboarding { display: block; }
 .timeoff-onboarding .view-main { display: grid; gap: 0; align-content: start; }
 .timeoff-onboarding .rail-card + .rail-card { margin-top: 12px; }
 
@@ -61,12 +70,19 @@
    upcoming conflicts, and approvals before the complete record. */
 .availability-board { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .availability-panel { min-width: 0; padding: 15px 16px; border: 1px solid var(--surface-border); border-radius: 14px; background: var(--surface); }
-.availability-panel.now { border-top: 3px solid var(--accent); }
-.availability-panel.upcoming { border-top: 3px solid var(--status-warning-ink); }
-.availability-panel.pending { border-top: 3px solid var(--status-info-ink); }
+/* THE ZERO RULE ON A TONED SURFACE (stage 11, defect 3). The accent is keyed to
+   the TONE the view computed through statusTone.metricTone, never to the panel's
+   identity — so a panel counting 0 has no class here and therefore no accent.
+   A count of zero is not an alarm. */
+.availability-panel.teal { border-top: 3px solid var(--status-info-ink); }
+.availability-panel.amber { border-top: 3px solid var(--status-warning-ink); }
+.availability-panel.red { border-top: 3px solid var(--status-danger-ink); }
 .availability-panel-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 11px; }
 .availability-panel h2 { margin: 0; color: var(--text-strong); font-size: 13px; font-weight: 600; }
-.availability-panel-head > span { display: grid; place-items: center; min-width: 22px; height: 22px; padding: 0 7px; border-radius: 999px; background: var(--surface-hover); color: var(--accent-text); font-family: var(--font-head); font-size: 11px; font-weight: 650; }
+.availability-panel-head > span { display: grid; place-items: center; min-width: 22px; height: 22px; padding: 0 7px; border-radius: 999px; background: var(--surface-hover); color: var(--text-muted); font-family: var(--font-head); font-size: 11px; font-weight: 650; }
+/* The counter borrows the panel's tone, and only when the panel has one. */
+.availability-panel.teal .availability-panel-head > span { color: var(--status-info-ink); }
+.availability-panel.amber .availability-panel-head > span { color: var(--status-warning-ink); }
 .availability-panel p { margin: 0; color: var(--text-faint); font-size: 12px; line-height: 1.5; }
 .availability-panel ul { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
 .availability-panel li { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
@@ -126,3 +142,55 @@
   .timeoff-row { grid-template-columns: 4px 1fr; }
   .timeoff-row-actions { grid-column: 2; justify-content: flex-start; }
 }
+
+/* ══ Space-light skin ══════════════════════════════════════════════════════
+   THE MISSING SHEET. Every other view has had one since stage 6; Time off had
+   none, which is precisely why the owner said this area "still looks like the
+   old version" — it was rendering App.css's dark geometry with light tokens
+   swapped in underneath. This block does nothing but restate the paper
+   language of components/paper.css for the surfaces this view owns.
+
+   COLOUR ONLY. Not one size, position or display lives in here: the dark
+   grouped/flat layouts never set .theme-space-light, and scoping structure is
+   what broke them in three earlier lanes. */
+
+.theme-space-light .timeoff-view { background: var(--wash); color: var(--ink); }
+
+/* Cards: paper on the wash, one hairline, the paper-card shadow and radius. */
+.theme-space-light :is(.availability-panel, .rail-card, .timeoff-form, .timeoff-row) {
+  border-color: var(--line);
+  border-radius: 20px;
+  background: var(--paper);
+  box-shadow: 0 16px 36px rgba(31, 35, 40, .06);
+}
+.theme-space-light .timeoff-row:hover { border-color: var(--line-strong); background: var(--wash); }
+.theme-space-light .availability-panel h2 { color: var(--ink); font-weight: 700; }
+.theme-space-light .availability-panel p { color: var(--quiet); }
+.theme-space-light .availability-panel li strong { color: var(--ink); }
+.theme-space-light .availability-panel li span { color: var(--muted); }
+.theme-space-light .availability-panel-head > span { background: var(--wash-2); }
+
+/* The rail heading speaks in the section voice, not in a shouted kicker: the
+   OVERVIEW lockup was the loudest type on a screen of zeros. */
+.theme-space-light .rail-card > h3 {
+  font-size: 13.5px;
+  font-weight: 700;
+  letter-spacing: -.01em;
+  text-transform: none;
+  color: var(--ink);
+}
+.theme-space-light .rail-card > h3 .rail-count { color: var(--muted); }
+.theme-space-light .rail-empty { color: var(--quiet); }
+.theme-space-light .timeoff-records-head h2 { color: var(--ink); font-size: 17px; font-weight: 720; letter-spacing: -.025em; }
+.theme-space-light .timeoff-records-head span { color: var(--quiet); }
+.theme-space-light .timeoff-reason { color: var(--ink); }
+.theme-space-light .timeoff-row-meta, .theme-space-light .timeoff-person { color: var(--muted); }
+.theme-space-light .timeoff-loading { color: var(--quiet); }
+
+/* Status pills join the paper pill family (components/paper.css .paper-pill):
+   sentence case, soft fill, no border. Colour law only — nothing else. */
+.theme-space-light .pill { text-transform: none; font-size: 12px; letter-spacing: 0; padding: 3px 9px; }
+.theme-space-light .pill-current { background: var(--teal-soft); color: var(--teal-ink); }
+.theme-space-light .pill-upcoming, .theme-space-light .pill-pending { background: var(--amber-soft); color: var(--amber-ink); }
+.theme-space-light .pill-past { background: var(--wash-2); color: var(--muted); }
+.theme-space-light .pill-approved { background: var(--wash-2); color: var(--muted); }

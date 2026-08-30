@@ -7,11 +7,13 @@
 .ph-muted { color: var(--text-dim); }
 .ph-empty { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 8px; padding: 36px 28px; border: 1px dashed var(--surface-border-hover); background: var(--surface); color: #a3a9b5; border-radius: 12px; max-width: 520px; margin: 24px auto; }
 
+/* The tiles are the shared MetricTile (components/blocks.css); only how many
+   fit on a row lives here. */
 .ph-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 12px; margin-bottom: 22px; max-width: 1000px; }
-.ph-stat { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 14px 16px; background: var(--surface); border: 1px solid var(--surface-border); border-radius: 10px; text-align: left; }
-.ph-stat:hover { border-color: var(--accent); }
-.ph-stat-num { font-family: var(--font-head); font-size: 24px; font-weight: 650; color: var(--text-strong); }
-.ph-stat-label { font-size: 12px; color: var(--text-muted); }
+
+/* Lead line: informational only — it is a name, never a control. */
+.ph-lead { margin: 0 0 16px; color: var(--text-muted); font-size: 13px; }
+.ph-lead strong { color: var(--text-strong); margin-left: 6px; }
 
 .ph-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; max-width: 1000px; }
 .ph-card { background: var(--surface); border: 1px solid var(--surface-border); border-radius: 10px; padding: 16px 18px; }
@@ -25,6 +27,9 @@
 .ph-list strong { color: var(--text-strong); font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
 .ph-list small { color: var(--text-dim); font-size: 11px; white-space: nowrap; }
 .ph-list time { color: var(--text-dim); font-size: 11px; white-space: nowrap; }
+/* "n more tasks →" under the preview: the list is a preview and admits it. */
+.ph-more { margin: 8px 0 0; }
+
 .ph-num { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--accent-text); font-size: 12px; flex: none; }
 
 /* Project deadline banner on the overview — tone by urgency, opens the calendar. */

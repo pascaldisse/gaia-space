@@ -1,9 +1,18 @@
 import { invoke } from "@tauri-apps/api/core";
+import { openUrl } from "@tauri-apps/plugin-opener";
 
+// `source_entity_*` is where the date came from, e.g. ("message", <id>) for one
+// arranged in a channel; send both halves or neither (`chatApi.resolveSourceRef` reads it back).
 // `video_room_id`/`join_url` are read-only here: the native join path writes them and
 // `update_meeting` ignores them, so the webview cannot repoint a call at another room.
 export type VideoStatus = "scheduled"|"live"|"ended"|"cancelled";
-export type Meeting = { id:string; title:string; description:string|null; starts_at:number; ends_at:number; rrule:string|null; location:string|null; organizer_id:string|null; channel_id:string|null; visibility:"public"|"private"|"participants"; modification_preference:"organizer-only"|"participants"; archived:boolean; video_provider:"livekit"|null; video_room_id:string|null; join_url:string|null; video_status:VideoStatus; video_started_at:number|null; video_ended_at:number|null; video_ended_by:string|null };
+// `meeting_url` is the EXTERNAL link a person pasted (Google Meet, Zoom, Teams). It is
+// writable from the composer, unlike `join_url` above, and the two never merge: a native
+// LiveKit join would otherwise overwrite the address somebody typed.
+// OPTIONAL on the way in, mirroring `#[serde(default)]` on the Rust struct: a surface that
+// creates a date without an external link (the calendar's day composer, a meeting minted
+// out of a work item) simply omits it, and the row is stored with no link.
+export type Meeting = { id:string; title:string; description:string|null; starts_at:number; ends_at:number; rrule:string|null; location:string|null; organizer_id:string|null; channel_id:string|null; visibility:"public"|"private"|"participants"; modification_preference:"organizer-only"|"participants"; archived:boolean; video_provider:"livekit"|null; video_room_id:string|null; join_url:string|null; meeting_url:string|null; video_status:VideoStatus; video_started_at:number|null; video_ended_at:number|null; video_ended_by:string|null; source_entity_type:string|null; source_entity_id:string|null };
 export type MeetingParticipant = { meeting_id:string; profile_id:string; status:"invited"|"accepted"|"declined" };
 export type MeetingRoom = { id:string; name:string; location:string|null; capacity:number; archived:boolean; equipment:string[] };
 export type MeetingAvailability = { rooms: Array<MeetingRoom & { available:boolean }>; conflicts: Array<{ kind:"room"|"meeting"|"absence"; profile_id:string|null; meeting_id:string|null; room_id:string|null; message:string }>; suggestions: MeetingRoom[] };
@@ -17,6 +26,24 @@ export type LivekitStatus = { running:boolean; url:string; pid:number|null };
 // recording is refused (fail-closed) and `reason` says why, so the UI can say so too.
 export type RecordingActorStatus = { available:boolean; profile_id:string|null; source:"environment"|"sole_profile"|null; reason:string|null };
 const call = <T>(command:string, args:Record<string, unknown> = {}) => invoke<T>(command, args);
+
+/** The ONE rule an external meeting link has to obey, stated once and shared by the
+ *  composer, the detail pane and the Join affordance: it is a web address. Mirrors
+ *  `meetings::normalize_meeting_url` in Rust, which refuses anything else on write —
+ *  the client check exists to SAY SO EARLY, not to be the only guard. */
+export const meetingLinkError = (raw:string|null|undefined):string => {
+  const value = (raw ?? "").trim();
+  if (!value) return "";
+  if (!/^https?:\/\//i.test(value)) return "Meeting link must start with http:// or https://";
+  if (!/^https?:\/\/[^/\s]+/i.test(value)) return "Meeting link is missing its address after http:// or https://";
+  return "";
+};
+export const hasMeetingLink = (meeting:Pick<Meeting,"meeting_url">):boolean => !meetingLinkError(meeting.meeting_url) && !!meeting.meeting_url?.trim();
+/** Desktop join. `window.open` would open the call INSIDE the webview, which is a
+ *  browser without a URL bar, an account session, or camera permissions — so the
+ *  desktop hands the URL to the operating system's default browser instead. The web
+ *  build never calls this: there a link is already a link (`target="_blank"`). */
+export const openMeetingLink = (url:string) => openUrl(url.trim());
 
 export const meetingsApi = {
   // Every read carries the acting profile. The web transport overwrites it with

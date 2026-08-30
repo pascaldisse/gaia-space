@@ -138,7 +138,7 @@ test("App(online=false) mounts the shell directly: no login, no auth request", a
   expect(host.querySelector(".login")).toBeNull();
   expect(host.textContent).not.toContain("Sign in");
   expect(host.querySelector(".space-shell-loading")).toBeNull(); // gate not pending
-  expect(host.querySelector(".space-shell")).not.toBeNull();
+  expect(host.querySelector(".space-chat-shell")).not.toBeNull();
   expect(authChecked()).toBe(true);
 });
 
@@ -147,7 +147,7 @@ test("App(online=true) in a browser gates on login and asks the server who I am"
   const host = mount(true);
   await settle();
   expect(auth.length).toBe(1);
-  expect(host.querySelector(".space-shell")).toBeNull();
+  expect(host.querySelector(".space-chat-shell")).toBeNull();
   expect(host.querySelector("input[type=password]")).not.toBeNull(); // the login form
 });
 

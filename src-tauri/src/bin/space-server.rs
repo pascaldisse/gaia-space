@@ -9,7 +9,8 @@ use axum::{
     Json, Router,
 };
 use gaia_space_lib::{
-    app_rights, applications, blogs, calendar_feeds, calls, channel_feeds, chat, chatbot, db,
+    app_rights, applications, blogs, calendar_feeds, calls, channel_feeds, channel_notes, chat,
+    chatbot, db,
     devenv, documents, events, issues, leads, meetings, oauth, organization, package_registry,
     payload_dispatch, personal, pipelines, platform, review,
 };
@@ -704,6 +705,9 @@ async fn app_create_issue(
         due_date: None,
         priority: None,
         archived: None,
+        // The application API has no conversation to point back at.
+        source_entity_type: None,
+        source_entity_id: None,
     })
     .map(Json)
     .map_err(|e| err(StatusCode::BAD_REQUEST, &e).into_response())
@@ -907,6 +911,8 @@ async fn app_create_room(
         video_started_at: None,
         video_ended_at: None,
         video_ended_by: None,
+        source_entity_type: None,
+        source_entity_id: None,
     };
     meetings::create_meeting(room.clone())
         .map_err(|message| err(StatusCode::BAD_REQUEST, &message).into_response())?;
@@ -2373,6 +2379,21 @@ fn todo_owned_by(profile_id: &str, todo_id: &str) -> bool {
         .flatten()
         .is_some_and(|owner| owner == profile_id)
 }
+/// A task filed in a project answers to that project's owner as well as its author.
+fn todo_project_owned_by(profile_id: &str, todo_id: &str) -> bool {
+    db::conn()
+        .ok()
+        .and_then(|c| {
+            c.query_row(
+                "SELECT EXISTS(SELECT 1 FROM todos t JOIN projects p ON p.id=t.project_id \
+                 WHERE t.id=?1 AND p.created_by=?2)",
+                rusqlite::params![todo_id, profile_id],
+                |row| row.get::<_, bool>(0),
+            )
+            .ok()
+        })
+        .unwrap_or(false)
+}
 fn calendar_feed_owned_by(profile_id: &str, feed_id: &str) -> bool {
     calendar_feeds::feed_owner(feed_id)
         .ok()
@@ -2447,10 +2468,23 @@ enum CommandPolicy {
     TodoRead,
     TodoCreate,
     TodoOwnerWrite,
+    /// Deleting a task: author, project owner or admin. The library owns the rule; the
+    /// gate only binds `actor_id` to the session identity.
+    TodoOwnerDelete,
     TodoCompletionWrite,
+    /// The channel Notes & Decisions log. Read and write share one posture: the session
+    /// identity is rebound onto the request (`bind_session_identity` already covers
+    /// `profile_id`/`author_id`), and `channel_notes.rs` then applies project membership
+    /// for reads and appends, authorship for edits and deletes. The chokepoint's own job
+    /// is only to refuse an id-only write whose author cannot be resolved.
+    ChannelNoteRead,
+    ChannelNoteWrite,
     NotificationWrite,
     ProjectCreate,
     ProjectWrite,
+    /// Destroying a project: owner or admin only, and the acting identity is bound to
+    /// the session so nobody deletes under another person's name.
+    ProjectDelete,
     ProjectRead,
     ProjectMemberWrite,
     PipelineScriptWrite,
@@ -2468,6 +2502,10 @@ enum CommandPolicy {
     DocumentRead,
     DocumentWrite,
     DocumentOwnerWrite,
+    /// Deleting a document/folder: ownership, not write access, and the session decides
+    /// who is acting.
+    DocumentOwnerDelete,
+    DocumentFolderDelete,
     DocumentAccessWrite,
     DocumentFolderCreate,
     DocumentFolderReadList,
@@ -2502,13 +2540,16 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
     Some(match name {
         "create_project" => CommandPolicy::ProjectCreate,
         "update_project" => CommandPolicy::ProjectWrite,
+        "delete_project" => CommandPolicy::ProjectDelete,
         "create_board" | "create_issue" | "clone_issue" | "move_issue_to_project" | "create_issue_status" => {
             CommandPolicy::ProjectMemberWrite
         }
         "get_project" | "list_boards" | "list_issue_statuses" | "project_dashboard_aggregate" => CommandPolicy::ProjectRead,
-        // Lead is informational only. Its write uses the established owner-or-admin gate;
-        // no access decision may inspect `projects.lead_id`.
-        "set_project_deadline" | "update_project_deadline" | "set_project_lead" => CommandPolicy::ProjectDeadlineWrite,
+        // The lead is informational, but *editing* the project field is the same
+        // owner-or-admin door as the deadline. It grants the lead nothing.
+        "set_project_deadline" | "update_project_deadline" | "set_project_lead" => {
+            CommandPolicy::ProjectDeadlineWrite
+        }
         "list_todos" | "dashboard_aggregate" | "get_dashboard_preferences" => CommandPolicy::TodoRead,
         "set_dashboard_preferences" => CommandPolicy::DashboardPreferencesWrite,
         "set_calendar_options" => CommandPolicy::CalendarOptionsWrite,
@@ -2520,12 +2561,19 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         "delete_calendar" => CommandPolicy::CalendarOwnerAction,
         "save_calendar_feed" => CommandPolicy::CalendarFeedUpsert,
         "delete_calendar_feed" | "sync_calendar_feed" => CommandPolicy::CalendarFeedOwnerAction,
-        "list_project_todos" | "list_team_todos" | "list_project_member_ids" => CommandPolicy::ProjectTodoRead,
+        "list_project_todos" | "list_team_todos" | "list_project_member_ids" => {
+            CommandPolicy::ProjectTodoRead
+        }
         "create_todo" => CommandPolicy::TodoCreate,
-        "update_todo" | "delete_todo" | "postpone_todo" | "convert_todo_to_issue" => {
+        "update_todo" | "postpone_todo" | "convert_todo_to_issue" => {
             CommandPolicy::TodoOwnerWrite
         }
+        "delete_todo" => CommandPolicy::TodoOwnerDelete,
         "set_todo_completion" => CommandPolicy::TodoCompletionWrite,
+        "list_channel_notes" => CommandPolicy::ChannelNoteRead,
+        "create_channel_note" | "update_channel_note" | "delete_channel_note" => {
+            CommandPolicy::ChannelNoteWrite
+        }
         "mark_notification_read" => CommandPolicy::NotificationWrite,
         "create_absence" | "update_absence" | "delete_absence" => CommandPolicy::AbsenceWrite,
         "create_meeting" => CommandPolicy::SessionIdentityWrite,
@@ -2550,7 +2598,8 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "add_review_participant"
         | "add_team_membership"
         | "archive_cf_definition" => CommandPolicy::Session,
-        "archive_document" | "delete_document" => CommandPolicy::DocumentOwnerWrite,
+        "archive_document" => CommandPolicy::DocumentOwnerWrite,
+        "delete_document" => CommandPolicy::DocumentOwnerDelete,
         "archive_meeting" | "attach_meeting_channel" | "delete_meeting" => CommandPolicy::MeetingWrite,
         "archive_issue" | "archive_role" | "archive_sprint" | "archive_team" => {
             CommandPolicy::Session
@@ -2592,7 +2641,9 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "delete_checklist_item"
         | "delete_deploy_target"
         | "delete_issue_status"
-        | "delete_message" | "set_message_pinned" => CommandPolicy::Session,
+        // `delete_channel` passes here and is then gated below by Channel.ManageChannel
+        // at the channel's own scope, exactly like every other channel write.
+        | "delete_message" | "set_message_pinned" | "delete_channel" => CommandPolicy::Session,
         // Drafts and typing beats are caller-scoped: `bind_session_identity` rewrites
         // `author_id`/`profile_id`, and the channel ACL check below still applies.
         "save_message_draft"
@@ -2632,6 +2683,9 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "evaluate_quality_gate" => CommandPolicy::Session,
         "expand_meeting_occurrences" => CommandPolicy::MeetingReadList,
         "get_channel" | "get_channel_by_entity" | "ensure_thread_channel" | "get_profile_email_status" => CommandPolicy::Session,
+        // Resolving a work item's source anchor reads channel/author/excerpt metadata
+        // the caller already sees in the channel it points at; it creates nothing.
+        "resolve_source_ref" => CommandPolicy::Session,
         "get_issue" | "get_issue_detail" | "list_issues" => CommandPolicy::IssueRead,
         "list_issue_assignees" | "set_issue_assignees" => CommandPolicy::IssueAssign,
         "add_project_member" | "remove_project_member" => CommandPolicy::ProjectMemberAdmin,
@@ -2654,7 +2708,9 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         "list_cf_definitions" | "list_channel_members" | "list_locations" | "location_channel" | "list_desk_assignments" | "save_desk_assignment" | "remove_desk_assignment" | "list_meeting_rooms" | "reserve_meeting_room" | "save_location" | "meeting_availability" | "attach_document_discussion" | "get_document_discussion" | "import_document_folder" | "save_channel_subscription" | "list_channel_subscriptions" | "ensure_project_document_root" => CommandPolicy::Session,
         "search_book_documents" => CommandPolicy::BookRead,
         "list_book_access" | "update_book_access" => CommandPolicy::BookManage,
+        "list_book_owners" => CommandPolicy::BookRead,
         "list_channels_with_meta"
+        | "list_unread_threads"
         | "list_checklist_items"
         | "list_checklists"
         | "list_deploy_targets"
@@ -2782,6 +2838,7 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         "move_issue_on_board" | "remove_channel_member" => CommandPolicy::Session,
         "move_document" => CommandPolicy::DocumentOwnerWrite,
         "move_document_folder" => CommandPolicy::DocumentFolderWrite,
+        "delete_document_folder" => CommandPolicy::DocumentFolderDelete,
         "remove_issue_from_board"
         | "remove_issue_link"
         | "remove_reaction"
@@ -3248,6 +3305,23 @@ fn authorize_command(
             }
             Ok(())
         }
+        CommandPolicy::ProjectDelete => {
+            // Same owner-or-admin door as every other project write, and the acting
+            // identity comes from the session: the body may name an `actor_id`, it is
+            // overwritten before the library re-checks the very same rule.
+            let project_id: String = arg(body, "id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
+            let owner = project_owner(&project_id)
+                .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?
+                .ok_or_else(|| err(StatusCode::FORBIDDEN, "project access denied"))?;
+            if user.role != "GlobalAdmin" && owner != user.profile_id {
+                return Err(err(
+                    StatusCode::FORBIDDEN,
+                    "only the project owner or an admin can delete this project",
+                ));
+            }
+            put_arg(body, "actor_id", json!(user.profile_id));
+            Ok(())
+        }
         CommandPolicy::ProjectWrite => {
             let (project_id, _) =
                 project_from_body(body).map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
@@ -3635,6 +3709,36 @@ fn authorize_command(
             put_arg(body, "profile_id", json!(user.profile_id));
             Ok(())
         }
+        // Reads: the channel id is the scope and `channel_notes::list_channel_notes`
+        // refuses a non-member outright, so there is nothing left to decide here beyond
+        // pinning the reader to their own session — which the rebinding above already did.
+        CommandPolicy::ChannelNoteRead => {
+            put_arg(body, "profile_id", json!(user.profile_id));
+            Ok(())
+        }
+        // Writes: membership (append) and authorship (edit/delete) are enforced in Rust
+        // against the STORED row, never against the payload, so a forged `author_id`
+        // cannot buy anything. A global admin gets no extra door: an entry in a log is
+        // somebody's statement, and rewriting another person's statement is exactly what
+        // the visible-edit rule exists to prevent.
+        CommandPolicy::ChannelNoteWrite => {
+            put_arg(body, "profile_id", json!(user.profile_id));
+            if name == "delete_channel_note" {
+                let note_id: String =
+                    arg(body, "id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
+                let author = channel_notes::note_author(&note_id)
+                    .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?;
+                // A note that exists but is not the caller's is answered exactly like a
+                // missing one, so the endpoint cannot be used to probe for note ids.
+                if author.as_deref() != Some(user.profile_id.as_str()) {
+                    return Err(err(
+                        StatusCode::FORBIDDEN,
+                        "only the author can delete this note",
+                    ));
+                }
+            }
+            Ok(())
+        }
         CommandPolicy::MessageAttachmentWrite => {
             // The message id is the scope of the whole attachment family; without it an
             // attachment id alone would be a capability over every message in the space.
@@ -3673,6 +3777,22 @@ fn authorize_command(
                     "only the owner can change this todo",
                 ));
             }
+            Ok(())
+        }
+        CommandPolicy::TodoOwnerDelete => {
+            // Author, project owner or admin — the library holds the rule, so the gate
+            // only refuses an unknown id and binds who is acting to the session.
+            let todo_id: String = arg(body, "id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
+            if user.role != "GlobalAdmin"
+                && !todo_owned_by(&user.profile_id, &todo_id)
+                && !todo_project_owned_by(&user.profile_id, &todo_id)
+            {
+                return Err(err(
+                    StatusCode::FORBIDDEN,
+                    "only the author, the project owner or an admin can delete this todo",
+                ));
+            }
+            put_arg(body, "actor_id", json!(user.profile_id));
             Ok(())
         }
         CommandPolicy::TodoCompletionWrite => {
@@ -3840,6 +3960,30 @@ fn authorize_command(
             } else {
                 Err(err(StatusCode::FORBIDDEN, "document owner access denied"))
             }
+        }
+        CommandPolicy::DocumentOwnerDelete => {
+            let id = document_id(body, name)
+                .ok_or_else(|| err(StatusCode::BAD_REQUEST, "invalid document id"))?;
+            if !documents::document_deletable_by(&id, &user.profile_id)
+                .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?
+            {
+                return Err(err(StatusCode::FORBIDDEN, "document owner access denied"));
+            }
+            put_arg(body, "actor_id", json!(user.profile_id));
+            Ok(())
+        }
+        CommandPolicy::DocumentFolderDelete => {
+            let id: String = arg(body, "id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
+            if !documents::document_folder_deletable_by(&id, &user.profile_id)
+                .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?
+            {
+                return Err(err(
+                    StatusCode::FORBIDDEN,
+                    "document folder owner access denied",
+                ));
+            }
+            put_arg(body, "actor_id", json!(user.profile_id));
+            Ok(())
         }
         CommandPolicy::DocumentAccessWrite => {
             let id = document_id(body, name)
@@ -4163,12 +4307,17 @@ fn authorize_command(
             }
             if matches!(
                 name,
-                "update_channel" | "add_channel_member" | "remove_channel_member"
+                "update_channel"
+                    | "add_channel_member"
+                    | "remove_channel_member"
+                    | "delete_channel"
             ) {
                 let channel_id: String = if name == "update_channel" {
                     body.get("channel")
                         .and_then(|channel| arg(channel, "id").ok())
                         .ok_or_else(|| err(StatusCode::BAD_REQUEST, "invalid channel"))?
+                } else if name == "delete_channel" {
+                    arg(body, "id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?
                 } else {
                     arg(body, "channel_id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?
                 };
@@ -4178,6 +4327,11 @@ fn authorize_command(
                     "channel",
                     Some(&channel_id),
                 )?;
+                if name == "delete_channel" {
+                    // The library re-checks the same right; who is acting is the
+                    // session, never a name the caller typed into the body.
+                    put_arg(body, "actor_id", json!(user.profile_id));
+                }
             }
             if name == "create_channel" {
                 let supplied: Vec<String> = arg(body, "member_ids").unwrap_or_default();
@@ -5144,7 +5298,7 @@ async fn cmd(
     "add_team_membership" => platform::add_team_membership(input: platform::TeamMembershipInput),
     "archive_cf_definition" => platform::archive_cf_definition(id: String, archived: bool),
     "archive_document" => documents::archive_document(id: String, archived: bool),
-    "delete_document" => documents::delete_document(id: String),
+    "delete_document" => documents::delete_document(id: String, actor_id: String),
     "archive_issue" => issues::archive_issue(id: String, archived: bool),
     "archive_meeting" => meetings::archive_meeting(id: String, archived: bool),
     "attach_meeting_channel" => meetings::attach_meeting_channel(id: String),
@@ -5220,7 +5374,11 @@ async fn cmd(
     "delete_subscription_setting" => personal::delete_subscription_setting(profile_id: String, event_type: String),
     "delete_swimlane" => issues::delete_swimlane(id: String),
     "delete_time_tracking_entry" => issues::delete_time_tracking_entry(id: String),
-    "delete_todo" => personal::delete_todo(id: String),
+    "delete_todo" => personal::delete_todo(id: String, actor_id: String),
+    "list_channel_notes" => channel_notes::list_channel_notes(channel_id: String, profile_id: String),
+    "create_channel_note" => channel_notes::create_channel_note(input: channel_notes::ChannelNoteInput),
+    "update_channel_note" => channel_notes::update_channel_note(note: channel_notes::ChannelNote),
+    "delete_channel_note" => channel_notes::delete_channel_note(id: String, profile_id: String),
     "dry_run_merge" => review::dry_run_merge(id: String, repo_path: String, review_id: String, source_branch: String, target_branch: String),
     "emit_notification" => personal::emit_notification(input: personal::NotificationInput),
     "evaluate_quality_gate" => review::evaluate_quality_gate(review_id: String),
@@ -5230,6 +5388,7 @@ async fn cmd(
     "get_channel_notification_preference" => chat::get_channel_notification_preference(profile_id: String, channel_id: String),
     "save_channel_notification_preference" => chat::save_channel_notification_preference(preference: chat::ChannelNotificationPreference),
     "get_channel_by_entity" => chat::get_channel_by_entity(entity_type: String, entity_id: String),
+    "resolve_source_ref" => chat::resolve_source_ref(entity_type: String, entity_id: String),
     "get_document" => documents::get_document_scoped(id: String, profile_id: String),
     "get_issue" => issues::get_issue(id: String),
     "get_issue_detail" => issues::get_issue_detail(id: String),
@@ -5263,6 +5422,7 @@ async fn cmd(
     "list_channel_members" => chat::list_channel_members(channel_id: String),
     "list_channels" => chat::list_channels(),
     "list_channels_with_meta" => chat::list_channels_with_meta(profile_id: String),
+    "list_unread_threads" => chat::list_unread_threads(profile_id: String),
     "list_checklist_items" => issues::list_checklist_items(checklist_id: String),
     "list_checklists" => issues::list_checklists(issue_id: String),
     "list_deploy_targets" => pipelines::list_deploy_targets(),
@@ -5294,6 +5454,7 @@ async fn cmd(
     "import_document_folder" => documents::import_document_folder(request: documents::DocumentImportRequest),
     "search_book_documents" => documents::search_book_documents(book_id: String, query: String),
     "list_book_access" => documents::list_book_access(book_id: String),
+    "list_book_owners" => documents::list_book_owners(book_id: String),
     "update_book_access" => documents::update_book_access(book_id: String, permissions: Vec<documents::DocumentAccessRecipient>),
     "save_channel_subscription" => channel_feeds::save_channel_subscription(value: channel_feeds::ChannelSubscription),
     "list_channel_subscriptions" => channel_feeds::list_channel_subscriptions(profile_id: String),
@@ -5410,6 +5571,7 @@ async fn cmd(
     "mark_notification_read" => personal::mark_notification_read(id: String),
     "move_document" => documents::move_document(id: String, container_type: String, container_id: Option<String>, folder_id: Option<String>),
     "move_document_folder" => documents::move_document_folder(id: String, parent_id: Option<String>),
+    "delete_document_folder" => documents::delete_document_folder(id: String, actor_id: String),
     "move_issue_on_board" => issues::move_issue_on_board(board_id: String, issue_id: String, column_id: String, sprint_id: Option<String>, swimlane_id: Option<String>, position: Option<i64>),
     "open_merge_request" => review::open_merge_request(req: review::NewMergeRequest),
     "apply_package_retention" => pipelines::apply_package_retention(repository_id: String),
@@ -5473,6 +5635,7 @@ async fn cmd(
     "update_board" => issues::update_board(board: issues::Board),
     "update_cf_definition" => platform::update_cf_definition(definition: platform::CfDefinition),
     "update_channel" => chat::update_channel(channel: chat::Channel),
+    "delete_channel" => chat::delete_channel(id: String, actor_id: String),
     "update_deploy_target" => pipelines::update_deploy_target(target: pipelines::DeployTarget),
     "update_document" => documents::update_document(document: documents::Document),
     "update_document_folder" => documents::update_document_folder(folder: documents::DocumentFolder),
@@ -5490,6 +5653,7 @@ async fn cmd(
     "update_pipeline_script" => pipelines::update_pipeline_script(script: pipelines::PipelineScript),
     "update_profile" => platform::update_profile(profile: platform::Profile),
     "update_project" => platform::update_project(project: platform::Project),
+    "delete_project" => platform::delete_project(id: String, actor_id: String),
     "set_project_deadline" => platform::set_project_deadline(project_id: String, deadline: Option<String>, actor_profile_id: Option<String>),
     "update_project_deadline" => platform::update_project_deadline(project_id: String, expected_deadline: Option<String>, deadline: Option<String>, actor_profile_id: Option<String>),
     "set_project_lead" => platform::set_project_lead(project_id: String, lead_id: Option<String>, actor_profile_id: Option<String>),
@@ -8543,6 +8707,80 @@ mod tests {
             .unwrap();
         assert_eq!(left, 0);
     }
+    /// The notes log over HTTP: a member appends and reads, an outsider gets nothing, and
+    /// a forged author buys nothing because the session identity is rebound before dispatch.
+    #[tokio::test]
+    async fn channel_note_endpoints_bind_the_author_and_refuse_outsiders() {
+        let _serial = test_lock();
+        setup();
+        let c = db::conn().unwrap();
+        c.execute("INSERT INTO projects(id,name,key,created_by,created_at) VALUES('pr-n','Notes','NOTE','pa',1)", []).unwrap();
+        c.execute(
+            "INSERT INTO project_members(project_id,profile_id) VALUES('pr-n','pb')",
+            [],
+        )
+        .unwrap();
+        c.execute("INSERT INTO channels(id,content_type,name,project_id,archived) VALUES('ch-n','public','Notes','pr-n',0)", []).unwrap();
+        drop(c);
+
+        let (status, _) = call(HeaderMap::new(), "list_channel_notes", json!({"channel_id":"ch-n"})).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+        // Alice writes a decision while claiming Bob wrote it. The session wins.
+        let (status, value) = call(
+            cookie("ta"),
+            "create_channel_note",
+            json!({"input":{"channel_id":"ch-n","kind":"decision","body":"Ship on Friday","author_id":"pb"}}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        let note = value["value"].clone();
+        assert_eq!(note["author_id"], json!("pa"), "a forged author is replaced by the session");
+        assert_eq!(note["project_id"], json!("pr-n"), "the project is read off the channel");
+        assert!(note["edited_at"].is_null());
+        let note_id = note["id"].as_str().unwrap().to_string();
+
+        // A member reads the log; a non-member is refused, not given an empty list.
+        let (status, value) =
+            call(cookie("tb"), "list_channel_notes", json!({"channel_id":"ch-n"})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        assert_eq!(value["value"].as_array().unwrap().len(), 1);
+        let (_, value) =
+            call(cookie("td"), "list_channel_notes", json!({"channel_id":"ch-n"})).await;
+        assert_eq!(value["ok"], json!(false), "an outsider is refused: {value}");
+
+        // Only the author edits, and the edit is stamped.
+        let mut foreign = note.clone();
+        foreign["body"] = json!("Bob overrules");
+        let (_, value) = call(cookie("tb"), "update_channel_note", json!({"note":foreign})).await;
+        assert_eq!(value["ok"], json!(false), "a member is not an author: {value}");
+        let mut own = note.clone();
+        own["body"] = json!("Ship on Monday");
+        let (status, value) = call(cookie("ta"), "update_channel_note", json!({"note":own})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        assert_eq!(value["value"]["body"], json!("Ship on Monday"));
+        assert!(
+            value["value"]["edited_at"].as_i64().is_some(),
+            "an edit is never silent: {value}"
+        );
+
+        // Deletion is the author's alone, and an unknown id is answered identically.
+        let (status, _) =
+            call(cookie("tb"), "delete_channel_note", json!({"id":&note_id})).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        let (status, _) =
+            call(cookie("tb"), "delete_channel_note", json!({"id":"no-such-note"})).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "an unknown id discloses nothing");
+        let (status, value) =
+            call(cookie("ta"), "delete_channel_note", json!({"id":&note_id})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        let c = db::conn().unwrap();
+        let left: i64 = c
+            .query_row("SELECT count(*) FROM channel_notes", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(left, 0);
+    }
+
     #[tokio::test]
     async fn todo_endpoints_bind_the_session_profile_and_refuse_foreign_todos() {
         let _serial = test_lock();

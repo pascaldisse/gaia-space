@@ -109,9 +109,35 @@ const PATHS = {
       <path d="M12 7.5V12l3 2" />
     </>
   ),
+  /* A shelf of books: the library's own mark, used where the Knowledge surface used
+     to show a glyph placeholder. */
+  books: () => <path d="M4 20V6h3v14zM9 20V4h3v16zM14.5 20 17 6l3 .5-2.5 14z" />,
+  folder: () => <path d="M4 6h5l2 2h9v11H4z" />,
+  /* An uploaded file: a page with an arrow into it. */
+  upload: () => <path d="M6 3h8l4 4v14H6zM14 3v4h4M12 17v-6M9.5 13.5 12 11l2.5 2.5" />,
+  /* Something still open, asking to be done. Deliberately NOT a tick: a tick on an
+     unfinished task reads as "already done" — the exact confusion this replaces. */
+  alert: () => (
+    <>
+      <circle cx="12" cy="12" r="8" />
+      <path d="M12 8v4.5" />
+      <circle cx="12" cy="15.8" r="0.85" fill="currentColor" stroke="none" />
+    </>
+  ),
+  /* Composer affordances. They used to be literal emoji (📎 🕒 📊), which the OS draws
+     in full colour and its own shape — the one place in the product where the icon set
+     was not the icon set. */
+  paperclip: () => <path d="M18.5 11.5 12 18a4 4 0 0 1-5.7-5.7l7.1-7.1a2.7 2.7 0 0 1 3.8 3.8l-7.1 7.1a1.4 1.4 0 0 1-2-2l6.5-6.5" />,
+  poll: () => <path d="M5 20V11M12 20V4M19 20v-6M3.5 20h17" />,
+  send: () => <path d="M5 12h13M12.5 5.5 19 12l-6.5 6.5" />,
+  trash: () => <path d="M5 7h14M10 7V5h4v2M6.5 7l1 13h9l1-13M10 10.5v6M14 10.5v6" />,
   plus: () => <path d="M12 5v14M5 12h14" />,
   menu: () => <path d="M4 7h16M4 12h16M4 17h16" />,
   close: () => <path d="m6 6 12 12M18 6 6 18" />,
+  /* A category IS a tag, so it is drawn as one. Every other glyph in this set was
+     already spoken for by a rail mode (layers = Projects, target = Development), and
+     a category wearing the Projects icon would have read as a second project field. */
+  tag: () => <><path d="M3 12.5V4.5A1.5 1.5 0 0 1 4.5 3h8L21 11.5 13.5 19 3 12.5Z" /><circle cx="7.5" cy="7.5" r="1.2" /></>,
 } satisfies Record<string, () => JSX.Element>;
 
 export type IconName = keyof typeof PATHS;

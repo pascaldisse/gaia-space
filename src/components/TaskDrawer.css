@@ -1,0 +1,21 @@
+/* THE EDITOR, INSIDE THE DRAWER PANEL (2026-08-29).
+   The drawer owns no fields any more — it renders `TaskRowEdit` (see TaskDrawer.tsx).
+   All this file does is give that one form the panel's room: it scrolls with the panel
+   and its three-across meta row stacks, because a drawer is a column, not a page.
+
+   STRUCTURE IS UNSCOPED. Nothing here sits under `.theme-space-light`. */
+
+.wid-root .task-edit-in-drawer {
+  align-content: start;
+  overflow-y: auto;
+  padding-right: 2px;
+  gap: 14px;
+}
+
+/* One column: the panel is ~380px wide, where three choosers side by side truncate
+   their values to nothing. */
+.wid-root .task-edit-in-drawer .composer-meta { grid-template-columns: 1fr; }
+
+/* A create has no Done and no Delete, so the row of buttons is just leave-or-keep —
+   let it sit right, the way every other drawer's footer does. */
+.wid-root .task-edit-in-drawer .task-edit-actions { justify-content: flex-end; }

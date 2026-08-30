@@ -1,7 +1,14 @@
 import { invoke } from "@tauri-apps/api/core";
 
 export type TodoContentKind = "text"|"markdown";
-export type Todo = { id:string; profile_id:string; content:string; due_date:string|null; project_id:string|null; done:boolean; source_entity_type:string|null; source_entity_id:string|null; notes:string|null; assignee_ids:string[]; content_kind:TodoContentKind };
+/** The ONE list of task categories on the client. A category says what KIND of work a
+ *  task is; it is a CLOSED short list, not free text, because a free field produces five
+ *  spellings of the same word and then nothing can be grouped. Mirror of
+ *  `personal::TODO_CATEGORIES` in src-tauri — the server refuses anything else. */
+export const TODO_CATEGORIES = [{id:"create",label:"Create"},{id:"improve",label:"Improve"},{id:"review",label:"Review"},{id:"decide",label:"Decide"},{id:"admin",label:"Admin"}] as const;
+export type TodoCategory = typeof TODO_CATEGORIES[number]["id"];
+/** `category` is OPTIONAL: absent or null means uncategorised, which is the normal case. */
+export type Todo = { id:string; profile_id:string; content:string; due_date:string|null; project_id:string|null; done:boolean; source_entity_type:string|null; source_entity_id:string|null; notes:string|null; assignee_ids:string[]; content_kind:TodoContentKind; category?:string|null };
 export type CalendarItem = { id:string; source_id:string; kind:"meeting"|"task"|"deadline"|"blog"|"external"; title:string; starts_at:number; ends_at:number|null; project_id:string|null; calendar_id:string|null; date:string|null };
 export type AbsenceAvailability = "away"|"partial"|"available";
 // `reason_type` arrives as "Private" when the owner marked it confidential and the
@@ -23,15 +30,23 @@ export type CalendarOptions = { profile_id:string; show_weekends:boolean; show_t
 const call = <T>(command:string, args:Record<string,unknown>={}) => invoke<T>(command,args);
 export const personalApi = {
   todos:(profile_id:string,include_done=false)=>call<Todo[]>("list_todos",{profileId:profile_id,includeDone:include_done}),
+  // Shared surface: returns EVERY member's project todos, not only the caller's. A
+  // project lead is informational and gets no wider read than any other member.
   projectTodos:(project_id:string,profile_id:string,include_done=false)=>call<Todo[]>("list_project_todos",{projectId:project_id,profileId:profile_id,includeDone:include_done}),
-teamTodos:(profile_id:string,include_done=false)=>call<Todo[]>("list_team_todos",{profileId:profile_id,includeDone:include_done}),
+  // Cross-project team surface: other people's running project work, everywhere the
+  // caller is a member/owner. Project-less personal todos are excluded.
+  teamTodos:(profile_id:string,include_done=false)=>call<Todo[]>("list_team_todos",{profileId:profile_id,includeDone:include_done}),
   projectMemberIds:(project_id:string)=>call<string[]>("list_project_member_ids",{projectId:project_id}),
   // `memberId`, not `profileId`: the web transport rewrites any profile id in a
   // request to the caller's own, which would turn "add Charles" into "add me".
   addProjectMember:(project_id:string,member_id:string)=>call<string[]>("add_project_member",{projectId:project_id,memberId:member_id}),
   removeProjectMember:(project_id:string,member_id:string)=>call<string[]>("remove_project_member",{projectId:project_id,memberId:member_id}),
   calendar:(profile_id:string,range_start:number,range_end:number,range_start_date:string,range_end_date:string,target_profile_id?:string,target_location?:string)=>call<CalendarItem[]>("calendar_aggregate",{profileId:profile_id,rangeStart:range_start,rangeEnd:range_end,rangeStartDate:range_start_date,rangeEndDate:range_end_date,targetProfileId:target_profile_id??null,targetLocation:target_location??null}),
-  createTodo:(input:Omit<Todo,"id">&{id?:string})=>call<Todo>("create_todo",{input}), updateTodo:(todo:Todo)=>call<Todo>("update_todo",{todo}), setTodoCompletion:(id:string,done:boolean)=>call<Todo>("set_todo_completion",{id,done}), deleteTodo:(id:string)=>call<void>("delete_todo",{id}),
+  createTodo:(input:Omit<Todo,"id">&{id?:string})=>call<Todo>("create_todo",{input}), updateTodo:(todo:Todo)=>call<Todo>("update_todo",{todo}), setTodoCompletion:(id:string,done:boolean)=>call<Todo>("set_todo_completion",{id,done}),
+  /** Deleting a task is OWNER-ONLY, and the owner is decided by the SERVER: `actorId`
+   *  is the identity that gate runs against (desktop has no session to mint it from).
+   *  A refusal comes back as a rejection and must reach the screen — never swallowed. */
+  deleteTodo:(id:string,actor_id:string)=>call<void>("delete_todo",{id,actorId:actor_id}),
   postponeTodo:(id:string,days:number)=>call<Todo>("postpone_todo",{id,days}),
   convertTodoToIssue:(id:string,project_id:string,status_id?:string)=>call<{id:string;project_id:string;number:number;title:string}>("convert_todo_to_issue",{id,projectId:project_id,statusId:status_id??null}),
   absences:(profile_id?:string)=>call<Absence[]>("list_absences",{profileId:profile_id}), createAbsence:(input:Omit<Absence,"id">&{id?:string})=>call<Absence>("create_absence",{input}), updateAbsence:(absence:Absence)=>call<Absence>("update_absence",{absence}), deleteAbsence:(id:string)=>call<void>("delete_absence",{id}), currentAbsences:(date:string)=>call<Absence[]>("current_absences",{date}),

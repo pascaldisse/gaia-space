@@ -45,11 +45,47 @@ const mount = async () => {
   await settle();
   return host;
 };
-const deadlineInput = (host: HTMLElement) =>
-  host.querySelector<HTMLInputElement>('.project-deadline input[type="date"]');
-const setDate = async (input: HTMLInputElement, value: string) => {
-  input.value = value;
-  input.dispatchEvent(new Event("change", { bubbles: true }));
+/* ADDRESS ONLY (date-field pass): the deadline is picked in the product's own month
+   grid now (components/DateField.tsx), not in the operating system's — a native
+   `<input type=date>` drew its calendar in a layer no CSS reaches. The write path,
+   the compare-and-set command and the owner rule are unchanged; only the way a test
+   states "choose this day" moved from `input.value = …` to picking the day. */
+const deadlineTrigger = (host: HTMLElement) =>
+  host.querySelector<HTMLButtonElement>(".project-deadline button.date-trigger");
+/** THE DEADLINE IS A PILL FIRST. A card carries the date as one fact at its edge; the
+ *  date field is an ACT and is only drawn once somebody asks for it — by pressing the
+ *  pill (offered only to whoever may move it) or through the card's menu. Every write
+ *  test therefore opens the editor the way a person does. */
+const duePill = (host: HTMLElement) => host.querySelector<HTMLButtonElement>(".project-due");
+const openEditor = async (host: HTMLElement) => {
+  host.querySelector<HTMLButtonElement>("button.project-due.editable")!.click();
+  await settle();
+  return deadlineTrigger(host)!;
+};
+/** Choose a day the way a person does: open the grid, walk to the month, press the
+ *  day. The grid opens on the CURRENT value's month, so a date in another month is
+ *  reached the same way a person reaches it. */
+const setDate = async (trigger: HTMLButtonElement, value: string) => {
+  trigger.click();
+  await settle();
+  const [year, month, day] = value.split("-").map(Number);
+  const wanted = new Date(year, month - 1, 1).toLocaleDateString("en-US", { month: "long", year: "numeric" });
+  const head = () => document.querySelector(".date-pop-head strong")!.textContent;
+  for (let guard = 0; guard < 36 && head() !== wanted; guard += 1) {
+    const shown = new Date(`${head()} 1`);
+    const step = shown.getTime() < new Date(year, month - 1, 1).getTime() ? "Next month" : "Previous month";
+    (document.querySelector(`.date-pop button[aria-label="${step}"]`) as HTMLButtonElement).click();
+    await settle();
+  }
+  const cell = [...document.querySelectorAll(".date-pop .date-day:not(.muted)")]
+    .find((element) => element.textContent === String(day))!;
+  cell.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+  await settle();
+};
+const clearDate = async (trigger: HTMLButtonElement) => {
+  trigger.click();
+  await settle();
+  document.querySelector("button.date-clear")!.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
   await settle();
 };
 
@@ -60,10 +96,15 @@ describe("project deadline editing", () => {
     reply = (cmd) => (cmd === "list_projects" ? [project()] : project({ deadline: "2030-06-01" }));
     const host = await mount();
 
-    const input = deadlineInput(host)!;
-    expect(input).toBeTruthy();
-    expect(input.value).toBe("2030-03-10");
-    await setDate(input, "2030-06-01");
+    // The pill states the fact and carries the band's colour.
+    expect(duePill(host)?.textContent).toBe("Due 2030-03-10");
+    const picker = await openEditor(host);
+    expect(picker).toBeTruthy();
+    // The control reads the date the way a person writes it; the ISO string is what
+    // travels to the server, and the card's own pill keeps stating it.
+    expect(picker.textContent).toContain("2030");
+    expect(picker.textContent).toContain("Mar");
+    await setDate(picker, "2030-06-01");
 
     const write = calls.find((c) => c.cmd === "update_project_deadline");
     expect(write).toBeTruthy();
@@ -84,10 +125,13 @@ describe("project deadline editing", () => {
     reply = (cmd) => (cmd === "list_projects" ? [project()] : project({ deadline: "2030-06-01" }));
     const host = await mount();
 
-    const input = deadlineInput(host)!;
-    input.value = "2030-06-01";
-    input.dispatchEvent(new Event("change", { bubbles: true }));
-    input.dispatchEvent(new Event("change", { bubbles: true }));
+    /* ADDRESS ONLY: the native field could emit `change` twice for one edit (fill +
+       blur). The picker commits once per chosen day, so the double is produced here
+       by choosing the same day twice — the guard under test is the same one. */
+    const picker = await openEditor(host);
+    await setDate(picker, "2030-06-01");
+    const again = deadlineTrigger(host);
+    if (again) await setDate(again, "2030-06-01");
     await settle();
 
     expect(calls.filter((c) => c.cmd === "update_project_deadline").length).toBe(1);
@@ -100,7 +144,10 @@ describe("project deadline editing", () => {
     reply = (cmd) => (cmd === "list_projects" ? [project({ deadline: null })] : project());
     const host = await mount();
 
-    await setDate(deadlineInput(host)!, "2030-03-10");
+    // With no date the pill says so, quietly and with no colour.
+    expect(duePill(host)?.textContent).toBe("No deadline");
+    expect(duePill(host)?.className).toContain("untoned");
+    await setDate(await openEditor(host), "2030-03-10");
     expect(calls.some((c) => c.cmd === "set_project_deadline")).toBe(true);
     expect(calls.some((c) => c.cmd === "update_project_deadline")).toBe(false);
   });
@@ -111,10 +158,9 @@ describe("project deadline editing", () => {
     reply = (cmd) => (cmd === "list_projects" ? [project()] : project({ deadline: null }));
     const host = await mount();
 
-    const clear = host.querySelector<HTMLButtonElement>('.project-deadline button')!;
-    expect(clear.getAttribute("aria-label")).toBe("Clear deadline for Atlas");
-    clear.click();
-    await settle();
+    // Clearing lives inside the picker now — one control, not a second button that
+    // says the same thing beside it.
+    await clearDate(await openEditor(host));
     const write = calls.find((c) => c.cmd === "update_project_deadline")!;
     expect(write.args).toMatchObject({ projectId: "p1", expectedDeadline: "2030-03-10", deadline: null });
   });
@@ -125,9 +171,11 @@ describe("project deadline editing", () => {
     reply = (cmd) => (cmd === "list_projects" ? [project()] : []);
     const host = await mount();
 
-    expect(deadlineInput(host)).toBeNull();
+    expect(deadlineTrigger(host)).toBeNull();
     expect(host.querySelector(".project-deadline button")).toBeNull();
-    expect(host.querySelector(".deadline-readonly")?.textContent).toContain("2030-03-10");
+    // The same pill, as a plain fact: no button, nothing to press and be refused.
+    expect(host.querySelector("button.project-due")).toBeNull();
+    expect(duePill(host)?.textContent).toBe("Due 2030-03-10");
   });
 
   test("a refused write is reported in place and the stored value is restored", async () => {
@@ -136,11 +184,12 @@ describe("project deadline editing", () => {
     reply = (cmd) => (cmd === "list_projects" ? [project()] : new Error("That deadline changed since you loaded it; reload and try again"));
     const host = await mount();
 
-    await setDate(deadlineInput(host)!, "2031-01-01");
+    await setDate(await openEditor(host), "2031-01-01");
     const alert = host.querySelector('.project-deadline [role="alert"]');
     expect(alert?.textContent).toContain("changed since you loaded it");
-    // The refused date never sticks: the list is re-read and the input shows the truth.
+    // The refused date never sticks: the list is re-read and the control shows the truth.
     expect(calls.filter((c) => c.cmd === "list_projects").length).toBeGreaterThan(1);
-    expect(deadlineInput(host)!.value).toBe("2030-03-10");
+    expect(deadlineTrigger(host)!.textContent).toContain("2030");
+    expect(deadlineTrigger(host)!.textContent).toContain("Mar");
   });
 });

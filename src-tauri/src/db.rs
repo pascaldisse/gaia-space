@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 133;
+pub const SCHEMA_VERSION: i64 = 138;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -864,6 +864,31 @@ pub fn migrate(conn: &Connection) -> Result<()> {
         )?;
         add_column_if_missing(&tx, "document_favorites", "group_name", "TEXT")?;
     }
+    // V132: one main responsible person per project. Additive, nullable column — a
+    // project without a lead is normal, not broken. The lead is PURELY INFORMATIONAL:
+    // it is never read by any authorization gate, and every project member keeps
+    // identical access with or without it (see `platform::Project::lead_id`).
+    if version < 132 && table_exists(&tx, "projects")? {
+        add_column_if_missing(&tx, "projects", "lead_id", "TEXT REFERENCES profiles(id)")?;
+    }
+    // V133: work created out of a conversation must keep pointing back at it. Todos
+    // already carry the generic `(source_entity_type, source_entity_id)` anchor; issues
+    // and meetings did not, so a ticket or a date born in a channel lost its origin the
+    // moment it was saved. Two nullable TEXT columns each, deliberately UNCONSTRAINED
+    // and unreferenced: the anchor names a row in another table by convention
+    // (`("message", <id>)`), never by foreign key, so deleting the source degrades the
+    // back-link instead of deleting the work. Both-or-neither is enforced in Rust
+    // (`valid_anchor`), not by the schema, exactly as it already is for todos.
+    if version < 134 {
+        if table_exists(&tx, "issues")? {
+            add_column_if_missing(&tx, "issues", "source_entity_type", "TEXT")?;
+            add_column_if_missing(&tx, "issues", "source_entity_id", "TEXT")?;
+        }
+        if table_exists(&tx, "meetings")? {
+            add_column_if_missing(&tx, "meetings", "source_entity_type", "TEXT")?;
+            add_column_if_missing(&tx, "meetings", "source_entity_id", "TEXT")?;
+        }
+    }
     // V103: per-member calendar rendering options (KB §4.1-4.2 `CalendarOptions`).
     // Additive columns on the existing preference row, table-guarded because
     // fixtures pinned before V46 have no `user_preferences` table yet.
@@ -967,9 +992,51 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if version < 109 && table_exists(&tx, "documents")? && table_exists(&tx, "channels")? {
         tx.execute_batch(SCHEMA_V109)?;
     }
-    // V132: a project lead is informational only. Access control never reads this column.
-    if version < 132 && table_exists(&tx, "projects")? {
-        add_column_if_missing(&tx, "projects", "lead_id", "TEXT REFERENCES profiles(id)")?;
+    // V134: a channel's Notes & Decisions log. A LOG, not a document: rows are appended,
+    // never silently rewritten, and an owner's edit is stamped in `edited_at` so history
+    // stays readable. The attachment is a REFERENCE to an existing document, not a second
+    // blob store — see `channel_notes.rs` for why. Table-guarded like every additive rung.
+    if version < 135
+        && table_exists(&tx, "channels")?
+        && table_exists(&tx, "projects")?
+        && table_exists(&tx, "profiles")?
+        && table_exists(&tx, "documents")?
+    {
+        tx.execute_batch(SCHEMA_V134)?;
+    }
+    // V135: the EXTERNAL meeting link. Most meetings in this product happen on someone
+    // else's conferencing service (Google Meet, Zoom, Teams), so a meeting must be able
+    // to carry a plain URL a person pasted. Deliberately NOT `join_url`: that column is
+    // native-owned — `calls::bind` writes it when a LiveKit room is minted, and
+    // `update_meeting` ignores it precisely so the webview cannot repoint a call at
+    // another room. Reusing it would both break that invariant and let the first native
+    // join silently overwrite the link a person typed. Two different facts, two columns.
+    if version < 136 && table_exists(&tx, "meetings")? {
+        add_column_if_missing(&tx, "meetings", "meeting_url", "TEXT")?;
+    }
+    // V136: what KIND of work a task is — create, improve, review, decide, admin. One
+    // nullable TEXT column, because having no category is the NORMAL case, not a defect:
+    // most tasks are just tasks. Deliberately a CLOSED short list validated in Rust
+    // (`personal::TODO_CATEGORIES`), never free text: a free field produces five
+    // spellings of the same word within a week and nothing can be grouped afterwards.
+    // No CHECK constraint, for the same reason every other rung avoids one — the list is
+    // allowed to grow without rewriting a table, and the write path is the single gate.
+    if version < 137 && table_exists(&tx, "todos")? {
+        add_column_if_missing(&tx, "todos", "category", "TEXT")?;
+    }
+    // V137: where a document CAME FROM. A file dropped into a project channel is filed
+    // into that project's library too, and the library must be able to say so instead of
+    // showing an orphan card. Same anchor pair the rest of the product already uses
+    // (`meetings`, `issues`, `channel_notes`), resolvable through `chat::resolve_source_ref`.
+    // The partial UNIQUE index is the DEDUPE ITSELF: one chat attachment can produce at
+    // most one library document, enforced by the database rather than by a read-then-write
+    // race in Rust. NULL anchors stay unconstrained — the normal case is no source.
+    if version < 138 && table_exists(&tx, "documents")? {
+        add_column_if_missing(&tx, "documents", "source_entity_type", "TEXT")?;
+        add_column_if_missing(&tx, "documents", "source_entity_id", "TEXT")?;
+        tx.execute_batch(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_documents_source_anchor ON documents(source_entity_type,source_entity_id) WHERE source_entity_type IS NOT NULL AND source_entity_id IS NOT NULL;",
+        )?;
     }
     // V133: external meeting URLs and durable document provenance. Both source fields
     // remain nullable for legacy rows; the partial index makes duplicate anchored filing
@@ -1221,6 +1288,33 @@ CREATE TABLE IF NOT EXISTS document_discussions (
   created_at INTEGER NOT NULL DEFAULT (unixepoch())
 );
 CREATE INDEX IF NOT EXISTS document_discussions_meeting ON document_discussions(meeting_id);
+"#;
+/// V134: the channel Notes & Decisions log.
+///
+/// `project_id` is stored, not derived, because authorization reads it on every row and a
+/// join to `channels` on each read would make the scope depend on a mutable column.
+/// The anchor keeps the both-or-neither CHECK the todos table already uses, so a note born
+/// from a message can never lose half its back-link.
+/// `attachment_document_id` is ON DELETE SET NULL: deleting the document must not delete
+/// the decision that referenced it — the log outlives its attachments.
+pub(crate) const SCHEMA_V134: &str = r#"
+CREATE TABLE IF NOT EXISTS channel_notes (
+  id TEXT PRIMARY KEY,
+  channel_id TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL CHECK(kind IN ('decision','status')),
+  body TEXT NOT NULL,
+  author_id TEXT NOT NULL REFERENCES profiles(id),
+  created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+  updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
+  edited_at INTEGER,
+  attachment_document_id TEXT REFERENCES documents(id) ON DELETE SET NULL,
+  source_entity_type TEXT,
+  source_entity_id TEXT,
+  CHECK((source_entity_type IS NULL) = (source_entity_id IS NULL))
+);
+CREATE INDEX IF NOT EXISTS channel_notes_channel_created ON channel_notes(channel_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS channel_notes_project ON channel_notes(project_id);
 "#;
 pub(crate) const SCHEMA_V71: &str = r#"
 CREATE TABLE IF NOT EXISTS document_imports (
@@ -2322,6 +2416,37 @@ mod tests {
     }
 
     #[test]
+    fn v135_adds_the_external_meeting_link_beside_the_native_join_url() {
+        let conn = Connection::open_in_memory().expect("database");
+        conn.execute_batch(SCHEMA_V1).expect("v1 meetings");
+        conn.pragma_update(None, "user_version", 134)
+            .expect("stamp v134");
+
+        migrate(&conn).expect("v135");
+        let columns = conn
+            .prepare("PRAGMA table_info(meetings)")
+            .expect("meeting columns")
+            .query_map([], |row| row.get::<_, String>(1))
+            .expect("column rows")
+            .collect::<Result<Vec<_>>>()
+            .expect("column names");
+        // Both must exist: the pasted external link and the native call's join url are
+        // two different facts and neither may stand in for the other.
+        for expected in ["meeting_url", "join_url"] {
+            assert!(
+                columns.iter().any(|column| column == expected),
+                "missing {expected}"
+            );
+        }
+        assert_eq!(
+            conn.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
+                .expect("version"),
+            SCHEMA_VERSION
+        );
+        migrate(&conn).expect("V135 re-run is idempotent");
+    }
+
+    #[test]
     fn v11_adds_nullable_todo_notes_without_touching_legacy_rows() {
         let temp = TempDb::new("gaia-space-v11-notes");
         let conn = open_at(&temp).expect("database");
@@ -2340,7 +2465,7 @@ mod tests {
             version, SCHEMA_VERSION,
             "schema version is monotonic and lands on head"
         );
-        assert_eq!(SCHEMA_VERSION, 133);
+        assert_eq!(SCHEMA_VERSION, 138);
         let notes: Option<String> = conn
             .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
                 r.get(0)
@@ -2358,6 +2483,51 @@ mod tests {
         );
         // Re-running is idempotent: no duplicate column, no error.
         migrate(&conn).expect("idempotent");
+    }
+
+    /// MERGE PROOF (master → space-redesign-communication-first): the two branches each
+    /// added a V132 (`projects.lead_id`, both idempotent via `add_column_if_missing`) and
+    /// ours stacked V133 (source anchors) and V134 (`channel_notes`) on top. The ladder
+    /// must therefore still be LINEAR from an old stamp and runnable twice.
+    #[test]
+    fn the_merged_ladder_climbs_from_an_old_stamp_to_136_and_survives_a_second_run() {
+        let temp = TempDb::new("gaia-space-merged-ladder");
+        let conn = open_at(&temp).expect("database");
+        migrate(&conn).expect("migrate to head");
+        seed(&conn).expect("seed");
+        // Stamp the database BELOW every rung the merge touched and climb the whole way.
+        conn.pragma_update(None, "user_version", 100).expect("rewind");
+        migrate(&conn).expect("climb from V100");
+        let head = |label: &str| {
+            let version: i64 = conn
+                .pragma_query_value(None, "user_version", |row| row.get(0))
+                .expect("version");
+            println!("MIGRATION PROOF {label}: user_version={version}");
+            version
+        };
+        assert_eq!(head("after climb from 100"), 138);
+        assert_eq!(SCHEMA_VERSION, 138);
+        // Every rung the merge touched exists exactly once, and by name.
+        for (table, column) in [
+            ("projects", "lead_id"),
+            ("issues", "source_entity_type"),
+            ("meetings", "source_entity_type"),
+            ("todos", "category"),
+            ("documents", "source_entity_type"),
+            ("documents", "source_entity_id"),
+        ] {
+            let present: i64 = conn
+                .query_row(
+                    &format!("SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name=?1"),
+                    [column],
+                    |row| row.get(0),
+                )
+                .expect("columns");
+            assert_eq!(present, 1, "{table}.{column} is missing after the climb");
+        }
+        assert!(table_exists(&conn, "channel_notes").expect("channel_notes"));
+        migrate(&conn).expect("migrate() is idempotent at head");
+        assert_eq!(head("after second run at head"), 138);
     }
 
     #[test]
@@ -2648,6 +2818,104 @@ mod tests {
             )
             .unwrap();
         assert_eq!(exists, 1);
+    }
+
+    /// V132 is additive: a database stamped at V131 gains a nullable `projects.lead_id`
+    /// and loses nothing — existing rows keep their name, owner, and deadline.
+    #[test]
+    fn v131_database_gains_project_lead_column_without_touching_rows() {
+        let conn = open_in_memory().expect("db");
+        migrate(&conn).expect("latest schema");
+        seed(&conn).expect("seed");
+        conn.execute("INSERT INTO projects(id,name,key,created_by,archived,deadline,created_at) VALUES('legacy','Legacy','LGY','default-org',0,'2030-01-01',1)", []).unwrap();
+        conn.pragma_update(None, "user_version", 131)
+            .expect("V131 stamp");
+        migrate(&conn).expect("V132 migration");
+        let (owner, deadline, lead): (Option<String>, Option<String>, Option<String>) = conn
+            .query_row(
+                "SELECT created_by,deadline,lead_id FROM projects WHERE id='legacy'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(owner.as_deref(), Some("default-org"), "ownership untouched");
+        assert_eq!(deadline.as_deref(), Some("2030-01-01"));
+        assert_eq!(lead, None, "a project without a lead is normal");
+        migrate(&conn).expect("V132 re-run is idempotent");
+    }
+
+    /// V133 is additive: a database stamped at V132 gains nullable source anchors on
+    /// issues and meetings, and every existing row keeps its content untouched.
+    #[test]
+    fn v132_database_gains_source_anchor_columns_without_touching_rows() {
+        let conn = open_in_memory().expect("db");
+        migrate(&conn).expect("latest schema");
+        seed(&conn).expect("seed");
+        conn.execute("INSERT INTO projects(id,name,key,created_by,archived,created_at) VALUES('p-anchor','Anchor','ANC','default-org',0,1)", []).unwrap();
+        conn.execute("INSERT INTO issues(id,project_id,number,title,archived) VALUES('legacy-issue','p-anchor',1,'Legacy issue',0)", []).unwrap();
+        conn.execute("INSERT INTO meetings(id,title,starts_at,ends_at,archived) VALUES('legacy-meeting','Legacy meeting',10,20,0)", []).unwrap();
+        conn.pragma_update(None, "user_version", 132)
+            .expect("V132 stamp");
+        migrate(&conn).expect("V133 migration");
+        let (title, kind, anchor): (String, Option<String>, Option<String>) = conn
+            .query_row(
+                "SELECT title,source_entity_type,source_entity_id FROM issues WHERE id='legacy-issue'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(title, "Legacy issue", "issue content untouched");
+        assert_eq!(
+            (kind, anchor),
+            (None, None),
+            "an unanchored issue is normal"
+        );
+        let (title, kind, anchor): (String, Option<String>, Option<String>) = conn
+            .query_row(
+                "SELECT title,source_entity_type,source_entity_id FROM meetings WHERE id='legacy-meeting'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(title, "Legacy meeting", "meeting content untouched");
+        assert_eq!((kind, anchor), (None, None));
+        migrate(&conn).expect("V133 re-run is idempotent");
+    }
+
+    /// V136 is additive: a database stamped at V135 gains a nullable `todos.category`,
+    /// every existing row keeps its content, and an uncategorised task stays NULL —
+    /// that is the normal state, not a migration that failed halfway.
+    #[test]
+    fn v135_database_gains_a_nullable_todo_category_without_touching_rows() {
+        let conn = open_in_memory().expect("db");
+        migrate(&conn).expect("latest schema");
+        seed(&conn).expect("seed");
+        conn.execute("INSERT INTO todos(id,profile_id,content,done) VALUES('legacy-todo','default-org','Legacy task',0)", []).unwrap();
+        conn.pragma_update(None, "user_version", 135)
+            .expect("V135 stamp");
+        migrate(&conn).expect("V136 migration");
+        let (content, category): (String, Option<String>) = conn
+            .query_row(
+                "SELECT content,category FROM todos WHERE id='legacy-todo'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(content, "Legacy task", "todo content untouched");
+        assert_eq!(category, None, "a task without a category is normal");
+        let version: i64 = conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(version, SCHEMA_VERSION);
+        migrate(&conn).expect("V136 re-run is idempotent");
+        let present: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('todos') WHERE name='category'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(present, 1, "the column exists exactly once");
     }
 
     #[test]
@@ -3252,7 +3520,7 @@ mod v133_contract_tests {
         assert_eq!(
             conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
                 .unwrap(),
-            133
+            138
         );
         let before: String = conn.query_row("SELECT group_concat(sql, '\n') FROM sqlite_master WHERE type IN ('index','trigger') ORDER BY name", [], |r| r.get(0)).unwrap();
         migrate(&conn).unwrap();

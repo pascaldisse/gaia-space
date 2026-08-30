@@ -43,11 +43,14 @@ pub struct Meeting {
     pub video_room_id: Option<String>,
     #[serde(default)]
     pub join_url: Option<String>,
-    /// User-facing external HTTP(S) meeting link; never the native LiveKit call URL.
-    #[serde(default)]
-    pub meeting_url: Option<String>,
     #[serde(default = "default_video_status")]
     pub video_status: String,
+    /// The EXTERNAL conference link a person pasted (Google Meet, Zoom, Teams, …).
+    /// Writable from the composer, unlike `join_url`, which the native call path owns.
+    /// No provider is parsed out of it: a URL is a URL, and guessing the vendor would
+    /// only create a second, wrong truth beside `video_provider`.
+    #[serde(default)]
+    pub meeting_url: Option<String>,
     /// Native lifecycle audit facts. Input writers never control them.
     #[serde(default)]
     pub video_started_at: Option<i64>,
@@ -55,6 +58,13 @@ pub struct Meeting {
     pub video_ended_at: Option<i64>,
     #[serde(default)]
     pub video_ended_by: Option<String>,
+    /// Where this date came from, e.g. `("message", <message id>)` for a meeting
+    /// arranged out of a channel conversation. Free-form by design (see `db` V133)
+    /// and both-or-neither, exactly like the todo anchor it mirrors.
+    #[serde(default)]
+    pub source_entity_type: Option<String>,
+    #[serde(default)]
+    pub source_entity_id: Option<String>,
 }
 fn default_video_status() -> String {
     "scheduled".into()
@@ -94,49 +104,62 @@ fn row_to_meeting(r: &rusqlite::Row<'_>) -> rusqlite::Result<Meeting> {
         video_provider: r.get(12)?,
         video_room_id: r.get(13)?,
         join_url: r.get(14)?,
-        meeting_url: r.get(15)?,
-        video_status: r.get(16)?,
-        video_started_at: r.get(17)?,
-        video_ended_at: r.get(18)?,
-        video_ended_by: r.get(19)?,
+        video_status: r.get(15)?,
+        video_started_at: r.get(16)?,
+        video_ended_at: r.get(17)?,
+        video_ended_by: r.get(18)?,
+        source_entity_type: r.get(19)?,
+        source_entity_id: r.get(20)?,
+        meeting_url: r.get(21)?,
     })
 }
 
-fn validate_external_meeting_url(url: &Option<String>) -> Result<()> {
-    let Some(value) = url.as_ref() else {
-        return Ok(());
+/// An anchor names its source with BOTH halves or neither; half an anchor is a
+/// dangling pointer nothing can render. Mirrors `personal::valid_anchor`.
+fn valid_anchor(entity_type: &Option<String>, entity_id: &Option<String>) -> Result<()> {
+    if entity_type.is_some() != entity_id.is_some() {
+        return Err("Source anchors require both entity type and entity ID".into());
+    }
+    Ok(())
+}
+
+/// An external meeting link is accepted as typed, with exactly one rule: it must be a
+/// web address. Anything else — `meet.google.com/abc` without a scheme, `javascript:`,
+/// `file:` — is REFUSED WITH A MESSAGE rather than repaired or stored, because a
+/// silently "fixed" or silently dropped link is a Join button that goes nowhere.
+/// Blank is not an error: it means the meeting has no external link.
+fn normalize_meeting_url(raw: Option<&str>) -> Result<Option<String>> {
+    let Some(trimmed) = raw.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(None);
     };
-    let trimmed = value.trim();
-    if trimmed.is_empty()
-        || trimmed.chars().any(char::is_whitespace)
-        || !(trimmed.starts_with("http://") || trimmed.starts_with("https://"))
-    {
-        return Err("Meeting URL must be an http(s) URL".into());
+    let lower = trimmed.to_ascii_lowercase();
+    if !(lower.starts_with("http://") || lower.starts_with("https://")) {
+        return Err("Meeting link must be a web address starting with http:// or https://".into());
     }
-    let authority = &trimmed[trimmed.find("://").expect("checked scheme") + 3..];
-    if authority.is_empty()
-        || authority.starts_with('/')
-        || authority.split('/').next().is_some_and(str::is_empty)
-    {
-        return Err("Meeting URL must be an http(s) URL".into());
+    // A scheme alone is not an address; `https://` must be followed by a host.
+    let host = trimmed
+        .split_once("//")
+        .map(|(_, rest)| rest)
+        .unwrap_or_default();
+    if host.trim().is_empty() || host.starts_with('/') {
+        return Err("Meeting link is missing its address after http:// or https://".into());
     }
-    Ok(())
+    Ok(Some(trimmed.to_string()))
 }
-fn normalize_external_meeting_url(url: &mut Option<String>) -> Result<()> {
-    validate_external_meeting_url(url)?;
-    if let Some(value) = url {
-        *value = value.trim().to_owned();
-    }
-    Ok(())
+
+fn validate_meeting_url(raw: Option<&str>) -> Result<()> {
+    normalize_meeting_url(raw).map(|_| ())
 }
+
 fn validate_meeting(meeting: &Meeting) -> Result<()> {
-    validate_external_meeting_url(&meeting.meeting_url)?;
     if meeting.title.trim().is_empty() {
         return Err("Meeting title is required".into());
     }
     if meeting.ends_at <= meeting.starts_at {
         return Err("Meeting end must be after its start".into());
     }
+    valid_anchor(&meeting.source_entity_type, &meeting.source_entity_id)?;
+    validate_meeting_url(meeting.meeting_url.as_deref())?;
     if let Some(rule) = &meeting.rrule {
         parse_rule(rule)?;
     }
@@ -159,7 +182,7 @@ fn validate_meeting(meeting: &Meeting) -> Result<()> {
     Ok(())
 }
 
-const MEETING_COLUMNS: &str = "m.id,m.title,m.description,m.starts_at,m.ends_at,m.rrule,m.location,m.organizer_id,m.channel_id,m.visibility,m.modification_preference,m.archived,m.video_provider,m.video_room_id,m.join_url,m.meeting_url,m.video_status,m.video_started_at,m.video_ended_at,m.video_ended_by";
+const MEETING_COLUMNS: &str = "m.id,m.title,m.description,m.starts_at,m.ends_at,m.rrule,m.location,m.organizer_id,m.channel_id,m.visibility,m.modification_preference,m.archived,m.video_provider,m.video_room_id,m.join_url,m.video_status,m.video_started_at,m.video_ended_at,m.video_ended_by,m.source_entity_type,m.source_entity_id,m.meeting_url";
 /// Private meetings are organizer-only; participant meetings additionally expose
 /// themselves to invited people and the legacy project-channel audience; public
 /// meetings are visible to every authenticated profile.
@@ -356,10 +379,10 @@ fn attach_meeting_channel_on(c: &rusqlite::Connection, id: &str) -> Result<Strin
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn create_meeting(mut meeting: Meeting) -> Result<()> {
-    normalize_external_meeting_url(&mut meeting.meeting_url)?;
     validate_meeting(&meeting)?;
     let c = db::conn()?;
-    c.execute("INSERT INTO meetings(id,title,description,starts_at,ends_at,rrule,location,organizer_id,channel_id,visibility,modification_preference,archived,video_provider,meeting_url,video_status) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)", rusqlite::params![meeting.id, meeting.title, meeting.description, meeting.starts_at, meeting.ends_at, meeting.rrule, meeting.location, meeting.organizer_id, meeting.channel_id, meeting.visibility, meeting.modification_preference, meeting.archived, meeting.video_provider, meeting.meeting_url, meeting.video_status]).map_err(|e| e.to_string())?;
+    let meeting_url = normalize_meeting_url(meeting.meeting_url.as_deref())?;
+    c.execute("INSERT INTO meetings(id,title,description,starts_at,ends_at,rrule,location,organizer_id,channel_id,visibility,modification_preference,archived,video_provider,video_status,source_entity_type,source_entity_id,meeting_url) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)", rusqlite::params![meeting.id, meeting.title, meeting.description, meeting.starts_at, meeting.ends_at, meeting.rrule, meeting.location, meeting.organizer_id, meeting.channel_id, meeting.visibility, meeting.modification_preference, meeting.archived, meeting.video_provider, meeting.video_status, meeting.source_entity_type, meeting.source_entity_id, meeting_url]).map_err(|e| e.to_string())?;
     if meeting.channel_id.is_none() {
         meeting.channel_id = Some(attach_meeting_channel_on(&c, &meeting.id)?);
     }
@@ -367,8 +390,7 @@ pub fn create_meeting(mut meeting: Meeting) -> Result<()> {
     Ok(())
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn update_meeting(mut meeting: Meeting) -> Result<()> {
-    normalize_external_meeting_url(&mut meeting.meeting_url)?;
+pub fn update_meeting(meeting: Meeting) -> Result<()> {
     validate_meeting(&meeting)?;
     let c = db::conn()?;
     let current: String = c
@@ -379,7 +401,8 @@ pub fn update_meeting(mut meeting: Meeting) -> Result<()> {
         )
         .map_err(|_| "Meeting not found".to_string())?;
     validate_calendar_video_status_transition(&current, &meeting.video_status)?;
-    let changed = c.execute("UPDATE meetings SET title=?2,description=?3,starts_at=?4,ends_at=?5,rrule=?6,location=?7,organizer_id=?8,channel_id=?9,visibility=?10,modification_preference=?11,archived=?12,video_provider=?13,meeting_url=?14,video_status=?15 WHERE id=?1", rusqlite::params![meeting.id, meeting.title, meeting.description, meeting.starts_at, meeting.ends_at, meeting.rrule, meeting.location, meeting.organizer_id, meeting.channel_id, meeting.visibility, meeting.modification_preference, meeting.archived, meeting.video_provider, meeting.meeting_url, meeting.video_status]).map_err(|e| e.to_string())?;
+    let meeting_url = normalize_meeting_url(meeting.meeting_url.as_deref())?;
+    let changed = c.execute("UPDATE meetings SET title=?2,description=?3,starts_at=?4,ends_at=?5,rrule=?6,location=?7,organizer_id=?8,channel_id=?9,visibility=?10,modification_preference=?11,archived=?12,video_provider=?13,video_status=?14,source_entity_type=?15,source_entity_id=?16,meeting_url=?17 WHERE id=?1", rusqlite::params![meeting.id, meeting.title, meeting.description, meeting.starts_at, meeting.ends_at, meeting.rrule, meeting.location, meeting.organizer_id, meeting.channel_id, meeting.visibility, meeting.modification_preference, meeting.archived, meeting.video_provider, meeting.video_status, meeting.source_entity_type, meeting.source_entity_id, meeting_url]).map_err(|e| e.to_string())?;
     if changed == 0 {
         return Err("Meeting not found".into());
     }
@@ -407,6 +430,13 @@ pub fn archive_meeting(id: String, archived: bool) -> Result<()> {
     Ok(())
 }
 
+/// Registered for BOTH transports. The web dispatcher has always routed
+/// `delete_meeting`; the desktop handler never listed it, so deleting a meeting
+/// failed on the desktop with "Command delete_meeting not found" — the third
+/// instance of this exact class in this repo (`get_issue_detail` was the first).
+/// A command that carries its attribute but is absent from `lib.rs` fails only at
+/// runtime, only on one transport, and only when a person tries.
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn delete_meeting(id: String) -> Result<()> {
     let mut c = db::conn()?;
     let tx = c.transaction().map_err(|e| e.to_string())?;
@@ -751,6 +781,8 @@ mod tests {
             video_started_at: None,
             video_ended_at: None,
             video_ended_by: None,
+            source_entity_type: None,
+            source_entity_id: None,
         }
     }
     #[test]
@@ -770,6 +802,36 @@ mod tests {
             vec![start, start + 86_400, start + 172_800]
         );
     }
+    /// A date arranged in a channel must still know which message arranged it after a
+    /// round-trip through storage, and a half-written anchor never reaches the table.
+    #[test]
+    fn source_anchor_round_trips_on_a_meeting_and_halves_are_refused() {
+        let c = scope_conn();
+        c.execute("INSERT INTO meetings(id,title,starts_at,ends_at,archived,source_entity_type,source_entity_id) VALUES('m-anchored','Release sync',10,20,0,'message','msg-7')", []).unwrap();
+        let stored = c
+            .query_row(
+                &format!("SELECT {MEETING_COLUMNS} FROM meetings m WHERE m.id='m-anchored'"),
+                [],
+                row_to_meeting,
+            )
+            .unwrap();
+        assert_eq!(stored.title, "Release sync");
+        assert_eq!(stored.source_entity_type.as_deref(), Some("message"));
+        assert_eq!(stored.source_entity_id.as_deref(), Some("msg-7"));
+
+        let mut half = meeting(1000, None);
+        half.source_entity_type = Some("message".into());
+        assert!(
+            validate_meeting(&half).is_err(),
+            "an anchor without its id is refused"
+        );
+        half.source_entity_type = None;
+        half.source_entity_id = Some("msg-7".into());
+        assert!(validate_meeting(&half).is_err());
+        half.source_entity_type = Some("message".into());
+        assert!(validate_meeting(&half).is_ok(), "both halves are accepted");
+    }
+
     fn scope_conn() -> rusqlite::Connection {
         use std::sync::atomic::{AtomicU64, Ordering};
         static COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -1041,6 +1103,72 @@ mod tests {
         assert!(validate_meeting(&m).is_ok());
         m.video_status = "whenever".into();
         assert!(validate_meeting(&m).is_err());
+    }
+
+    #[test]
+    fn an_external_meeting_link_must_be_a_web_address() {
+        // Blank in any spelling is "no link", not an error.
+        for blank in [None, Some(""), Some("   ")] {
+            assert_eq!(normalize_meeting_url(blank).unwrap(), None);
+        }
+        // Accepted as typed, with surrounding whitespace removed — never rewritten.
+        assert_eq!(
+            normalize_meeting_url(Some("  https://meet.google.com/abc-defg-hij  ")).unwrap(),
+            Some("https://meet.google.com/abc-defg-hij".to_string())
+        );
+        assert_eq!(
+            normalize_meeting_url(Some("HTTP://zoom.us/j/123?pwd=x")).unwrap(),
+            Some("HTTP://zoom.us/j/123?pwd=x".to_string())
+        );
+        // Refused loudly, never repaired and never silently dropped.
+        for bad in [
+            "meet.google.com/abc",
+            "javascript:alert(1)",
+            "file:///etc/passwd",
+            "ws://127.0.0.1:7880",
+            "https://",
+            "https:///path-with-no-host",
+        ] {
+            assert!(
+                normalize_meeting_url(Some(bad)).is_err(),
+                "{bad} must be refused"
+            );
+        }
+
+        let mut m = meeting(1000, None);
+        m.meeting_url = Some("notaurl".into());
+        assert!(validate_meeting(&m).is_err());
+        m.meeting_url = Some("https://teams.microsoft.com/l/meetup-join/x".into());
+        assert!(validate_meeting(&m).is_ok());
+    }
+
+    #[test]
+    fn an_external_meeting_link_round_trips_and_never_touches_the_native_join_url() {
+        let c = crate::db::open_in_memory().unwrap();
+        crate::db::migrate(&c).unwrap();
+        c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('p-owner','p-owner','p-owner',unixepoch())", []).unwrap();
+        c.execute(
+            "INSERT INTO meetings(id,title,starts_at,ends_at,organizer_id,archived,visibility,modification_preference,video_status,meeting_url) VALUES('m-x','Sync',1,2,'p-owner',0,'participants','organizer-only','scheduled','https://meet.google.com/abc-defg-hij')",
+            [],
+        )
+        .unwrap();
+
+        let stored = get_meeting_unscoped(&c, "m-x").unwrap().unwrap();
+        assert_eq!(
+            stored.meeting_url.as_deref(),
+            Some("https://meet.google.com/abc-defg-hij"),
+            "the pasted link must survive the read path"
+        );
+        assert_eq!(stored.join_url, None);
+
+        // A native LiveKit join writes `join_url` — and must leave the pasted link alone.
+        record_call_room_on(&c, "m-x", "livekit", "meeting-m-x", "ws://127.0.0.1:7880").unwrap();
+        let after = get_meeting_unscoped(&c, "m-x").unwrap().unwrap();
+        assert_eq!(
+            after.meeting_url.as_deref(),
+            Some("https://meet.google.com/abc-defg-hij")
+        );
+        assert_eq!(after.join_url.as_deref(), Some("ws://127.0.0.1:7880"));
     }
 }
 

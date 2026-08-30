@@ -1,204 +1,359 @@
 import { createResource, createSignal, For, Show, onMount } from "solid-js";
-import { personalApi, type Todo as TodoItem } from "../api/personal";
+import { TODO_CATEGORIES, personalApi, type Todo as TodoItem } from "../api/personal";
+import "../components/paper.css";
 import "./Todo.css";
-import { ProfilePicker } from "../components/Pickers";
-import { WorkspaceHeader } from "../components/WorkspaceHeader";
-import { AssigneeControl, DueDateControl, ProjectControl } from "../components/TaskMeta";
+import "./taskCards.css";
+import PageHeader, { Chip } from "../components/PageHeader";
+import SourceLink from "../components/SourceLink";
+import EmptyState from "../components/EmptyState";
+import ConfirmDialog from "../components/ConfirmDialog";
+import ContextMenu, { type ContextMenuItem } from "../components/ContextMenu";
+import DeleteButton from "../components/DeleteButton";
+import TaskRowEdit, { blankTask, focusTaskRow } from "../components/TaskRowEdit";
 import { profileId, profiles, reloadProfiles, projects, reloadProjects } from "../session";
 import { parseMarkdown } from "../markdownLite";
+import { bandTone, deadlineBand, todayISO, urgencyOf } from "../statusTone";
 import { humanError } from "../session";
+import { Icon } from "../components/Icon";
+import ContentHead from "../components/ContentHead";
 
-const blank = () => ({ content:"", notes:"", due_date:"", project_id:"", source_entity_type:"", source_entity_id:"", assignee_ids:[] as string[], content_kind:"text" as "text"|"markdown" });
 // Tokens, never HTML: a task body can style itself but can never inject markup.
 const markdownBody=(body:string)=><div class="task-markdown"><For each={parseMarkdown(body)}>{block=><p classList={{"task-md-line":true,"task-md-bullet":block.bullet}}><For each={block.tokens}>{token=>token.kind==="strong"?<strong>{token.text}</strong>:token.kind==="em"?<em>{token.text}</em>:token.kind==="code"?<code>{token.text}</code>:<>{token.text}</>}</For></p>}</For></div>;
-type MemberLookup = { ids?: string[]; failed?: string };
+/* The rail's coloured numbers used to be hard-coded classes, then a local
+   `metricClass` helper. Both are gone: the shared MetricTile applies `metricTone`
+   itself, so "0 Overdue" cannot be red no matter what a caller passes. */
 export default function Todo() {
   onMount(()=>{ void reloadProfiles(); void reloadProjects(); });
-  const [form,setForm]=createSignal(blank()); const [error,setError]=createSignal("");
+  /* ONE CREATION ACT, ONE SHAPE (stage 20). The always-open inline composer is gone:
+     it was ~180px of form standing between the reader and the list on the surface the
+     owner named first ("This left area bothers me on Tasks"). NOTHING it could do was
+     lost — title, project, due date, assignees, notes, the markdown switch and the
+     source bookmark are all in the drawer (`advanced` turns the last two on, and My
+     tasks is the only surface that ever had them). Editing an existing task did NOT
+     move: it still happens in place, in the row (`.task-card-editing`, below). */
+  const [creating,setCreating]=createSignal(false); const [error,setError]=createSignal("");
+  /** Done is folded away by default — it is the part of the list you are finished
+   *  with, and it only ever grows. */
+  const [showDone,setShowDone]=createSignal(false);
   const [todos,{refetch}]=createResource(profileId,id=>id?personalApi.todos(id,true):Promise.resolve([]));
-  // A refused member read is carried as a value: the composer must say the list could
-  // not be loaded, never quietly offer "nobody" as if the project were empty.
-  const loadMembers=async(id:string):Promise<MemberLookup>=>{
-    if(!id) return { ids: [] };
-    try { return { ids: await personalApi.projectMemberIds(id) }; }
-    catch(reason){ return { failed: humanError(reason) }; }
-  };
-  const [projectMembers]=createResource(()=>form().project_id,loadMembers);
-  const idsOf=(value:MemberLookup|undefined)=>value&&"ids" in value?value.ids??[]:[];
-  const failedOf=(value:MemberLookup|undefined)=>value&&"failed" in value?value.failed??"":"";
-  const memberIds=()=>idsOf(projectMembers());
-  const membersFailed=()=>failedOf(projectMembers());
+  /* The project-member read, the assignable-people list and the project list moved
+     WITH the editor into components/TaskRowEdit.tsx — including the rule that a
+     refused member read is carried as a value and said out loud, never shown as
+     "nobody". This view keeps only what its own rows and rail need. */
   const active=()=>profiles()?.filter(p=>!p.archived)??[];
   const nameOf=(id:string)=>{ const p=active().find(x=>x.id===id); return p?(p.display_name||p.username):id; };
   const projectName=(id:string)=>projects()?.find(project=>project.id===id)?.name??id;
-  const addAssignee=(id:string)=>{ if(!id || !form().project_id) return; const f=form(); if(f.assignee_ids.includes(id)) return; setForm({...f,assignee_ids:[...f.assignee_ids,id]}); };
-  // A person is on or off this task; the popover stays open so several can be picked.
-  const toggleAssignee=(id:string)=>{ form().assignee_ids.includes(id) ? removeAssignee(id) : addAssignee(id); };
-  // Assignable people are the project's members: the project decides who may carry
-  // its work, and the server refuses anybody else.
-  const assignableFrom=(ids:string[])=>active().filter(person=>ids.includes(person.id)).map(person=>({id:person.id,label:person.display_name||person.username,sub:person.username}));
-  const assignable=()=>assignableFrom(memberIds());
-  const selectableProjects=()=>(projects()??[]).filter(project=>!project.archived).map(project=>({id:project.id,name:project.name,key:project.key}));
-  const removeAssignee=(id:string)=>{ const f=form(); setForm({...f,assignee_ids:f.assignee_ids.filter(x=>x!==id)}); };
-  const selectProject=(id:string)=>setForm({...form(),project_id:id,assignee_ids:id?form().assignee_ids:[]});
-  const save=async(e:SubmitEvent)=>{ e.preventDefault(); try { if(!profileId().trim()||!form().content.trim()) throw new Error("Pick a profile and enter task content."); const f=form(); if(Boolean(f.source_entity_type)!==Boolean(f.source_entity_id)) throw new Error("Source type and source ID must be supplied together."); await personalApi.createTodo({profile_id:profileId().trim(),content:f.content.trim(),due_date:f.due_date||null,project_id:f.project_id||null,done:false,source_entity_type:f.source_entity_type||null,source_entity_id:f.source_entity_id||null,notes:f.notes.trim()||null,assignee_ids:f.assignee_ids,content_kind:f.content_kind}); setForm(blank()); refetch(); } catch(reason) { setError(humanError(reason)); } };
+  /** An unknown category still shows its stored value rather than vanishing: a row
+   *  that silently drops a fact is worse than one that shows a word we did not plan. */
+  const categoryLabel=(id:string)=>TODO_CATEGORIES.find(option=>option.id===id)?.label??id;
+  /** THE QUIET LINE UNDER A TASK'S NAME, in the order it is read: what KIND of act,
+   *  then where it lives, then who carries it, then what it is about.
+   *
+   *  The category leads because it is the one fact that says what sort of work this
+   *  is — and it carries NO COLOUR. Both coloured things on this tile (the state mark
+   *  and the due date) come from `deadlineBand()`/`urgencyOf()`; a category palette
+   *  beside them would be a second colour rule on one card, and "what kind of work"
+   *  would compete with "how late". One colour rule per tile. */
+  const metaParts=(todo:TodoItem)=>{
+    const parts:{cls:string;text:string}[]=[];
+    if(todo.category) parts.push({cls:"task-tile-cat",text:categoryLabel(todo.category)});
+    if(todo.project_id) parts.push({cls:"",text:projectName(todo.project_id)});
+    if(todo.assignee_ids.length) parts.push({cls:"",text:todo.assignee_ids.map(nameOf).join(", ")});
+    if(todo.notes) parts.push({cls:"",text:todo.notes.length>60?todo.notes.slice(0,60)+"…":todo.notes});
+    return parts;
+  };
   const complete=async(todo:TodoItem, done:boolean)=>{ try { await personalApi.setTodoCompletion(todo.id,done); refetch(); } catch(reason) { setError(humanError(reason)); } };
 
-  // ── edit an existing task (content/notes/due date/project/assignees/source) ──
-  // One row editable at a time, same shape as the composer, reusing its own
-  // controls so editing never looks like a second, different UI.
+  /* ── EDIT AN EXISTING TASK: IN THE ROW ──────────────────────────────────────
+     One row open at a time. The editor itself moved to components/TaskRowEdit.tsx
+     UNCHANGED IN SUBSTANCE (same controls, same classes, same Save/Cancel), because
+     the project and team surfaces now open the SAME editor with the same gesture.
+     This surface keeps what is its own: which row is open, and where the focus goes
+     when it closes. */
   const [editingId,setEditingId]=createSignal<string|null>(null);
-  const [editForm,setEditForm]=createSignal(blank());
-  const [editMembers]=createResource(()=>editForm().project_id,loadMembers);
-  const editMemberIds=()=>idsOf(editMembers());
-  const editMembersFailed=()=>failedOf(editMembers());
-  const startEdit=(todo:TodoItem)=>{
-    setEditingId(todo.id);
-    setEditForm({ content:todo.content, notes:todo.notes??"", due_date:todo.due_date??"", project_id:todo.project_id??"", source_entity_type:todo.source_entity_type??"", source_entity_id:todo.source_entity_id??"", assignee_ids:[...todo.assignee_ids], content_kind:todo.content_kind??"text" });
-    setError("");
-  };
-  const cancelEdit=()=>setEditingId(null);
-  const selectEditProject=(id:string)=>setEditForm({...editForm(),project_id:id,assignee_ids:id?editForm().assignee_ids:[]});
-  const addEditAssignee=(id:string)=>{ if(!id || !editForm().project_id) return; const f=editForm(); if(f.assignee_ids.includes(id)) return; setEditForm({...f,assignee_ids:[...f.assignee_ids,id]}); };
-  const removeEditAssignee=(id:string)=>{ const f=editForm(); setEditForm({...f,assignee_ids:f.assignee_ids.filter(x=>x!==id)}); };
-  const toggleEditAssignee=(id:string)=>{ editForm().assignee_ids.includes(id) ? removeEditAssignee(id) : addEditAssignee(id); };
-  const saveEdit=async(todo:TodoItem)=>{
+  /** Which field the row editor opens on. Clicking the "add a description" hint
+   *  must land the caret in the description, not in the title. */
+  const [editIntent,setEditIntent]=createSignal<"title"|"notes">("title");
+  // FOCUS RETURNS TO THE ROW ON CLOSE. Not to the element that opened it: closing
+  // follows a re-read that replaces that button. The row is found again by task id.
+  const startEdit=(todo:TodoItem,field:"title"|"notes"="title")=>{ setEditIntent(field); setEditingId(todo.id); setError(""); };
+  const closeEdit=(id:string)=>{ setEditingId(null); focusTaskRow(id); };
+
+  /* ── DELETING A TASK ────────────────────────────────────────────────────────
+     THE OWNER RULE, quoted from the server, not invented here: the CREATOR
+     (`profile_id`) may delete. A SHARED task — one bound to a project, or carried
+     by somebody else — may NOT be deleted by the person it was put on: this list
+     contains other people's tasks assigned to me, and removing one would delete
+     THEIR work to clear MY list. Those rows get no button, and a reason instead.
+
+     Two doors, one act and one question: the row's right-click menu (where people
+     point at a task) and the opened task's own facts (below). Both open the
+     ConfirmDialog; neither deletes on click. */
+  const ownsTask=(todo:TodoItem)=>!!profileId()&&todo.profile_id===profileId();
+  const [menu,setMenu]=createSignal<{x:number;y:number;items:ContextMenuItem[]}|null>(null);
+  const [pendingDelete,setPendingDelete]=createSignal<TodoItem|null>(null);
+  const [deleting,setDeleting]=createSignal(false);
+  /* The row's old glyph buttons (+1d, +1w, → Ticket) are WORDS in this menu now.
+     Nothing was dropped: postponing and converting are still one click away, they
+     just no longer sit on every tile as unlabelled furniture. */
+  const taskMenuItems=(todo:TodoItem):ContextMenuItem[]=>[
+    { label:"Open", onSelect:()=>startEdit(todo) },
+    ...(todo.done?[]:[
+      { label:"Postpone by a day", onSelect:()=>void postpone(todo,1) },
+      { label:"Postpone by a week", onSelect:()=>void postpone(todo,7) },
+    ]),
+    ...(!todo.done&&todo.project_id&&todo.source_entity_type!=="issue"
+      ?[{ label:"Convert to ticket", onSelect:()=>void convert(todo) }]
+      :[]),
+    ...(ownsTask(todo)?[{ label:"Delete task…", danger:true, onSelect:()=>setPendingDelete(todo) }]:[]),
+  ];
+  const openTaskMenu=(event:MouseEvent,todo:TodoItem)=>{ event.preventDefault(); event.stopPropagation(); setMenu({x:event.clientX,y:event.clientY,items:taskMenuItems(todo)}); };
+  const deleteTask=async()=>{
+    const todo=pendingDelete(); if(!todo) return;
+    setError(""); setDeleting(true);
     try {
-      const f=editForm();
-      if(!f.content.trim()) throw new Error("Task content cannot be empty.");
-      if(Boolean(f.source_entity_type)!==Boolean(f.source_entity_id)) throw new Error("Source type and source ID must be supplied together.");
-      // Everything not in the edit form (id, profile_id, done…) survives untouched.
-      await personalApi.updateTodo({...todo,content:f.content.trim(),notes:f.notes.trim()||null,due_date:f.due_date||null,project_id:f.project_id||null,source_entity_type:f.source_entity_type||null,source_entity_id:f.source_entity_id||null,assignee_ids:f.assignee_ids,content_kind:f.content_kind});
-      setEditingId(null);
+      await personalApi.deleteTodo(todo.id,profileId());
+      setPendingDelete(null); if(editingId()===todo.id) setEditingId(null);
       refetch();
-    } catch(reason) { setError(humanError(reason)); }
+    } catch(reason) {
+      // This surface's one error line. A refusal is never swallowed.
+      setError(humanError(reason)); setPendingDelete(null);
+    } finally { setDeleting(false); }
   };
 
-  const today=()=>new Date().toISOString().slice(0,10);
-  const inDays=(days:number)=>new Date(Date.now()+days*86400000).toISOString().slice(0,10);
+  const today=todayISO;
   const openTodos=()=>todos()?.filter(todo=>!todo.done)??[];
-  const overdue=()=>openTodos().filter(todo=>todo.due_date&&todo.due_date<today());
-  const dueSoon=()=>openTodos().filter(todo=>todo.due_date&&todo.due_date>=today()&&todo.due_date<=inDays(7));
+  // Overdue / due-soon come from the shared urgency rule, not from a local date
+  // comparison — see `src/statusTone.ts`. "Due soon" here looks a week ahead.
+  const overdue=()=>openTodos().filter(todo=>urgencyOf(todo.due_date,today(),7)==="overdue");
+  const dueSoon=()=>openTodos().filter(todo=>["today","soon"].includes(urgencyOf(todo.due_date,today(),7)));
   const doneCount=()=>todos()?.filter(todo=>todo.done).length??0;
-  const attention=()=>[...overdue(),...dueSoon()].sort((a,b)=>(a.due_date??"").localeCompare(b.due_date??"")).slice(0,5);
   // Today = due today or already overdue (an overdue task IS today's work); Later = a
   // future due date; No date = never scheduled. Every open task lands in exactly one.
   const todayList=()=>openTodos().filter(todo=>todo.due_date&&todo.due_date<=today());
   const laterList=()=>openTodos().filter(todo=>todo.due_date&&todo.due_date>today());
   const somedayList=()=>openTodos().filter(todo=>!todo.due_date);
+  /** Open work of any kind. Zero of it, with tasks on the list, is its own state:
+   *  not 'nothing exists' and not 'a filter matched nothing' — 'you are finished'. */
+  const openCount=()=>openTodos().length;
+  /** True while an EmptyState on this surface is showing its own "New task". */
+  const showsEmptyPrimary=()=>!!profileId()&&!todos.loading&&(!(todos()??[]).length||!openCount());
   const doneList=()=>todos()?.filter(todo=>todo.done)??[];
   const postpone=async(todo:TodoItem,days:number)=>{ try { await personalApi.postponeTodo(todo.id,days); refetch(); } catch(reason) { setError(humanError(reason)); } };
   // Only a task that already belongs to a project can become that project's issue.
-  const convert=async(todo:TodoItem)=>{ try { if(!todo.project_id) throw new Error("Give the task a project before converting it into an issue."); await personalApi.convertTodoToIssue(todo.id,todo.project_id); refetch(); } catch(reason) { setError(humanError(reason)); } };
+  const convert=async(todo:TodoItem)=>{ try { if(!todo.project_id) throw new Error("Give the task a project before converting it into a ticket."); await personalApi.convertTodoToIssue(todo.id,todo.project_id); refetch(); } catch(reason) { setError(humanError(reason)); } };
   const editRow=(todo:TodoItem)=><article class="task-card task-card-editing">
     <div class="task-body">
-      <input class="composer-title" autofocus aria-label="Task title" value={editForm().content} onInput={e=>setEditForm({...editForm(),content:e.currentTarget.value})} onKeyDown={e=>{ if(e.key==="Escape") cancelEdit(); }}/>
-      <div class="composer-meta tm-row">
-        <ProjectControl value={editForm().project_id} projects={selectableProjects()} onChange={selectEditProject}/>
-        <DueDateControl value={editForm().due_date} onChange={iso=>setEditForm({...editForm(),due_date:iso})}/>
-        <AssigneeControl value={editForm().assignee_ids} people={assignableFrom(editMemberIds())} onToggle={toggleEditAssignee}
-          disabled={!editForm().project_id} disabledReason="Select a project before assigning members"
-          emptyNote={editMembersFailed()?`The project's members could not be loaded: ${editMembersFailed()}`:"This project has no members available for assignment."}/>
-      </div>
-      <Show when={editMembersFailed()}>{reason=><p class="personal-error" role="alert">The project's members could not be loaded: {reason()}</p>}</Show>
-      <Show when={editForm().assignee_ids.length}><ul class="assignee-chips"><For each={editForm().assignee_ids}>{id=><li class="assignee-chip">{nameOf(id)}<button type="button" aria-label={`Remove ${nameOf(id)}`} onClick={()=>removeEditAssignee(id)}>×</button></li>}</For></ul></Show>
-      <label class="todo-field todo-field-notes"><span class="field-label">Notes</span><textarea class="composer-notes" rows="3" placeholder="Context, links, hand-over notes" value={editForm().notes} onInput={e=>setEditForm({...editForm(),notes:e.currentTarget.value})}/></label>
-      <label class="fld-check"><input type="checkbox" checked={editForm().content_kind==="markdown"} onChange={e=>setEditForm({...editForm(),content_kind:e.currentTarget.checked?"markdown":"text"})}/> Markdown body</label>
-      <details class="composer-source" open={Boolean(editForm().source_entity_type||editForm().source_entity_id)}><summary>Source bookmark</summary><div class="composer-source-fields"><input placeholder="Entity type (issue, document…)" value={editForm().source_entity_type} onInput={e=>setEditForm({...editForm(),source_entity_type:e.currentTarget.value})}/><input placeholder="Entity ID" value={editForm().source_entity_id} onInput={e=>setEditForm({...editForm(),source_entity_id:e.currentTarget.value})}/></div></details>
-      <div class="composer-actions task-edit-actions"><button type="button" class="ghost" onClick={cancelEdit}>Cancel</button><button type="button" class="primary composer-submit" onClick={()=>saveEdit(todo)}>Save</button></div>
+      {/* My tasks is the surface that has always carried the markdown switch and the
+          source bookmark, so it is the one that asks for them (`advanced`).
+          This is the caller's OWN list, so the caller owns every row in it — the
+          server's owner rule (TodoOwnerWrite) is satisfied by construction here. */}
+      {/* THE ONE ACT THAT REMOVES THE TASK travels INTO the editor's own row of
+          buttons. It used to sit in a strip below the card, outside its border, so the
+          opened task ended in a floating red button that belonged to nothing. */}
+      <TaskRowEdit task={todo} advanced canEdit canComplete ownerName={nameOf(todo.profile_id)} focusField={editIntent()}
+        onCancel={()=>closeEdit(todo.id)}
+        onSaved={()=>{ closeEdit(todo.id); refetch(); }}
+        onError={setError}
+        danger={<DeleteButton
+          label={`Delete ${todo.content}`}
+          canDelete={ownsTask(todo)}
+          deniedReason="Only the owner can delete this"
+          onRequest={()=>setPendingDelete(todo)}/>}/>
     </div>
   </article>;
-  const todoRow=(todo:TodoItem)=><Show when={editingId()===todo.id} fallback={<article classList={{"task-card":true,done:todo.done}}>
-    <input class="task-check" aria-label={`Mark ${todo.content} done`} type="checkbox" checked={todo.done} onChange={e=>complete(todo,e.currentTarget.checked)}/>
-    <button type="button" class="task-body task-body-edit" aria-label={`Edit ${todo.content}`} onClick={()=>startEdit(todo)}>
-      <Show when={todo.content_kind==="markdown"} fallback={<span class="task-title">{todo.content}</span>}><span class="task-title">{markdownBody(todo.content)}</span></Show>
-      <Show when={todo.notes}>{notes=><p class="task-notes">{notes()}</p>}</Show>
-<Show when={todo.due_date||todo.project_id||todo.assignee_ids.length||todo.source_entity_type}>
-        <div class="task-meta">
-          <Show when={todo.due_date}>{date=><span class="task-tag due">{date()}</span>}</Show>
-          <Show when={todo.project_id}>{id=><span class="task-tag project">{projectName(id())}</span>}</Show>
-          <For each={todo.assignee_ids}>{id=><span class="task-tag assignee">{nameOf(id)}</span>}</For>
-          <Show when={todo.source_entity_type}><span class="task-tag source">{todo.source_entity_type}: {todo.source_entity_id}</span></Show>
-        </div>
-      </Show>
-    </button>
-    <div class="task-row-actions">
-      <Show when={!todo.done}>
-        <button type="button" class="ghost small" title="Postpone by one day" aria-label={`Postpone ${todo.content} by a day`} onClick={()=>postpone(todo,1)}>+1d</button>
-        <button type="button" class="ghost small" title="Postpone by a week" aria-label={`Postpone ${todo.content} by a week`} onClick={()=>postpone(todo,7)}>+1w</button>
-        <Show when={todo.project_id&&todo.source_entity_type!=="issue"}>
-          <button type="button" class="ghost small" title="Convert to issue" aria-label={`Convert ${todo.content} to an issue`} onClick={()=>convert(todo)}>→ Issue</button>
+  /** THE TASK TILE — Knowledge's card, in the vocabulary of work: the check is the
+   *  icon tile (the one thing you do without opening it), the name is bold, ONE quiet
+   *  meta line carries project · people · origin, and the due date is the only fact
+   *  that earns colour. Dragging it onto a project in the sidebar files it there. */
+  const todoRow=(todo:TodoItem)=><Show when={editingId()===todo.id} fallback={
+    <article
+      class="task-tile"
+      classList={{ done: todo.done }}
+      draggable={!todo.done}
+      onDragStart={event=>event.dataTransfer?.setData("application/x-gaia-task", JSON.stringify({ id: todo.id, title: todo.content }))}
+      onContextMenu={event=>openTaskMenu(event,todo)}
+    >
+      {/* THE MARK SAYS THE STATE, NOT THE ACT. A tick on an open task reads as
+          "already done"; an open task carries "!" and only a completed one wears the
+          tick. The button still toggles completion — its label says so. */}
+      <button
+        type="button"
+        class="task-tile-check"
+        classList={{ [todo.done?"":bandTone(deadlineBand(todo.due_date,today()))]: !todo.done }}
+        aria-label={`Mark ${todo.content} ${todo.done?"not done":"done"}`}
+        aria-pressed={todo.done}
+        onClick={()=>void complete(todo,!todo.done)}
+      >
+        <Icon name={todo.done?"check":"alert"} size={15} />
+      </button>
+      <button type="button" class="task-tile-body" data-task-row={todo.id} aria-label={`Edit ${todo.content}`} onClick={()=>startEdit(todo)}>
+        <span class="task-tile-title">
+          <Show when={todo.content_kind==="markdown"} fallback={todo.content}>{markdownBody(todo.content)}</Show>
+        </span>
+        {/* THE META LINE JOINS ITSELF. Every separator used to be placed by hand next
+            to the fact it followed, so each new fact had to guess what might come
+            before it — and got it wrong: a category with nothing after it printed
+            "Review ·", and a task carrying only notes printed "· notes". Facts are
+            collected first, then joined, so a dot can only ever appear BETWEEN two of
+            them. */}
+        <Show when={metaParts(todo).length}>
+          <span class="task-tile-meta">
+            <For each={metaParts(todo)}>{(part,index)=><>
+              <Show when={index()>0}><span class="sep">·</span></Show>
+              <span class={part.cls}>{part.text}</span>
+            </>}</For>
+          </span>
         </Show>
-      </Show>
-      <button class="ghost task-delete" title="Delete task" aria-label={`Delete ${todo.content}`} onClick={async()=>{try{await personalApi.deleteTodo(todo.id);refetch()}catch(reason){setError(humanError(reason))}}}>×</button>
-    </div>
-  </article>}>
-    {editRow(todo)}
+      </button>
+      <span class="task-tile-edge">
+        <Show when={todo.due_date}>{date=>{
+          const tone=()=>urgencyOf(date(),today(),7);
+          return <span class="task-due" classList={{ [tone()]: tone()!=="none" }}>{date()}</span>;
+        }}</Show>
+        {/* Outside the edit button on purpose: a link inside a button is neither
+            valid nor clickable, and the origin must stay reachable. */}
+        <Show when={todo.source_entity_type}>{kind=>
+          <Show when={kind()==="message"} fallback={<span class="task-due">{kind()}</span>}>
+            <SourceLink entityType={kind()} entityId={todo.source_entity_id!} />
+          </Show>
+        }</Show>
+      </span>
+      <button
+        class="task-tile-menu"
+        aria-label={`Actions for ${todo.content}`}
+        title="Actions"
+        onClick={event=>openTaskMenu(event,todo)}
+      >⋯</button>
+    </article>
+  }>
+    <div class="task-open">{editRow(todo)}</div>
   </Show>;
   return <section class="personal-view todo-view">
-    <WorkspaceHeader icon="check" title="My tasks" actions={<ProfilePicker locked/>}>Personal tasks and project work, scoped to the people attached to each project.</WorkspaceHeader>
+    <Show when={menu()}>{open=><ContextMenu x={open().x} y={open().y} items={open().items} onClose={()=>setMenu(null)}/>}</Show>
+    <ConfirmDialog
+      open={!!pendingDelete()}
+      title="Delete task?"
+      body={<><strong>{pendingDelete()?.content}</strong> is deleted, with its description, due date and assignees. This cannot be undone.</>}
+      confirmLabel="Delete task"
+      busy={deleting()}
+      onConfirm={()=>void deleteTask()}
+      onCancel={()=>setPendingDelete(null)}/>
+    {/* L1: the shell owns identity. A disabled "Acting as" box in the corner of
+        every load is still a second identity control (audit §3.1). */}
+    {/* THREE TASK SURFACES, THREE SENTENCES (stage 12d). Each says WHOSE work and
+        HOW WIDE, in that order, so no two can be confused:
+          My tasks     — only yours, across every project.
+          Team tasks   — everybody's, across every project you are in.
+          Project Tasks— everybody's, in one project. */}
+    {/* ONE ACTION, ONE PLACE. The header primary and the empty state's primary are
+        the same act, so only one of them is ever drawn: while the surface is empty
+        the empty state carries it (that is where the eye already is, and where the
+        owner asked for it to be obvious), and the moment there is content the header
+        takes it back. Two identical buttons on one screen is the defect this rule
+        exists to prevent. */}
+    {/* THE KNOWLEDGE SHAPE, in the vocabulary of work: header · one action row ·
+        a head that says what you are looking at and what you can do with it ·
+        sections of cards. The "At a glance" rail is GONE: four numbers in a box
+        beside the list restated what the list already shows, and the two figures
+        that carry a decision (how much is open, how much is late) now sit in the
+        header as chips — where a number belongs. */}
+    <PageHeader
+      icon="check"
+      title="My tasks"
+      subline="Only your tasks — yours and what people put on you, across every project."
+      chips={
+        <Show when={!todos.loading && !!(todos() ?? []).length}>
+          <Chip value={openCount()} label="open" />
+          <Show when={overdue().length}><Chip value={overdue().length} label="overdue" tone="red" /></Show>
+          <Show when={dueSoon().length}><Chip value={dueSoon().length} label="due in 7 days" tone="amber" /></Show>
+        </Show>
+      }
+    />
     <Show when={error()}><p class="personal-error">{error()}</p></Show>
-    <div class="view-cols todo-cols">
-      <div class="view-main">
-        <form class="task-composer" onSubmit={save}>
-          <div class="composer-head"><span class="composer-head-label">New task</span></div>
-          <input class="composer-title" autofocus placeholder="What needs doing?" value={form().content} onInput={e=>setForm({...form(),content:e.currentTarget.value})}/>
-          <div class="composer-meta tm-row">
-            <ProjectControl value={form().project_id} projects={selectableProjects()} onChange={selectProject}/>
-            <DueDateControl value={form().due_date} onChange={iso=>setForm({...form(),due_date:iso})}/>
-            <AssigneeControl value={form().assignee_ids} people={assignable()} onToggle={toggleAssignee}
-              disabled={!form().project_id} disabledReason="Select a project before assigning members"
-              emptyNote={membersFailed()?`The project's members could not be loaded: ${membersFailed()}`:"This project has no members available for assignment."}/>
-          </div>
-          <Show when={membersFailed()}>{reason=><p class="personal-error" role="alert">The project's members could not be loaded: {reason()}</p>}</Show>
-          <Show when={form().project_id&&!projectMembers.loading&&!membersFailed()&&!memberIds().length}><p class="hint">This project has no members available for assignment.</p></Show>
-          <Show when={form().assignee_ids.length}><ul class="assignee-chips"><For each={form().assignee_ids}>{id=><li class="assignee-chip">{nameOf(id)}<button type="button" aria-label={`Remove ${nameOf(id)}`} onClick={()=>removeAssignee(id)}>×</button></li>}</For></ul></Show>
-          <label class="todo-field todo-field-notes"><span class="field-label">Notes</span><textarea class="composer-notes" rows="3" placeholder="Context, links, hand-over notes" value={form().notes} onInput={e=>setForm({...form(),notes:e.currentTarget.value})}/></label>
-          <label class="fld-check"><input type="checkbox" checked={form().content_kind==="markdown"} onChange={e=>setForm({...form(),content_kind:e.currentTarget.checked?"markdown":"text"})}/> Markdown body</label>
-<details class="composer-source"><summary>Source bookmark</summary><div class="composer-source-fields"><input placeholder="Entity type (issue, document…)" value={form().source_entity_type} onInput={e=>setForm({...form(),source_entity_type:e.currentTarget.value})}/><input placeholder="Entity ID" value={form().source_entity_id} onInput={e=>setForm({...form(),source_entity_id:e.currentTarget.value})}/></div></details>
-          <div class="composer-actions"><button class="primary composer-submit">Add task</button></div>
-        </form>
-        <Show when={!profileId()}><p class="personal-empty">No profile selected — add one in Members.</p></Show>
-        <section class="task-list">
-          <h3 class="task-group-title">Today<span class="rail-count">{todayList().length}</span></h3>
-          <Show when={todayList().length} fallback={<p class="personal-empty">Nothing due today.</p>}><For each={todayList()}>{todoRow}</For></Show>
-        </section>
-        <section class="task-list">
-          <h3 class="task-group-title">Later<span class="rail-count">{laterList().length}</span></h3>
-          <Show when={laterList().length} fallback={<p class="personal-empty">Nothing scheduled ahead.</p>}><For each={laterList()}>{todoRow}</For></Show>
-        </section>
-        <Show when={somedayList().length}>
-          <section class="task-list">
-            <h3 class="task-group-title">No date<span class="rail-count">{somedayList().length}</span></h3>
-            <For each={somedayList()}>{todoRow}</For>
-          </section>
-        </Show>
-        <Show when={doneList().length}>
-          <section class="task-list">
-            <h3 class="task-group-title">Done<span class="rail-count">{doneList().length}</span></h3>
-            <For each={doneList()}>{todoRow}</For>
-          </section>
-        </Show>
-      </div>
-      <aside class="view-rail todo-rail">
-        <div class="rail-card">
-          <h3>At a glance</h3>
-          <div class="rail-metrics">
-            <div class="rail-metric accent"><span class="rail-num">{openTodos().length}</span><span class="rail-lbl">Open</span></div>
-            <div class="rail-metric warn"><span class="rail-num">{overdue().length}</span><span class="rail-lbl">Overdue</span></div>
-            <div class="rail-metric"><span class="rail-num">{dueSoon().length}</span><span class="rail-lbl">Due in 7 days</span></div>
-            <div class="rail-metric"><span class="rail-num">{doneCount()}</span><span class="rail-lbl">Done</span></div>
+
+    <Show when={!showsEmptyPrimary()}>
+      <nav class="documents-actionbar task-actionbar">
+        {/* The word alone. An icon here would only decorate: unlike an upload, there
+            is no second way to read "New task". */}
+        <button type="button" class="primary doc-action-primary" onClick={()=>{setCreating(true);setError("")}}>New task</button>
+        <button type="button" class="doc-action-secondary" onClick={()=>setShowDone(open=>!open)} aria-pressed={showDone()}>
+          {showDone() ? "Hide done" : `Show done${doneCount()?` (${doneCount()})`:""}`}
+        </button>
+      </nav>
+    </Show>
+
+    <div class="task-board">
+      {/* A NEW TASK IS BORN WHERE IT WILL LIVE. It used to be made in a panel that slid
+          in from the right — a different place, a different shape, for the same object
+          the list edits in place. The editor opens at the top of the list instead, in
+          the row the task will occupy a second later. */}
+      <Show when={creating()}>
+        <div class="task-grid task-create-grid" aria-label="New task">
+          <div class="task-open">
+            <article class="task-card task-card-editing">
+              <div class="task-body">
+                <TaskRowEdit
+                  mode="create"
+                  task={blankTask(profileId())}
+                  advanced
+                  canEdit
+                  canComplete={false}
+                  ownerName={nameOf(profileId())}
+                  onCancel={()=>setCreating(false)}
+                  onSaved={()=>{ setCreating(false); refetch(); }}
+                  onError={setError} />
+              </div>
+            </article>
           </div>
         </div>
-        <div class="rail-card">
-          <h3>Needs attention<span class="rail-count">{attention().length}</span></h3>
-          <Show when={attention().length} fallback={<p class="rail-empty">Nothing due in the next seven days.</p>}>
-            <div class="rail-rows">
-              <For each={attention()}>{todo=><div class="rail-item"><span class="rail-item-title">{todo.content}</span><span class="rail-item-sub">Due {todo.due_date}</span></div>}</For>
+      </Show>
+      <Show when={!profileId()}><p class="personal-empty">No profile selected — add one in Members.</p></Show>
+      <Show when={!todos.loading && !!profileId() && !(todos() ?? []).length}>
+        <EmptyState
+          title="No tasks yet"
+          hint="Your own list — personal to-dos, and anything assigned to you from a project."
+          actions={<button type="button" class="primary" onClick={()=>setCreating(true)}>New task</button>}
+        />
+      </Show>
+      {/* A SECTION WITH NOTHING IN IT IS NOT DRAWN — an empty section carries no
+          information its own count does not already carry. */}
+      <Show when={!openCount() && !!(todos() ?? []).length}>
+        <EmptyState
+          title="Nothing open"
+          hint={doneList().length ? `Everything on your list is done — ${doneList().length} completed.` : undefined}
+          actions={<button type="button" class="primary" onClick={()=>setCreating(true)}>New task</button>}
+        />
+      </Show>
+
+      <Show when={openCount() > 0}>
+        <ContentHead icon="alert" title="Open work" line="Open a task to edit it, or drag it onto a project in the sidebar to file it there." />
+      </Show>
+
+      <For each={[
+        { key: "today", label: "Today", rows: todayList() },
+        { key: "later", label: "Later", rows: laterList() },
+        { key: "someday", label: "No date", rows: somedayList() },
+      ]}>
+        {group => (
+          <Show when={group.rows.length}>
+            <p class="task-group-heading">{group.label}<span class="count">{group.rows.length}</span></p>
+            <div class="task-grid" aria-label={`${group.label} tasks`}>
+              <For each={group.rows}>{todoRow}</For>
             </div>
           </Show>
+        )}
+      </For>
+
+      {/* Done is folded away by default: it is the part of the list you are finished
+          with, and it grows forever. The count stays visible on the toggle. */}
+      <Show when={showDone() && doneList().length}>
+        <p class="task-group-heading">Done<span class="count">{doneList().length}</span></p>
+        <div class="task-grid" aria-label="Completed tasks">
+          <For each={doneList()}>{todoRow}</For>
         </div>
-      </aside>
+      </Show>
     </div>
+
   </section>;
 }

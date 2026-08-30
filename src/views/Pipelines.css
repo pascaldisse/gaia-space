@@ -9,11 +9,23 @@
 .tab-switch button.active { background: var(--accent-soft); border-color: var(--accent); color: var(--text); }
 
 .pipelines-view textarea { font-family: ui-monospace, monospace; font-size: 12px; width: 100%; box-sizing: border-box; }
-.pipelines-view button { background: var(--ctl-bg-raised); border: 1px solid var(--surface-border); color: var(--text); border-radius: var(--ctl-radius-sm); padding: 5px 10px; cursor: pointer; }
+/* `:not(.dev-card)` because a card that happens to be a <button> is a CARD: this
+   blanket rule would otherwise repaint the script list's frame and padding. */
+.pipelines-view button:not(.dev-card) { background: var(--ctl-bg-raised); border: 1px solid var(--surface-border); color: var(--text); border-radius: var(--ctl-radius-sm); padding: 5px 10px; cursor: pointer; }
 .pipelines-view button.primary { background: var(--accent); border-color: var(--accent); color: var(--brand-navy); }
 .pipelines-view button.ghost { background: transparent; }
 .pipelines-view button.ghost.small { padding: 2px 7px; font-size: 11px; }
 .pipelines-view button.danger { color: var(--status-danger-ink); border-color: var(--status-danger-ink); }
+/* In the light theme a control at rest is a SOFT SHAPE, not a box: a red ring
+   drawn permanently around 'Delete script' reads as an error on the page, not
+   as a destructive action waiting to be chosen. The red stays where it belongs
+   — in the ink, and in the fill once you are actually touching the control. */
+.theme-space-light .pipelines-view .ghost-pill.danger { border-color: transparent; color: var(--red-ink, var(--status-danger-ink)); }
+.theme-space-light .pipelines-view .ghost-pill.danger:hover:not(:disabled) { background: var(--red-soft, var(--status-danger-bg)); }
+/* The section pills come from Development.css; this view only has to stop its
+   own blanket `button` rule from repainting them. */
+.pipelines-view .dev-tab { background: none; }
+.pipelines-tabs { margin: 0 0 4px; }
 .pipelines-view button:disabled { opacity: 0.6; cursor: default; }
 
 .pipelines-error { margin-top: 12px; background: var(--status-danger-bg); border: 1px solid var(--status-danger-ink); color: var(--status-danger-ink); padding: 8px 12px; border-radius: 6px; cursor: pointer; }
@@ -34,9 +46,8 @@
 .script-more-menu, .target-more-menu { position: absolute; right: 0; top: calc(100% + 4px); z-index: 5; display: flex; flex-direction: column; gap: 4px; padding: 6px; background: #0e1626; border: 1px solid var(--surface-border); border-radius: 6px; min-width: 150px; }
 
 .automation-grid, .deployments-grid { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 18px; }
-.scripts-list ul, .targets-list ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-.scripts-list li, .targets-list li { border: 1px solid var(--surface-border); border-radius: 6px; padding: 8px 10px; background: var(--surface); cursor: pointer; display: flex; flex-direction: column; gap: 3px; }
-.scripts-list li.active, .targets-list li.active { border-color: var(--accent); background: var(--accent-soft); }
+/* Both lists are Knowledge's card in one column now (devCards.css) — frame,
+   padding, radius, hover and the chosen state all live there. */
 
 .script-detail, .target-detail { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 .script-detail-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
@@ -44,9 +55,16 @@
 .script-detail-head .repo-input { min-width: 160px; flex: 1; }
 
 .jobs-editor, .runs-section { border: 1px solid var(--surface-border); border-radius: 8px; padding: 12px 14px; background: var(--surface); }
-.jobs-editor h3, .runs-section h3 { margin: 0; font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--text-muted); }
+/* The sections carry the shared `SectionHeading` now (blocks.tsx), so this view
+   no longer invents its own uppercase heading voice. */
+.jobs-editor > .section-heading, .runs-section > .section-heading { margin-bottom: 8px; }
 .jobs-editor-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
-.runs-section h3 { margin-bottom: 8px; }
+/* The standing "n/max" hint at the steps box. Quiet while the count is legal; red
+   only once the limit is passed, which is a genuine block — the server refuses the
+   save — and so is the one thing here the colour law lets be red. */
+.steps-count { margin: 0; font-size: 12px; color: var(--text-muted); }
+.steps-count.over, .jobs-editor .section-heading-meta .over { color: var(--status-danger-ink); font-weight: 600; }
+
 .job-card { border: 1px solid var(--surface-border); border-radius: 6px; padding: 8px 10px; margin-bottom: 8px; background: #0e1626; display: flex; flex-direction: column; gap: 6px; }
 .job-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .job-row .job-name { flex: 1; min-width: 120px; }
@@ -79,3 +97,11 @@
 .deployments-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .deployments-list li { border: 1px solid var(--surface-border); border-radius: 6px; padding: 8px 10px; background: var(--surface); display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .transition-actions { margin-left: auto; display: flex; gap: 6px; }
+
+/* ── THE INTRODUCTION KEEPS ITS RHYTHM ───────────────────────────────────────
+   This view's root carries no padding of its own, so PageHeader.css gives the header
+   the page inset with a `padding: … 0` shorthand — and that shorthand also lands on
+   the bottom, overruling the rule that keeps a gap between the header and the action
+   row beneath it. The row then sat glued to the subline. Restated here, for this root
+   only, with the same token the shared rule uses. Structure, unscoped. */
+.pipelines-view > .page-header:has(+ .page-actionbar) { padding-bottom: var(--view-head-gap, 22px); }

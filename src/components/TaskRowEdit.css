@@ -1,0 +1,79 @@
+/* The in-row editor's shell (stage 20). The CONTROLS come from Todo.css — this is the
+   editor My tasks already had, lifted so the project and team surfaces open the same
+   one. Only what is new about opening it inside a plain list row lives here.
+
+   STRUCTURE IS UNSCOPED; only the paper restyle sits under `.theme-space-light`. */
+
+.task-edit { display: grid; gap: 12px; min-width: 0; }
+.task-edit .composer-title { font-size: 16px !important; }
+.task-edit-readonly { margin: 0; color: var(--text-muted); font-size: 12px; }
+/* ONE FOOTER, READ LEFT TO RIGHT: state · destroy · spacer · leave · keep. `space-between`
+   is gone — with four items it spread them evenly and the pairs stopped reading as pairs. */
+.task-edit-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.task-edit-spacer { flex: 1 1 auto; }
+/* DONE IS A BUTTON, built from the same tokens as Save and Delete so the three read
+   as one family: same height, same radius, same type. Teal, because ticking work off
+   is the affirmative act on this surface — but a WASH at rest, never solid, so it
+   cannot outrank Save, which is the page's one primary. Pressed, it fills. */
+.task-edit-done {
+  display: inline-flex; align-items: center; gap: 7px; white-space: nowrap;
+  min-height: var(--btn-height, 37px);
+  padding: 0 var(--btn-pad-x, 12px);
+  border: 1px solid var(--accent, #2f8f83);
+  border-radius: var(--btn-radius, 11px);
+  background: color-mix(in srgb, var(--accent, #2f8f83) 10%, transparent);
+  color: var(--accent, #2f8f83);
+  font-family: var(--font-head, inherit);
+  font-size: var(--btn-font-size, 13px);
+  font-weight: var(--btn-font-weight, 650);
+  line-height: 1; cursor: pointer;
+}
+.task-edit-done:hover:not(:disabled) { background: var(--accent, #2f8f83); color: #fff; }
+.task-edit-done:focus-visible { outline: 2px solid var(--accent, #2f8f83); outline-offset: 2px; }
+.task-edit-done:disabled { opacity: .55; cursor: default; }
+/* The mark holds its box whether or not it carries a tick, so the label never shifts
+   sideways as the state flips. */
+.task-edit-done-mark {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 15px; height: 15px; border-radius: 4px;
+  border: 1.5px solid currentColor;
+}
+.task-edit-done.on { background: var(--accent, #2f8f83); color: #fff; border-color: var(--accent, #2f8f83); }
+.task-edit-done.on .task-edit-done-mark { background: #fff; color: var(--accent, #2f8f83); border-color: #fff; }
+.task-edit-danger { display: inline-flex; }
+
+.task-edit-field-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+
+
+/* THE ROW KEEPS ITS PLACE WHILE OPEN. The editor is rendered inside the same <li>
+   the row occupies, so the list never re-orders under the person editing it; this
+   only marks the open row so it stays findable. */
+.task-row-editing {
+  display: block;
+  padding: 14px 12px;
+  border-top: 1px solid var(--surface-border);
+  border-left: 3px solid var(--accent);
+  background: var(--surface-raised);
+}
+.task-list-plain > li:first-child > .task-row-editing { border-top: 0; }
+
+/* ══ Space-light restyle ═══════════════════════════════════════════════════ */
+/* THE OPEN TASK IS PAPER, LIKE EVERY OTHER CARD. It used to be a teal-tinted block
+   with a top hairline — the one surface in the product that answered an act with a
+   coloured panel instead of a card. It now wears exactly what a project card wears:
+   white paper, one hairline, the same radius and the same lift, so opening a task
+   does not change the material the page is made of. */
+.theme-space-light .task-row-editing,
+.theme-space-light .task-card-editing {
+  border: 1px solid var(--line);
+  border-left: 1px solid var(--line);
+  border-top: 1px solid var(--line);
+  border-radius: 20px;
+  background: var(--paper);
+  box-shadow: 0 16px 36px rgba(31, 35, 40, .06);
+  padding: 20px 22px;
+}
+/* Field rows breathe like the project form's do. */
+.theme-space-light .task-edit { gap: 14px; }
+.theme-space-light .task-edit .composer-title { color: var(--ink); }
+.theme-space-light .task-edit-readonly { color: var(--muted); }

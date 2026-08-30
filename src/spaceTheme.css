@@ -1,0 +1,324 @@
+/* ── GAIA Space redesign palette (communication-first shell) ───────────────
+   Ported 1:1 from FINAL_GAIA_SPACE_PROTOTYP.html `:root`.
+
+   SCOPED ON PURPOSE. The shipped dark theme lives in App.css `:root` and is
+   what all 27 existing views are drawn against. These light tokens are only
+   in scope inside `.theme-space-light`, which the chat-first layout sets on
+   the shell root — switch the layout back to grouped/flat and not a single
+   custom property here applies.
+
+   Colour law (briefing): teal = action/open, amber = due soon/waiting,
+   red = critical/blocked. Nothing else may use those three. */
+.theme-space-light {
+  --ink: #1f2328;
+  --muted: #68717d;
+  --quiet: #8a929d;
+  --paper: #ffffff;
+  --wash: #faf8f4;
+  --wash-2: #f0ebe4;
+
+  --line: #e5ddd3;
+  --line-strong: #d2c6b9;
+
+  --purple-0: #2b0630;
+  --purple-1: #4a1454;
+  --purple-2: #63266f;
+  --purple-3: #7a4087;
+  /* The chrome's own inks. NEUTRAL WHITE, not a tint of the chrome hue: the
+     sidebar labels used to be lilac literals, which read as "lilac" rather than
+     as "quiet" — and stayed lilac when the chrome went teal. Opacity carries the
+     rank instead of hue, so every chrome colour gets the same three steps. */
+  --nav-text: rgba(255, 255, 255, .96);
+  --nav-muted: rgba(255, 255, 255, .74);
+  --nav-faint: rgba(255, 255, 255, .58);
+
+  /* action / open */
+  --teal: #00bfa6;
+  --teal-dark: #008d7b;
+  --teal-soft: #dcf7f2;
+  /* due soon / waiting */
+  --amber: #d99b24;
+  --amber-soft: #fff1d3;
+  /* critical / blocked */
+  --red: #bd3f3f;
+  --red-soft: #fbe3e0;
+
+  --green: #258b58;
+  --green-soft: #e4f1e9;
+  --blue: #4b5fc7;
+
+  --shadow: 0 18px 44px rgba(31, 35, 40, .08);
+
+  /* readable inks on the three soft status fills */
+  --teal-ink: #006b5e;
+  --amber-ink: #7b5207;
+  --red-ink: #8a2323;
+
+  /* ── NAVIGATION CHROME ────────────────────────────────────────────────────
+     The rail, the sidebar and the command bar are ONE surface family: dark,
+     saturated, the same in every canvas scheme. They are tokens (not literals in
+     SpaceShell.css) so a palette can re-hue the whole chrome in one place —
+     see palettes.css, where canvas and chrome are two independent axes. */
+  --rail-gradient: linear-gradient(180deg, #3b0640 0%, #4b0646 56%, #330631 100%);
+  --nav-sidebar-gradient:
+    radial-gradient(circle at 12% 0%, rgba(255, 255, 255, .13), transparent 34%),
+    linear-gradient(180deg, var(--purple-2), var(--purple-1) 48%, #3b1242 100%);
+  --nav-top-gradient: linear-gradient(90deg, var(--purple-1), #3d073d);
+  /* the one row you are standing on, in the chrome's own light tint */
+  --nav-active-bg: #f3d7ff;
+  --nav-chip-bg: #e9e1ea;
+  --nav-active-ink: #1b0e1f;
+
+  /* ── TOKEN REMAP ─────────────────────────────────────────────────────────
+     Every colour custom property App.css `:root` defines for the dark theme is
+     re-pointed here at the light palette above. ~1300 colour decisions across
+     27 views already read these tokens, so the views convert without being
+     touched. Scoped to `.theme-space-light`: grouped/flat stay byte-identical.
+
+     Order follows App.css `:root` so the two lists can be diffed. */
+
+  /* brand system — navy is only ever used as INK ON TEAL inside views
+     (button.primary, avatars, project marks); the page background comes from
+     :root, which this scope does not reach. So it becomes a deep teal ink. */
+  --brand-navy: #021f1b; /* prototype ink on teal (.btn.primary, .send) */
+  --brand-teal: var(--teal);
+  --brand-teal-bright: var(--teal-dark);
+  --brand-ice: var(--ink);
+  --brand-slate: var(--ink);
+  --brand-cool-gray: var(--ink);
+
+  --accent: var(--teal);
+  --accent-hover: var(--teal-dark);
+  --accent-soft: var(--teal-soft);
+  --accent-text: var(--teal-dark);
+  --text: var(--ink);
+  --text-strong: var(--ink);
+  --text-muted: var(--muted);
+  --text-faint: var(--quiet);
+  --text-dim: var(--quiet);
+  --text-emphasis: var(--ink);
+
+  /* identity avatars */
+  --avatar-person-bg: var(--wash-2);
+  --avatar-person-ink: var(--ink);
+  --avatar-person-ring: rgba(31, 35, 40, .10);
+
+  /* central status tokens — colour law: teal = action/open, amber = due soon
+     / waiting, red = critical/blocked. Success keeps the separate green so it
+     does not steal teal; neutral is plain paper grey. */
+  --status-success-ink: #1c6b44;
+  --status-success-bg: var(--green-soft);
+  --status-info-ink: var(--teal-ink);
+  --status-info-bg: var(--teal-soft);
+  --status-warning-ink: var(--amber-ink);
+  --status-warning-bg: var(--amber-soft);
+  --status-danger-ink: var(--red-ink);
+  --status-danger-bg: var(--red-soft);
+  --status-neutral-ink: var(--muted);
+  --status-neutral-bg: var(--wash-2);
+  --attn-amber: var(--amber);
+  --attn-amber-text: var(--amber-ink);
+  --deadline-blue: var(--blue);
+
+  /* a mention is neither a status nor an act — it is the rail's own purple,
+     the one hue that says "this is about YOU personally" */
+  --mention-soft: #f2e9fa;
+  --mention-ink: #5a3a8a;
+  --mention-line: #b79ad2;
+  --status-risk-overdue: var(--red);
+  --status-risk-high: var(--amber);
+  --status-risk-medium: #caa64a;
+  --status-risk-low: var(--teal);
+
+  /* controls — filled paper fields on a wash canvas, real hairlines.
+     SHAPE + TYPE come from the prototype `.input` / `.btn` (stage 5a):
+       .input { min-height:40px; border:1px solid var(--line); radius:11px;
+                padding:10px 11px; background:#fbfaf8; font-size:14px }
+       .btn   { border:1px solid var(--line-strong); radius:11px;
+                background:var(--paper); padding:9px 12px; 13px/650 } */
+  --ctl-bg: #fbfaf8;            /* prototype .input fill — a hair off paper */
+  --ctl-bg-hover: #f6f2ec;
+  --ctl-bg-raised: var(--paper);
+  --ctl-bg-raised-hover: #f6f2ec;
+  --ctl-border: var(--line);
+  --ctl-border-hover: var(--line-strong);
+  --ctl-placeholder: var(--quiet);
+  --ctl-focus-ring: 0 0 0 3px rgba(0, 191, 166, .22);
+
+  --ctl-radius: 11px;
+  --ctl-radius-sm: 9px;
+  --ctl-pad-y: 10px;
+  --ctl-pad-x: 11px;
+  --ctl-font-size: 14px;
+  --ctl-font-weight: 500;
+  --ctl-line: 1.35;
+
+  /* ── THE BUTTON RULE (one place, whole application) ───────────────────────
+     Every button that carries an ACT — primary, secondary, delete, the pills in
+     an action bar — is the same size, weight, height and radius, wherever it
+     sits. A component must never restate these as literals and must never write
+     `font: inherit`: inheriting means the button takes the size of whatever page
+     it landed on, which is exactly how the chat's Delete ended up at 15px beside
+     13px neighbours. Values come from the prototype's `.btn`.
+     Icon cells and bare text affordances are NOT act-buttons and keep their own
+     size — the rule is about the chunky ones. */
+  --btn-font-size: 13px;
+  --btn-font-weight: 650;
+  --btn-height: 37px;
+  --btn-radius: 11px;
+  --btn-pad-x: 12px;
+
+  /* ── TYPOGRAPHY ──────────────────────────────────────────────────────────
+     The prototype has no brand face at all: one system stack, and the voice
+     comes from size/weight/tracking. Poppins-for-headings is the single
+     biggest reason the rest of the app reads as a different product from the
+     Home calendar, so BOTH tokens re-point here. */
+  --font-head: ui-sans-serif, -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-body: ui-sans-serif, -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+
+  /* prototype heading scale, harvested verbatim */
+  --type-h1: 27px;      --type-h1-ls: -.045em;  --type-h1-lh: 1.12;
+  --type-h2: 18px;      --type-h2-ls: -.035em;
+  --type-h3: 15px;      --type-h3-ls: -.025em;
+  --type-h4: 13.5px;    --type-h4-ls: -.015em;
+  --type-weight-head: 720;   /* .surface h2 / h1 / .drawer h2 all 720 */
+  --type-weight-strong: 700; /* .item-title, .author, .stat-row strong */
+  --type-kicker: 12px;
+  --type-kicker-weight: 680;
+  --type-kicker-ls: .08em;
+  --type-body: 15px;         /* .text */
+  --type-body-lh: 1.52;
+  --type-sub: 14px;          /* .subtitle, .side-link, .tab */
+  --type-meta: 13px;         /* .item-sub, .time, .metric-pill */
+  --type-micro: 12px;        /* .tag, .action-btn, labels */
+
+  /* ── SPACING + SHAPE ─────────────────────────────────────────────────────
+     .feed padding 22px 28px 30px · .page-header 18px 28px 0 · HomeCalendar
+     18px 28px 32px. The old 26/34/44 rhythm is wider and looser than either. */
+  --view-pad-y: 18px;
+  --view-pad-x: 28px;
+  --view-pad-bottom: 32px;
+  --view-head-gap: 16px;
+
+  /* .surface / .table 18px · .side-card / .composer-box / .summary-card 16px
+     · .tag / .action-btn 8px · .task-meter 12px */
+  --radius-control: 11px;
+  --radius-option: 10px;
+  --radius-event: 6px;
+  --radius-card: 18px;
+  --radius-card-sm: 16px;
+  --radius-chip-sq: 8px;
+
+  /* calendar shape: the Home calendar is the reference surface */
+  --cal-radius-grid: 18px;
+  --cal-radius-agenda: 12px;
+  --cal-radius-toggle: 10px;
+  --cal-radius-key: 3px;
+
+  /* documents / knowledge radius ladder, lifted to the paper language */
+  --dk-radius-md: 8px;
+  --dk-radius-lg: 10px;
+  --dk-radius-xl: 12px;
+  --dk-radius-2xl: 14px;
+  --dk-radius-3xl: 16px;
+  --dk-radius-4xl: 18px;
+
+  /* elevation ladder, prototype-exact */
+  --shadow-card: var(--shadow);
+  --shadow-card-sm: 0 12px 30px rgba(31, 35, 40, .06);
+  --shadow-side: 0 8px 22px rgba(31, 35, 40, .04);
+  --shadow-btn: 0 1px 0 rgba(0, 0, 0, .03);
+
+  /* surface / elevation ladder — cards are paper, the canvas behind is wash */
+  --surface: var(--paper);
+  --surface-hover: #f6f2ec;
+  --surface-raised: var(--paper);
+  --surface-border: var(--line);
+  --surface-border-hover: var(--line-strong);
+  --surface-sunken: var(--wash);
+  --surface-line: var(--line);
+  --surface-line-dashed: var(--line-strong);
+  --surface-2: var(--wash); /* only ever read as a fallback var(--surface-2, …) */
+
+  /* calendar typed items */
+  --cal-task: var(--amber);
+  --cal-task-bg: rgba(217, 155, 36, .12);
+  --cal-task-chip-bg: rgba(217, 155, 36, .18);
+  --cal-deadline: var(--red);
+  --cal-deadline-bg: rgba(189, 63, 63, .10);
+  --cal-deadline-chip-bg: rgba(189, 63, 63, .16);
+  --cal-deadline-ink: var(--red-ink);
+  --cal-external: var(--blue);
+  --cal-external-bg: rgba(75, 95, 199, .10);
+  --cal-external-chip-bg: rgba(75, 95, 199, .16);
+  --cal-external-ink: #3a49a0;
+
+  /* calendar grid surfaces */
+  --cal-grid-bg: var(--paper);
+  --cal-weekday-bg: var(--wash);
+  --cal-cell-line: var(--line);
+  --cal-cell-muted-bg: var(--wash);
+  --cal-cell-muted-ink: var(--quiet);
+  --cal-detail-bg: var(--wash);
+  --cal-cell-hover-bg: var(--wash-2);
+  --cal-side-rule: var(--line);
+  --cal-side-count-ink: var(--teal-ink);
+  --cal-side-count-bg: var(--teal-soft);
+  --cal-agenda-border: var(--line);
+  --cal-agenda-bg: var(--paper);
+  --cal-agenda-hover-bg: var(--wash);
+
+  /* documents / knowledge workspace */
+  --dk-line: var(--line);
+  --dk-row-hover-bg: var(--wash);
+  --dk-row-active-ink: var(--ink);
+  --dk-field-bg: var(--paper);
+  --dk-field-border: var(--line-strong);
+  --dk-meta-ink: var(--quiet);
+  --dk-title-ink: var(--ink);
+  --dk-caption-ink: var(--muted);
+  --dk-tab-ink: var(--muted);
+  --dk-snippet-ink: var(--muted);
+  --dk-danger-ink: var(--red-ink);
+  --dk-editor-bg: var(--paper);
+  --dk-version-current-bg: var(--wash-2);
+  --dk-mark-grad-end: var(--teal-dark);
+  --dk-mark-shadow: 0 2px 10px rgba(0, 191, 166, .28);
+  --dk-icon-bg: rgba(0, 191, 166, .10);
+  --dk-icon-border: rgba(0, 191, 166, .30);
+}
+
+/* ── Literals the generator deliberately does not touch ────────────────────
+   tools/lightOverrides.mjs skips any value containing a gradient, so brand
+   marks (teal logo lozenges) keep their treatment. Two panel shells painted a
+   navy gradient rather than a flat colour, and those are surfaces, not marks:
+   restated here by hand. */
+.theme-space-light .today-next,
+.theme-space-light .calendar-overview {
+  background: var(--paper);
+  border-color: var(--line);
+  box-shadow: var(--shadow);
+}
+.theme-space-light .call-tile { background: linear-gradient(135deg, var(--teal-soft), var(--wash-2)); }
+
+/* Native widget chrome: App.css pins `color-scheme: dark` on every field. */
+.theme-space-light input,
+.theme-space-light select,
+.theme-space-light textarea { color-scheme: light; }
+.theme-space-light select option { background: var(--paper); color: var(--ink); }
+
+/* Ink for text that the dark theme paints near-white.
+   The global stylesheet colours headings #e9f6f4 for the navy surfaces; on the
+   light content area that is invisible. Restated here rather than edited there,
+   so grouped/flat stay byte-identical. */
+.theme-space-light .space-content h1,
+.theme-space-light .space-content h2,
+.theme-space-light .space-content h3,
+.theme-space-light .space-content h4,
+.theme-space-light .space-content strong,
+.theme-space-light .space-content label,
+.theme-space-light .space-content dt { color: var(--ink); -webkit-text-fill-color: var(--ink); }
+.theme-space-light .space-content { color: var(--ink); }
+.theme-space-light .space-content p,
+.theme-space-light .space-content small,
+.theme-space-light .space-content time { color: var(--muted); }

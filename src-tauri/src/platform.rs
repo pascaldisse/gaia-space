@@ -1419,33 +1419,47 @@ pub struct Project {
     pub created_by: Option<String>,
     pub archived: bool,
     pub deadline: Option<String>,
-    /// Informational only: no authorization path reads `lead_id`.
+    /// The one person mainly responsible for the project.
+    ///
+    /// LAW: `lead_id` is PURELY INFORMATIONAL. It is never an authorization input —
+    /// no gate anywhere may read it, and there is no rule of the form "only the lead
+    /// may ...". Every project member keeps identical access with or without a lead:
+    /// all tasks, knowledge and calendar entries stay readable, and any member may
+    /// create tasks for themselves and for others. Authorization stays where it
+    /// already lives: `created_by` (owner) plus the admin role.
+    ///
+    /// `serde(default)` keeps every pre-V132 payload (and every old client) deserializable.
     #[serde(default)]
     pub lead_id: Option<String>,
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_projects() -> Result<Vec<Project>> {
     let c = db::conn()?;
+    list_projects_on(&c)
+}
+pub fn list_projects_on(c: &Connection) -> Result<Vec<Project>> {
     let mut s = c
         .prepare("SELECT id,name,key,description,created_by,archived,deadline,lead_id FROM projects ORDER BY archived,name")
         .map_err(|e| e.to_string())?;
     let rows = s
-        .query_map([], |r| {
-            Ok(Project {
-                id: r.get(0)?,
-                name: r.get(1)?,
-                key: r.get(2)?,
-                description: r.get(3)?,
-                created_by: r.get(4)?,
-                archived: r.get(5)?,
-                deadline: r.get(6)?,
-                lead_id: r.get(7)?,
-            })
-        })
+        .query_map([], read_project)
         .map_err(|e| e.to_string())?
         .collect::<std::result::Result<_, _>>()
         .map_err(|e| e.to_string());
     rows
+}
+/// Single row shape for every project read: id,name,key,description,created_by,archived,deadline,lead_id.
+fn read_project(r: &rusqlite::Row<'_>) -> rusqlite::Result<Project> {
+    Ok(Project {
+        id: r.get(0)?,
+        name: r.get(1)?,
+        key: r.get(2)?,
+        description: r.get(3)?,
+        created_by: r.get(4)?,
+        archived: r.get(5)?,
+        deadline: r.get(6)?,
+        lead_id: r.get(7)?,
+    })
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn get_project(id: String) -> Result<Option<Project>> {
@@ -1473,14 +1487,61 @@ pub fn create_project_on(c: &Connection, project: Project) -> Result<()> {
         created_by: Some(owner),
         ..project
     };
-    c.execute("INSERT INTO projects(id,name,key,description,created_by,archived,deadline,created_at)VALUES(?1,?2,?3,?4,?5,?6,?7,unixepoch())",rusqlite::params![project.id,project.name,project.key,project.description,project.created_by,project.archived,project.deadline.filter(|date| !date.trim().is_empty())]).map_err(|e|e.to_string())?;
+    c.execute("INSERT INTO projects(id,name,key,description,created_by,archived,deadline,lead_id,created_at)VALUES(?1,?2,?3,?4,?5,?6,?7,?8,unixepoch())",rusqlite::params![project.id,project.name,project.key,project.description,project.created_by,project.archived,project.deadline.clone().filter(|date| !date.trim().is_empty()),normalized_lead(project.lead_id.clone())]).map_err(|e|e.to_string())?;
+    // After the row is durable. A new project is ORGANISATION NEWS: it is
+    // announced to the workspace, it is nobody's task, and it is never counted.
+    if let Err(error) = emit_project_created_on(c, &project) {
+        eprintln!("project.created fan-out failed: {error}");
+    }
+    Ok(())
+}
+
+/// Announces a new project to every active colleague except its creator.
+/// Modelled on `personal::emit_absence_lifecycle_on`: the domain supplies the
+/// recipients, subscriptions decide delivery.
+fn emit_project_created_on(c: &Connection, project: &Project) -> Result<()> {
+    let owner = match project.created_by.as_deref() {
+        Some(owner) => owner,
+        None => return Ok(()),
+    };
+    let mut statement = err(c.prepare("SELECT id FROM profiles WHERE archived=0 AND id<>?1"))?;
+    let recipients = err(statement.query_map([owner], |row| row.get::<_, String>(0)))?
+        .collect::<std::result::Result<Vec<String>, _>>()
+        .map_err(|error| error.to_string())?;
+    if recipients.is_empty() {
+        return Ok(());
+    }
+    let actor = err(c
+        .query_row(
+            "SELECT display_name FROM profiles WHERE id=?1",
+            [owner],
+            |row| row.get::<_, String>(0),
+        )
+        .optional())?;
+    let body = actor.map(|name| crate::events::actor_body(&name, Some(&project.key)));
+    crate::personal::fan_out_notification_on(
+        c,
+        crate::personal::NotificationFanout {
+            recipients,
+            event_type: crate::events::PROJECT_CREATED,
+            title: &project.name,
+            body: body.as_deref(),
+            entity_type: "project",
+            entity_id: &project.id,
+            target_type: Some("project"),
+            target_id: Some(&project.id),
+        },
+    )?;
     Ok(())
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn update_project(project: Project) -> Result<()> {
     let c = db::conn()?;
+    update_project_on(&c, project)
+}
+pub fn update_project_on(c: &Connection, project: Project) -> Result<()> {
     c.execute(
-        "UPDATE projects SET name=?2,key=?3,description=?4,created_by=?5,archived=?6,deadline=?7 WHERE id=?1",
+        "UPDATE projects SET name=?2,key=?3,description=?4,created_by=?5,archived=?6,deadline=?7,lead_id=?8 WHERE id=?1",
         rusqlite::params![
             project.id,
             project.name,
@@ -1488,11 +1549,180 @@ pub fn update_project(project: Project) -> Result<()> {
             project.description,
             project.created_by,
             project.archived,
-            project.deadline.filter(|date| !date.trim().is_empty())
+            project.deadline.filter(|date| !date.trim().is_empty()),
+            normalized_lead(project.lead_id)
         ],
     )
     .map_err(|e| e.to_string())?;
     Ok(())
+}
+/// Delete a project with everything that only exists because of it. Same shape as
+/// `chat::delete_channel`: authorization first, then one transaction, then a cascade
+/// that is written out table by table instead of trusting `ON DELETE CASCADE` (several
+/// of these tables predate the cascade clauses, and the guarantee must not depend on
+/// the `foreign_keys` pragma of whichever connection calls us).
+///
+/// The door is the same owner-or-admin rule `update_project`/`set_project_deadline`
+/// already use: the profile in `projects.created_by`, or an account/superadmin admin.
+/// Rows that carry their own meaning are not followed — a channel outlives the project
+/// it was filed under, so its `project_id` is cleared, never its conversation deleted.
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn delete_project(id: String, actor_id: String) -> Result<()> {
+    let mut c = db::conn()?;
+    delete_project_on(&mut c, &id, &actor_id)
+}
+pub fn delete_project_on(c: &mut Connection, id: &str, actor_id: &str) -> Result<()> {
+    let owner: Option<Option<String>> = c
+        .query_row("SELECT created_by FROM projects WHERE id=?1", [id], |r| {
+            r.get(0)
+        })
+        .optional()
+        .map_err(|e| e.to_string())?;
+    let owner = owner.ok_or_else(|| "Project not found".to_string())?;
+    if owner.as_deref() != Some(actor_id) && !is_admin_on(c, actor_id)? {
+        return Err("only the project owner or an admin can delete this project".into());
+    }
+    let tx = c.transaction().map_err(|e| e.to_string())?;
+    // Pointers from rows that stand on their own: cleared, not followed.
+    for clause in PROJECT_CLEARED {
+        tx.execute(clause, [id]).map_err(|e| e.to_string())?;
+    }
+    for clause in PROJECT_SCOPED {
+        // A `TREE` entry is self-referencing (folders inside folders, subtasks inside
+        // subtasks): a parent row may only go once no child points at it, so the same
+        // statement runs until it stops removing rows — deepest level first.
+        match clause.strip_prefix("TREE ") {
+            Some(tree) => loop {
+                let removed = tx
+                    .execute(&format!("DELETE FROM {tree}"), [id])
+                    .map_err(|e| e.to_string())?;
+                if removed == 0 {
+                    break;
+                }
+            },
+            None => {
+                tx.execute(&format!("DELETE FROM {clause}"), [id])
+                    .map_err(|e| e.to_string())?;
+            }
+        }
+    }
+    tx.commit().map_err(|e| e.to_string())
+}
+/// Other domains keep their row; only their pointer at this project (or at a document
+/// that goes with it) is cleared. A blog post is a published article, a channel is a
+/// conversation — neither stops existing because the project does.
+const PROJECT_CLEARED: &[&str] = &[
+    "UPDATE channels SET project_id=NULL WHERE project_id=?1",
+    "UPDATE blog_posts SET project_id=NULL WHERE project_id=?1",
+    "UPDATE blog_posts SET draft_id=NULL WHERE draft_id IN \
+     (SELECT id FROM documents WHERE container_type='project' AND container_id=?1)",
+    "UPDATE channel_notes SET attachment_document_id=NULL WHERE attachment_document_id IN \
+     (SELECT id FROM documents WHERE container_type='project' AND container_id=?1)",
+];
+/// Every table that holds a row *because of* this project, deepest first. The last
+/// entry is the project itself; the self-referencing trees above have already been
+/// emptied by the time the parent tables are reached.
+const PROJECT_SCOPED: &[&str] = &[
+    // A gone entity must not leave a claim on anyone's attention behind.
+    "notifications WHERE (entity_type='project' AND entity_id=?1) \
+     OR (entity_type='issue' AND entity_id IN (SELECT id FROM issues WHERE project_id=?1)) \
+     OR (entity_type='todo' AND entity_id IN (SELECT id FROM todos WHERE project_id=?1)) \
+     OR (entity_type='document' AND entity_id IN (SELECT id FROM documents WHERE container_type='project' AND container_id=?1))",
+    // Documents of the project, then the folders they were filed in.
+    "doc_versions WHERE document_id IN (SELECT id FROM documents WHERE container_type='project' AND container_id=?1)",
+    "document_permissions WHERE document_id IN (SELECT id FROM documents WHERE container_type='project' AND container_id=?1)",
+    "document_favorites WHERE document_id IN (SELECT id FROM documents WHERE container_type='project' AND container_id=?1)",
+    "document_files WHERE document_id IN (SELECT id FROM documents WHERE container_type='project' AND container_id=?1)",
+    "document_discussions WHERE document_id IN (SELECT id FROM documents WHERE container_type='project' AND container_id=?1)",
+    "document_imports WHERE container_type='project' AND container_id=?1",
+    "documents WHERE container_type='project' AND container_id=?1",
+    "document_folder_permissions WHERE folder_id IN (SELECT id FROM document_folders WHERE container_type='project' AND container_id=?1)",
+    "kb_book_owners WHERE book_id IN (SELECT id FROM document_folders WHERE container_type='project' AND container_id=?1)",
+    "TREE document_folders WHERE container_type='project' AND container_id=?1 \
+     AND NOT EXISTS(SELECT 1 FROM document_folders child WHERE child.parent_id=document_folders.id)",
+    // Issue tracker: attachments of an issue, then the issues, then their statuses.
+    "TREE checklist_items WHERE checklist_id IN (SELECT ck.id FROM checklists ck JOIN issues i ON i.id=ck.issue_id WHERE i.project_id=?1) \
+     AND NOT EXISTS(SELECT 1 FROM checklist_items child WHERE child.parent_id=checklist_items.id)",
+    "checklists WHERE issue_id IN (SELECT id FROM issues WHERE project_id=?1)",
+    "issue_activities WHERE issue_id IN (SELECT id FROM issues WHERE project_id=?1)",
+    "issue_assignees WHERE issue_id IN (SELECT id FROM issues WHERE project_id=?1)",
+    "issue_attachments WHERE issue_id IN (SELECT id FROM issues WHERE project_id=?1)",
+    "issue_comments WHERE issue_id IN (SELECT id FROM issues WHERE project_id=?1)",
+    "issue_links WHERE issue_id IN (SELECT id FROM issues WHERE project_id=?1) \
+     OR linked_issue_id IN (SELECT id FROM issues WHERE project_id=?1)",
+    "issue_tags WHERE issue_id IN (SELECT id FROM issues WHERE project_id=?1) \
+     OR tag_id IN (SELECT id FROM planning_tags WHERE project_id=?1)",
+    "issue_tracker_links WHERE issue_id IN (SELECT id FROM issues WHERE project_id=?1)",
+    "time_tracking_entries WHERE issue_id IN (SELECT id FROM issues WHERE project_id=?1)",
+    "cf_values WHERE entity_id=?1 OR entity_id IN (SELECT id FROM issues WHERE project_id=?1)",
+    // Boards before the issues they place, statuses before the issues that hold them.
+    "issue_board_positions WHERE board_id IN (SELECT id FROM boards WHERE project_id=?1) \
+     OR issue_id IN (SELECT id FROM issues WHERE project_id=?1)",
+    "board_card_settings WHERE board_id IN (SELECT id FROM boards WHERE project_id=?1)",
+    "swimlanes WHERE board_id IN (SELECT id FROM boards WHERE project_id=?1)",
+    "sprints WHERE board_id IN (SELECT id FROM boards WHERE project_id=?1)",
+    "column_statuses WHERE column_id IN (SELECT id FROM board_columns WHERE board_id IN (SELECT id FROM boards WHERE project_id=?1)) \
+     OR status_id IN (SELECT id FROM issue_statuses WHERE project_id=?1)",
+    "board_columns WHERE board_id IN (SELECT id FROM boards WHERE project_id=?1)",
+    "boards WHERE project_id=?1",
+    "issues WHERE project_id=?1",
+    "issue_statuses WHERE project_id=?1",
+    "TREE planning_tags WHERE project_id=?1 \
+     AND NOT EXISTS(SELECT 1 FROM planning_tags child WHERE child.parent_id=planning_tags.id)",
+    // Tasks of the project.
+    "todo_assignees WHERE todo_id IN (SELECT id FROM todos WHERE project_id=?1)",
+    "todos WHERE project_id=?1",
+    // Code review.
+    "review_discussions WHERE review_id IN (SELECT id FROM reviews WHERE project_id=?1)",
+    "review_external_checks WHERE review_id IN (SELECT id FROM reviews WHERE project_id=?1)",
+    "review_external_issue_links WHERE review_id IN (SELECT id FROM reviews WHERE project_id=?1)",
+    "review_file_states WHERE review_id IN (SELECT id FROM reviews WHERE project_id=?1)",
+    "review_merge_preferences WHERE review_id IN (SELECT id FROM reviews WHERE project_id=?1)",
+    "review_participants WHERE review_id IN (SELECT id FROM reviews WHERE project_id=?1)",
+    "safe_merge_runs WHERE review_id IN (SELECT id FROM reviews WHERE project_id=?1)",
+    "review_stack_items WHERE stack_id IN (SELECT id FROM review_stacks WHERE project_id=?1) \
+     OR review_id IN (SELECT id FROM reviews WHERE project_id=?1)",
+    "reviews WHERE project_id=?1",
+    "review_stacks WHERE project_id=?1",
+    "review_merge_policies WHERE project_id=?1",
+    "quality_gate_rules WHERE project_id=?1",
+    "protected_branch_rules WHERE project_id=?1",
+    // Pipelines and deployments.
+    "job_artifacts WHERE job_run_id IN (SELECT jr.id FROM job_runs jr JOIN jobs j ON j.id=jr.job_id \
+     JOIN pipeline_scripts ps ON ps.id=j.script_id WHERE ps.project_id=?1)",
+    "test_reports WHERE job_run_id IN (SELECT jr.id FROM job_runs jr JOIN jobs j ON j.id=jr.job_id \
+     JOIN pipeline_scripts ps ON ps.id=j.script_id WHERE ps.project_id=?1)",
+    "deployments WHERE target_id IN (SELECT id FROM deploy_targets WHERE project_id=?1) \
+     OR job_run_id IN (SELECT jr.id FROM job_runs jr JOIN jobs j ON j.id=jr.job_id \
+     JOIN pipeline_scripts ps ON ps.id=j.script_id WHERE ps.project_id=?1)",
+    "job_runs WHERE job_id IN (SELECT j.id FROM jobs j JOIN pipeline_scripts ps ON ps.id=j.script_id WHERE ps.project_id=?1)",
+    "jobs WHERE script_id IN (SELECT id FROM pipeline_scripts WHERE project_id=?1)",
+    "pipeline_scripts WHERE project_id=?1",
+    "deploy_targets WHERE project_id=?1",
+    // Package registry.
+    "package_vulnerabilities WHERE package_version_id IN (SELECT pv.id FROM package_versions pv \
+     JOIN package_repositories pr ON pr.id=pv.repository_id WHERE pr.project_id=?1)",
+    "package_versions WHERE repository_id IN (SELECT id FROM package_repositories WHERE project_id=?1)",
+    "package_repository_acl WHERE repository_id IN (SELECT id FROM package_repositories WHERE project_id=?1)",
+    "package_repositories WHERE project_id=?1",
+    // Development environments and generated files.
+    "dev_environments WHERE project_id=?1",
+    "dev_environment_pool_policies WHERE project_id=?1",
+    "devfiles WHERE project_id=?1",
+    // Membership, roles and invitations into the project.
+    "channel_notes WHERE project_id=?1",
+    "invitations WHERE project_id=?1",
+    "role_assignments WHERE scope_type='project' AND scope_id=?1",
+    "project_team_roles WHERE project_id=?1",
+    "project_roles WHERE project_id=?1",
+    "project_members WHERE project_id=?1",
+    "projects WHERE id=?1",
+];
+/// A blank string is "no lead", not a profile id: the column stays NULL or holds a real id.
+fn normalized_lead(lead_id: Option<String>) -> Option<String> {
+    lead_id
+        .map(|id| id.trim().to_string())
+        .filter(|id| !id.is_empty())
 }
 
 /// Narrow deadline write: the only column it can change is `projects.deadline`, so a
@@ -1691,9 +1921,13 @@ pub fn update_project_deadline_on(
     project_on(c, project_id)?.ok_or_else(|| "project access denied".to_string())
 }
 
-/// Project lead is informational only: it names a responsible member but grants no access.
-/// This is intentionally a narrow, single-column write. Its sole authorization gate is
-/// `authorize_project_deadline_on`; `lead_id` must never appear in authorization logic.
+/// Narrow lead write: the only column it can change is `projects.lead_id`, so a stale
+/// whole-project payload can never overwrite name/description/ownership (H6).
+///
+/// LAW (repeated here because this is the door that writes it): the lead is purely
+/// informational. Naming a lead grants nothing and removes nothing — every project
+/// member keeps identical read and write access to the project's work. The gate below
+/// is the *existing* owner-or-admin rule for editing the project, not a lead privilege.
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn set_project_lead(
     project_id: String,
@@ -1701,10 +1935,26 @@ pub fn set_project_lead(
     actor_profile_id: Option<String>,
 ) -> Result<Project> {
     let c = db::conn()?;
-    if let Some(actor) = actor_profile_id.as_deref() {
-        authorize_project_deadline_on(&c, actor, &project_id)?;
+    set_project_lead_for_actor_on(
+        &c,
+        &project_id,
+        lead_id.as_deref(),
+        actor_profile_id.as_deref(),
+    )
+}
+/// Gate + write in one place so the desktop command, the web dispatch and the tests
+/// exercise the identical path. Desktop passes its local identity; web passes none
+/// because the HTTP command gate already authorized the session before dispatch.
+pub fn set_project_lead_for_actor_on(
+    c: &Connection,
+    project_id: &str,
+    lead_id: Option<&str>,
+    actor_profile_id: Option<&str>,
+) -> Result<Project> {
+    if let Some(actor) = actor_profile_id {
+        authorize_project_deadline_on(c, actor, project_id)?;
     }
-    set_project_lead_on(&c, &project_id, lead_id.as_deref())
+    set_project_lead_on(c, project_id, lead_id)
 }
 
 pub fn set_project_lead_on(
@@ -1715,17 +1965,34 @@ pub fn set_project_lead_on(
     if project_id.trim().is_empty() {
         return Err("A project is required".into());
     }
-    let lead_id = lead_id.map(str::trim).filter(|id| !id.is_empty());
-    let changed = c.execute(
-        "UPDATE projects SET lead_id=?2 WHERE id=?1 AND (?2 IS NULL OR (EXISTS(SELECT 1 FROM profiles WHERE id=?2 AND archived=0) AND (created_by=?2 OR EXISTS(SELECT 1 FROM project_members WHERE project_id=projects.id AND profile_id=?2))))",
-        params![project_id, lead_id],
-    ).map_err(|e| e.to_string())?;
-    if changed == 0 {
-        return match project_on(c, project_id)? {
-            None => Err("project access denied".into()),
-            Some(_) => Err("Project lead must be an active project member".into()),
-        };
+    // A missing project and one you may not touch are indistinguishable here for the
+    // same reason as the deadline path: the error text must not become an existence oracle.
+    if project_on(c, project_id)?.is_none() {
+        return Err("project access denied".into());
     }
+    let lead = lead_id.map(str::trim).filter(|id| !id.is_empty());
+    if let Some(lead) = lead {
+        // A lead must be a real, live person who is already on the project. This is a
+        // data-integrity check on the value being stored — not an access rule.
+        let known: bool = c
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM profiles WHERE id=?1 AND archived=0)",
+                [lead],
+                |r| r.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        if !known {
+            return Err("that person does not exist".into());
+        }
+        if !crate::personal::project_member_on(c, project_id, lead)? {
+            return Err("the project lead must be a project member".into());
+        }
+    }
+    c.execute(
+        "UPDATE projects SET lead_id=?2 WHERE id=?1",
+        rusqlite::params![project_id, lead],
+    )
+    .map_err(|e| e.to_string())?;
     project_on(c, project_id)?.ok_or_else(|| "project access denied".to_string())
 }
 
@@ -1733,18 +2000,7 @@ pub fn project_on(c: &Connection, project_id: &str) -> Result<Option<Project>> {
     c.query_row(
         "SELECT id,name,key,description,created_by,archived,deadline,lead_id FROM projects WHERE id=?1",
         [project_id],
-        |r| {
-            Ok(Project {
-                id: r.get(0)?,
-                name: r.get(1)?,
-                key: r.get(2)?,
-                description: r.get(3)?,
-                created_by: r.get(4)?,
-                archived: r.get(5)?,
-                deadline: r.get(6)?,
-                lead_id: r.get(7)?,
-            })
-        },
+        read_project,
     )
     .optional()
     .map_err(|e| e.to_string())
@@ -2795,10 +3051,129 @@ mod tests {
         assert_eq!(count, 1);
     }
 
+    /// The lead round-trips through the wide create/update writes, and the narrow door
+    /// refuses anyone who is not on the project. Naming a lead is a *label*: it moves no
+    /// ownership and opens no gate (see `Project::lead_id`).
+    #[test]
+    fn project_lead_round_trips_and_only_accepts_members() {
+        let c = conn();
+        c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('p','person','Person',1),('q','other','Other',1),('gone','ghost','Ghost',1)", []).unwrap();
+        c.execute("UPDATE profiles SET archived=1 WHERE id='gone'", [])
+            .unwrap();
+        let project = |lead: Option<&str>| Project {
+            id: "pr".into(),
+            name: "Project".into(),
+            key: "PR".into(),
+            description: Some("Original".into()),
+            created_by: Some("p".into()),
+            archived: false,
+            deadline: None,
+            lead_id: lead.map(str::to_owned),
+        };
+        // Create persists the lead; the owner is a member by construction.
+        create_project_on(&c, project(Some("p"))).unwrap();
+        assert_eq!(
+            project_on(&c, "pr").unwrap().unwrap().lead_id.as_deref(),
+            Some("p")
+        );
+        // Update persists it too, and a blank string is "no lead", not an id.
+        update_project_on(&c, project(Some("   "))).unwrap();
+        assert_eq!(project_on(&c, "pr").unwrap().unwrap().lead_id, None);
+        assert_eq!(
+            list_projects_on(&c).unwrap()[0].lead_id,
+            None,
+            "the list read carries the column"
+        );
+
+        // q is not on the project yet: refused, and nothing is written.
+        let refused = set_project_lead_on(&c, "pr", Some("q")).unwrap_err();
+        assert!(refused.contains("must be a project member"), "{refused}");
+        assert_eq!(project_on(&c, "pr").unwrap().unwrap().lead_id, None);
+        // Unknown and archived people are refused the same way.
+        assert!(set_project_lead_on(&c, "pr", Some("nobody")).is_err());
+        c.execute(
+            "INSERT INTO project_members(project_id,profile_id) VALUES('pr','gone')",
+            [],
+        )
+        .unwrap();
+        assert!(
+            set_project_lead_on(&c, "pr", Some("gone")).is_err(),
+            "an archived profile cannot lead"
+        );
+
+        // Once q is a member the write lands, and only `lead_id` moves.
+        c.execute(
+            "INSERT INTO project_members(project_id,profile_id) VALUES('pr','q')",
+            [],
+        )
+        .unwrap();
+        let led = set_project_lead_on(&c, "pr", Some("q")).unwrap();
+        assert_eq!(led.lead_id.as_deref(), Some("q"));
+        assert_eq!(
+            (
+                led.name.as_str(),
+                led.description.as_deref(),
+                led.created_by.as_deref()
+            ),
+            ("Project", Some("Original"), Some("p")),
+            "a lead write never touches ownership or any other column"
+        );
+        // Clearing is explicit and always allowed.
+        assert_eq!(set_project_lead_on(&c, "pr", None).unwrap().lead_id, None);
+        // A project that does not exist is refused with the non-oracle message.
+        assert_eq!(
+            set_project_lead_on(&c, "ghost", None).unwrap_err(),
+            "project access denied"
+        );
+    }
+
+    /// Same owner-or-admin door as the deadline: a member who is neither owner nor admin
+    /// cannot set the lead — and being (or naming) a lead grants that person nothing.
+    #[test]
+    fn setting_a_project_lead_runs_the_owner_or_admin_gate() {
+        let c = conn();
+        c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('p','person','Person',1),('q','other','Other',1),('boss','admin','Admin',1)", []).unwrap();
+        c.execute("INSERT INTO users(id,username,password_hash,display_name,profile_id,role,active,created_at) VALUES('u1','admin','x','Admin','boss','admin',1,1)", []).unwrap();
+        c.execute("INSERT INTO projects(id,name,key,created_by,archived,created_at) VALUES('pr','Project','PR','p',0,1)", []).unwrap();
+        c.execute(
+            "INSERT INTO project_members(project_id,profile_id) VALUES('pr','q')",
+            [],
+        )
+        .unwrap();
+
+        // A plain member is refused, even to name themselves.
+        let refused = set_project_lead_for_actor_on(&c, "pr", Some("q"), Some("q")).unwrap_err();
+        assert!(refused.contains("owner or an admin"), "{refused}");
+        assert_eq!(project_on(&c, "pr").unwrap().unwrap().lead_id, None);
+        // Owner and admin both pass; the web path (no actor) is already authorized upstream.
+        assert_eq!(
+            set_project_lead_for_actor_on(&c, "pr", Some("q"), Some("p"))
+                .unwrap()
+                .lead_id
+                .as_deref(),
+            Some("q")
+        );
+        assert_eq!(
+            set_project_lead_for_actor_on(&c, "pr", None, Some("boss"))
+                .unwrap()
+                .lead_id,
+            None
+        );
+        assert_eq!(
+            set_project_lead_for_actor_on(&c, "pr", Some("q"), None)
+                .unwrap()
+                .lead_id
+                .as_deref(),
+            Some("q")
+        );
+        // The freshly named lead is still just a member: the gate does not know them.
+        assert!(set_project_lead_for_actor_on(&c, "pr", None, Some("q")).is_err());
+    }
+
     #[test]
     fn desktop_project_creation_is_never_ownerless() {
         let c = conn();
-        c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('p','person','Person',1)", []).unwrap();
+        c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('p','person','Person',1),('q','other','Other',1)", []).unwrap();
         let project = |owner: Option<&str>| Project {
             id: "pr".into(),
             name: "Project".into(),
@@ -2828,6 +3203,31 @@ mod tests {
             })
             .unwrap();
         assert_eq!(stored.as_deref(), Some("p"));
+
+        // ORGANISATION NEWS: the workspace hears about a new project, its creator
+        // does not hear about herself, and the actor is named by the convention
+        // `events::actor_body` — never guessed by the reader.
+        let mut statement = c
+            .prepare("SELECT recipient_id,body FROM notifications WHERE event_type='project.created' ORDER BY recipient_id")
+            .unwrap();
+        let announced = statement
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+            })
+            .unwrap()
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .unwrap();
+        assert!(
+            announced.iter().all(|(recipient, _)| recipient != "p"),
+            "the creator is not an audience for her own act"
+        );
+        assert!(!announced.is_empty(), "a new project is announced");
+        assert!(
+            announced
+                .iter()
+                .all(|(_, body)| body.as_deref() == Some("by Person · PR")),
+            "{announced:?}"
+        );
     }
 
     /// "Admin" had two parallel meanings that never met: the web session gate reads
@@ -3102,8 +3502,11 @@ mod tests {
         assert_eq!(chosen.lead_id.as_deref(), Some("member"));
         let untouched: (String, Option<String>, Option<String>) = c.query_row("SELECT name,description,deadline FROM projects WHERE id='pr'", [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))).unwrap();
         assert_eq!(untouched, ("Project".into(), Some("Original".into()), Some("2030-03-10".into())));
-        assert!(set_project_lead_on(&c, "pr", Some("outside")).unwrap_err().contains("active project member"));
-        assert!(set_project_lead_on(&c, "pr", Some("archived")).unwrap_err().contains("active project member"));
+        // master's requirement, kept: a lead must be an ACTIVE MEMBER. Our wording splits
+        // the two reasons — a stranger to the project vs a profile that no longer exists —
+        // so the assertions name our messages while testing master's guarantee.
+        assert!(set_project_lead_on(&c, "pr", Some("outside")).unwrap_err().contains("must be a project member"));
+        assert!(set_project_lead_on(&c, "pr", Some("archived")).unwrap_err().contains("does not exist"));
         assert_eq!(set_project_lead_on(&c, "pr", Some("  ")).unwrap().lead_id, None);
     }
 
@@ -3211,5 +3614,146 @@ mod tests {
             assign_project_team_role_on(&c, "pr", "team-b", &role.id).unwrap_err(),
             "Project role is archived"
         );
+    }
+}
+
+
+#[cfg(test)]
+mod delete_project_tests {
+    use super::*;
+
+    fn conn() -> Connection {
+        let c = db::open_in_memory().unwrap();
+        db::migrate(&c).unwrap();
+        c
+    }
+
+    /// Seeds one project with a row in each domain that only exists because of it,
+    /// plus two rows that stand on their own (a channel and a blog post).
+    fn seed(c: &Connection) {
+        c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('own','own','Owner',1),('other','other','Other',1),('boss','boss','Boss',1)", []).unwrap();
+        c.execute("INSERT INTO users(id,username,password_hash,display_name,profile_id,role,active,created_at) VALUES('u1','boss','x','Boss','boss','admin',1,1)", []).unwrap();
+        c.execute("INSERT INTO projects(id,name,key,created_by,archived,created_at) VALUES('pr','Project','PR','own',0,1),('keep','Other','KEEP','other',0,1)", []).unwrap();
+        c.execute(
+            "INSERT INTO project_members(project_id,profile_id) VALUES('pr','other'),('keep','own')",
+            [],
+        )
+        .unwrap();
+        c.execute("INSERT INTO project_roles(id,project_id,name,role_kind,archived) VALUES('role','pr','Dev','member',0)", []).unwrap();
+        c.execute("INSERT INTO boards(id,project_id,name) VALUES('bo','pr','Board')", []).unwrap();
+        c.execute("INSERT INTO board_columns(id,board_id,name,ordering) VALUES('col','bo','Todo',0)", []).unwrap();
+        c.execute("INSERT INTO issue_statuses(id,project_id,name) VALUES('st','pr','Open')", []).unwrap();
+        c.execute("INSERT INTO column_statuses(column_id,status_id) VALUES('col','st')", []).unwrap();
+        c.execute("INSERT INTO issues(id,project_id,number,title,status_id) VALUES('is','pr',1,'Issue','st')", []).unwrap();
+        c.execute("INSERT INTO issue_comments(id,issue_id,author_id,body,created_at) VALUES('ic','is','own','Comment',1)", []).unwrap();
+        c.execute("INSERT INTO todos(id,profile_id,content,project_id) VALUES('td','own','Task','pr')", []).unwrap();
+        c.execute("INSERT INTO todo_assignees(todo_id,profile_id) VALUES('td','other')", []).unwrap();
+        c.execute("INSERT INTO document_folders(id,container_type,container_id,parent_id,name,archived) VALUES('root','project','pr',NULL,'Documents',0),('sub','project','pr','root','Sub',0)", []).unwrap();
+        c.execute("INSERT INTO documents(id,container_type,container_id,folder_id,doc_type,title,created_by) VALUES('doc','project','pr','sub','text','Spec','own')", []).unwrap();
+        c.execute("INSERT INTO doc_versions(id,document_id,version,body) VALUES('dv','doc',1,'text')", []).unwrap();
+        c.execute("INSERT INTO reviews(id,project_id,number,kind,state,title) VALUES('rv','pr',1,'MR','Opened','Review')", []).unwrap();
+        c.execute("INSERT INTO pipeline_scripts(id,project_id,source) VALUES('ps','pr','job')", []).unwrap();
+        c.execute("INSERT INTO devfiles(id,project_id,path,name,content) VALUES('df','pr','.space/dev.yaml','Dev','x')", []).unwrap();
+        c.execute("INSERT INTO notifications(id,recipient_id,event_type,title,entity_type,entity_id,created_at) VALUES('nt','other','issue.created','Issue','issue','is',1)", []).unwrap();
+        // Rows that carry their own meaning: the conversation and the article survive.
+        c.execute("INSERT INTO channels(id,content_type,name,project_id) VALUES('ch','public','general','pr')", []).unwrap();
+        c.execute("INSERT INTO blog_posts(id,draft_id,title,body,author_id,project_id) VALUES('bp','doc','Post','Body','own','pr')", []).unwrap();
+    }
+
+    fn count(c: &Connection, sql: &str) -> i64 {
+        c.query_row(sql, [], |r| r.get(0)).unwrap()
+    }
+
+    /// The owner deletes; every row that only existed because of the project goes with
+    /// it in one transaction, while the channel and the blog post keep their identity
+    /// and merely lose the pointer.
+    #[test]
+    fn the_owner_deletes_a_project_with_everything_that_only_belonged_to_it() {
+        let mut c = conn();
+        db::enforce_foreign_keys(&c).unwrap();
+        seed(&c);
+
+        delete_project_on(&mut c, "pr", "own").unwrap();
+
+        assert_eq!(count(&c, "SELECT count(*) FROM projects WHERE id='pr'"), 0);
+        for probe in [
+            "SELECT count(*) FROM project_members WHERE project_id='pr'",
+            "SELECT count(*) FROM project_roles WHERE project_id='pr'",
+            "SELECT count(*) FROM boards WHERE project_id='pr'",
+            "SELECT count(*) FROM board_columns WHERE board_id='bo'",
+            "SELECT count(*) FROM column_statuses WHERE column_id='col'",
+            "SELECT count(*) FROM issues WHERE project_id='pr'",
+            "SELECT count(*) FROM issue_comments WHERE issue_id='is'",
+            "SELECT count(*) FROM issue_statuses WHERE project_id='pr'",
+            "SELECT count(*) FROM todos WHERE project_id='pr'",
+            "SELECT count(*) FROM todo_assignees WHERE todo_id='td'",
+            "SELECT count(*) FROM document_folders WHERE container_type='project' AND container_id='pr'",
+            "SELECT count(*) FROM documents WHERE container_type='project' AND container_id='pr'",
+            "SELECT count(*) FROM doc_versions WHERE document_id='doc'",
+            "SELECT count(*) FROM reviews WHERE project_id='pr'",
+            "SELECT count(*) FROM pipeline_scripts WHERE project_id='pr'",
+            "SELECT count(*) FROM devfiles WHERE project_id='pr'",
+            "SELECT count(*) FROM notifications WHERE entity_id='is'",
+        ] {
+            assert_eq!(count(&c, probe), 0, "left behind: {probe}");
+        }
+
+        // The conversation outlives the project it was filed under.
+        assert_eq!(
+            count(&c, "SELECT count(*) FROM channels WHERE id='ch' AND project_id IS NULL"),
+            1
+        );
+        assert_eq!(
+            count(&c, "SELECT count(*) FROM blog_posts WHERE id='bp' AND project_id IS NULL AND draft_id IS NULL"),
+            1
+        );
+        // A second project is untouched.
+        assert_eq!(count(&c, "SELECT count(*) FROM projects WHERE id='keep'"), 1);
+        assert_eq!(
+            count(&c, "SELECT count(*) FROM project_members WHERE project_id='keep'"),
+            1
+        );
+    }
+
+    /// A member who is not the owner is refused, and the refusal changes nothing at all.
+    #[test]
+    fn a_stranger_is_refused_and_the_project_is_untouched() {
+        let mut c = conn();
+        seed(&c);
+        let before = count(
+            &c,
+            "SELECT (SELECT count(*) FROM projects) + (SELECT count(*) FROM issues) + (SELECT count(*) FROM todos) \
+             + (SELECT count(*) FROM documents) + (SELECT count(*) FROM boards) + (SELECT count(*) FROM channels)",
+        );
+
+        let refused = delete_project_on(&mut c, "pr", "other").unwrap_err();
+        assert!(refused.contains("owner or an admin"), "{refused}");
+        assert_eq!(
+            count(
+                &c,
+                "SELECT (SELECT count(*) FROM projects) + (SELECT count(*) FROM issues) + (SELECT count(*) FROM todos) \
+                 + (SELECT count(*) FROM documents) + (SELECT count(*) FROM boards) + (SELECT count(*) FROM channels)",
+            ),
+            before,
+            "a refused delete must not touch a single row"
+        );
+        assert_eq!(
+            count(&c, "SELECT count(*) FROM channels WHERE id='ch' AND project_id='pr'"),
+            1
+        );
+    }
+
+    /// An admin has the same break-glass path as everywhere else; an unknown id is a
+    /// plain not-found, never a half-executed cascade.
+    #[test]
+    fn an_admin_may_delete_and_a_missing_project_is_not_found() {
+        let mut c = conn();
+        seed(&c);
+        assert_eq!(
+            delete_project_on(&mut c, "ghost", "own").unwrap_err(),
+            "Project not found"
+        );
+        delete_project_on(&mut c, "pr", "boss").unwrap();
+        assert_eq!(count(&c, "SELECT count(*) FROM projects WHERE id='pr'"), 0);
     }
 }

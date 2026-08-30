@@ -7,7 +7,13 @@
 .panel-title{display:flex;justify-content:space-between;align-items:center;margin:0 0 8px}
 .panel-title h2{font-size:14px;margin:0}
 .admin-view input,.admin-view select{min-width:0;width:100%}
-.inline-form-col{display:grid;gap:6px;margin-bottom:12px}
+/* An operator column, not a filter line: these panels are ~280px wide, so four
+   pickers genuinely stack. What must NOT stack full-width is the action — a
+   primary that spans the whole panel reads as a banner, not as a button. This
+   is structure, so it is unscoped and applies to the dark layouts too. */
+.inline-form-col{display:grid;gap:6px;margin-bottom:12px;justify-items:stretch}
+.inline-form-col>button{justify-self:start}
+.inline-form-col>.ghost-pill{justify-self:start}
 .entity-list{list-style:none;margin:0 0 12px;padding:0;display:grid;gap:6px}
 .entity-list li{display:flex;justify-content:space-between;align-items:center;padding:8px;border-bottom:1px solid var(--surface-border);gap:8px}
 .entity-list.compact li{cursor:pointer;padding:7px 8px;border-radius:6px}
@@ -23,9 +29,10 @@
 .matrix-row input{width:auto}
 .matrix-row code{font-size:10px;color:var(--text-dim)}
 .cf-tabs{display:flex;gap:6px;margin-bottom:10px}
-.cf-tabs button{flex:1;background:var(--ctl-bg)}
+.cf-tabs button{flex:1;background:var(--ctl-bg);text-transform:capitalize}
 .cf-tabs button.active{background:var(--accent);border-color:var(--accent);color:var(--brand-navy)}
-.result-true{color:var(--status-success-ink);font-weight:600}
-.result-false{color:var(--status-danger-ink);font-weight:600}
+/* `.result-true` / `.result-false` lived here to colour the GRANTED/DENIED word.
+   The answer is now a `paper-pill` carrying the shared colour law (teal =
+   allowed, red = blocked), so these two rules had no call site left. */
 @media(max-width:1300px){.admin-grid{grid-template-columns:1fr 1fr}}
 @media(max-width:760px){.admin-grid{grid-template-columns:1fr}}

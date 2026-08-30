@@ -82,12 +82,100 @@ describe("calendar day agenda", () => {
     const request = calls.find((c) => c.cmd === "calendar_aggregate");
     expect(request?.args.rangeStartDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     expect(request?.args.rangeEndDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    /* A TASK IS A PROJECT'S BUSINESS: the organisation-wide calendar carries what
+       binds people to a moment — meetings and project deadlines. A due date is drawn
+       on the calendar of the project that owns it (see the project-scoped test
+       below), so the unscoped grid shows two kinds, not three. */
     const agenda = [...host.querySelectorAll(".cal-agenda li")];
-    expect(agenda.map((li) => li.className.split(" ")[0]).sort()).toEqual(["deadline", "meeting", "task"]);
+    expect(agenda.map((li) => li.className.split(" ")[0]).sort()).toEqual(["deadline", "meeting"]);
     // Every agenda item leaves through a real anchor, never a click handler on a div.
     for (const li of agenda) expect(li.querySelector("a")?.getAttribute("href")).toBeTruthy();
-    // The typed legend names all three kinds.
+    // The typed legend still names all three kinds — it moved out from under the
+    // h1 into the View options popover (a lookup table is read once, so it does
+    // not hold a permanent line), and it is reachable and complete there.
+    expect(host.querySelector(".calendar-legend")).toBeNull();
+    const viewOptions = host.querySelector(".cal-viewopts button") as HTMLButtonElement;
+    expect(viewOptions.getAttribute("aria-expanded")).toBe("false");
+    viewOptions.click();
+    await settle();
+    expect(viewOptions.getAttribute("aria-expanded")).toBe("true");
+    expect(host.querySelector(".cal-viewopts-menu")?.getAttribute("role")).toBe("dialog");
     expect(host.querySelector(".calendar-legend")?.textContent).toBe("MeetingTaskDeadline");
+  });
+
+  test("the filters are named pills at the far end of the action row, not captioned fields in a card", async () => {
+    stubFetch();
+    setProfileId("pa");
+    const today = new Date();
+    replies = { calendar_aggregate: { ok: true, value: [] }, list_meetings: { ok: true, value: [
+      { id: "m1", title: "Standup", description: null, starts_at: Math.floor(today.getTime() / 1000), ends_at: Math.floor(today.getTime() / 1000) + 3600, rrule: null, location: "Berlin HQ", organizer_id: "pa", channel_id: null, visibility: "participants", modification_preference: "organizer-only", archived: false, video_provider: null, video_room_id: null, join_url: null, video_status: "scheduled", video_started_at: null, video_ended_at: null, video_ended_by: null, source_entity_type: null, source_entity_id: null },
+    ] } };
+    const host = mount();
+    await settle();
+    // The card of captioned fields is gone in every theme, not merely restyled.
+    expect(host.querySelector(".calendar-filters")).toBeNull();
+    expect(host.querySelector(".calendar-filter")).toBeNull();
+    // Both filters CHANGE WHAT YOU SEE, so since the shared action row they live at
+    // its far end (`.actionbar-view-controls`), not in the header's top-right corner.
+    // They keep an accessible name, with the VALUE as the visible label.
+    const actions = host.querySelector(".page-actionbar > .actionbar-view-controls")!;
+    expect(actions).toBeTruthy();
+    // The creation act is the row's primary, on the left, outside the view controls.
+    const create = host.querySelector(".page-actionbar > button.primary") as HTMLButtonElement;
+    expect(create?.textContent).toBe("New meeting");
+    /* ADDRESS ONLY (picker pass): these filters are PillMenus now, not native
+       selects. A `<select>`'s OPEN state belongs to the operating system — grey
+       system rows in a layer no CSS reaches — so the product's own filters looked
+       redesigned until they were clicked. The control is a named button that opens
+       a listbox we draw; the keyboard contract is covered by
+       controls.pillmenu.test.tsx. */
+    const location = actions.querySelector("button[aria-label='Location calendar']") as HTMLButtonElement;
+    expect(actions.querySelector("button[aria-label='Member calendar']")).toBeTruthy();
+    expect(location).toBeTruthy();
+    location.click();
+    await settle();
+    expect([...document.querySelectorAll('[role="option"]')].map((option) => option.textContent)).toEqual(["All locations", "Berlin HQ"]);
+    location.click();
+    await settle();
+    // A caption above a filter is what was removed; none may come back.
+    for (const label of actions.querySelectorAll("label")) expect(label.textContent?.trim()).toBe("");
+  });
+
+  test("all four view modes switch, and the pill that is chosen is the pill that is marked", async () => {
+    stubFetch();
+    setProfileId("pa");
+    replies = { calendar_aggregate: { ok: true, value: [] } };
+    const host = mount();
+    await settle();
+    const pill = (label: string) => [...host.querySelectorAll(".cal-viewtoggle button")].find((button) => button.textContent === label) as HTMLButtonElement;
+    const marked = () => [...host.querySelectorAll(".cal-viewtoggle button")].filter((button) => button.classList.contains("active")).map((button) => button.textContent);
+    expect(marked()).toEqual(["Month"]);
+    for (const [label, grid] of [["Week", "week"], ["Day", "day"]] as const) {
+      pill(label).click();
+      await settle();
+      // Exactly one pill is marked, it is the one that was pressed, and the grid
+      // actually changed shape with it.
+      expect(marked()).toEqual([label]);
+      expect(pill(label).getAttribute("aria-pressed")).toBe("true");
+      expect(host.querySelector(".calendar-grid")?.classList.contains(grid)).toBe(true);
+    }
+    pill("Schedule").click();
+    await settle();
+    expect(marked()).toEqual(["Schedule"]);
+    expect(host.querySelector(".cal-schedule")).toBeTruthy();
+    expect(host.querySelector(".calendar-grid")).toBeNull();
+    pill("Month").click();
+    await settle();
+    expect(marked()).toEqual(["Month"]);
+    // The range navigation keeps its names and moves the cursor by the mode's span.
+    const heading = () => host.querySelector(".cal-toolbar strong")?.textContent;
+    const before = heading();
+    (host.querySelector("button[aria-label='Next range']") as HTMLButtonElement).click();
+    await settle();
+    expect(heading()).not.toBe(before);
+    (host.querySelector(".cal-toolbar .ghost-pill") as HTMLButtonElement).click();
+    await settle();
+    expect(heading()).toBe(before);
   });
 
   test("calendar filter keeps local items and hides external items from other calendars", async () => {
@@ -100,9 +188,21 @@ replies = { calendar_aggregate: { ok: true, value: [
 { id: "personal", source_id: "personal", kind: "external", title: "Personal event", starts_at: 0, ends_at: null, project_id: null, calendar_id: "personal", date: key },
 ] }, list_calendars: { ok: true, value: [{ id: "work", profile_id: "pa", name: "Work", color: "#2563eb", visible: true }, { id: "personal", profile_id: "pa", name: "Personal", color: "#2563eb", visible: true }] } };
 const host = mount(); await settle();
-const filter = host.querySelector("select[aria-label='Calendar filter']") as HTMLSelectElement;
-expect(filter).toBeTruthy(); filter.value = "work"; filter.dispatchEvent(new Event("change", { bubbles: true })); await settle();
-expect(host.querySelector(".cal-agenda")?.textContent).toContain("Local");
+/* ADDRESS ONLY (picker pass): a PillMenu is chosen by clicking the option we draw,
+   not by writing a value into a native select. What is under test is unchanged —
+   choosing "Work" hides the other calendar's events and keeps the local ones. */
+const filter = host.querySelector("button[aria-label='Calendar filter']") as HTMLButtonElement;
+expect(filter).toBeTruthy();
+filter.click(); await settle();
+/* A PillMenu commits on MOUSEDOWN, not click: it keeps the focus story its own
+   (see controls.tsx), which a bare .click() would skip. */
+([...document.querySelectorAll('[role="option"]')].find(option => option.textContent === "Work") as HTMLElement)
+  .dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+await settle();
+/* "Local" is a TASK: it belongs to the project calendar, not to this one. What the
+   filter must still do is keep the chosen calendar's external events and drop the
+   other calendar's — that is the rule under test. */
+expect(host.querySelector(".cal-agenda")?.textContent).not.toContain("Local");
 expect(host.querySelector(".cal-agenda")?.textContent).toContain("Work event");
 expect(host.querySelector(".cal-agenda")?.textContent).not.toContain("Personal event");
 });
@@ -167,8 +267,13 @@ test("quick create offers a meeting, a task and a deadline form on the chosen da
     const title = form.querySelector("input") as HTMLInputElement;
     title.value = "Sync";
     title.dispatchEvent(new Event("input", { bubbles: true }));
-    const end = form.querySelectorAll("input[type=datetime-local]")[1] as HTMLInputElement;
-    const start = form.querySelectorAll("input[type=datetime-local]")[0] as HTMLInputElement;
+    /* ADDRESS ONLY (date-field pass): an instant is two halves now — the day is chosen in
+       the product's own month grid (components/DateField.tsx), the clock stays a time input.
+       Both quick-create times sit on the SAME day, so making the end equal the start is done
+       where it always was: on the clock. The draft still carries `YYYY-MM-DDTHH:mm`, and
+       meetingDraftError is the same judge of it. */
+    const clocks = form.querySelectorAll<HTMLInputElement>("input.date-time-clock");
+    const [start, end] = [clocks[0], clocks[1]];
     end.value = start.value;
     end.dispatchEvent(new Event("input", { bubbles: true }));
     await settle();
@@ -176,5 +281,193 @@ test("quick create offers a meeting, a task and a deadline form on the chosen da
     await settle();
     expect(host.querySelector(".calendar-error")?.textContent).toContain("end after it starts");
     expect(calls.some((c) => c.cmd === "create_meeting")).toBe(false);
+  });
+});
+
+// A MEETING HAPPENS ON SOMEBODY ELSE'S SERVICE. The calendar's detail pane edits the
+// same external link the Meetings list edits, and shows the same way in — one control,
+// shared (views/Meetings.tsx `JoinLink`), so the act cannot drift into two behaviours.
+// Nothing is drawn without a valid link: a Join that leads nowhere is worse than none.
+describe("the calendar's meeting detail carries the way into the meeting", () => {
+  const meetingAt = (url: string | null) => {
+    const start = Math.floor(Date.now() / 1000) + 3600;
+    return {
+      id: "m-link", title: "Design review", description: null, starts_at: start, ends_at: start + 1800,
+      rrule: null, location: null, organizer_id: "pa", channel_id: null, visibility: "participants",
+      modification_preference: "organizer-only", archived: false, video_provider: null, video_room_id: null,
+      join_url: null, meeting_url: url, video_status: "scheduled", video_started_at: null, video_ended_at: null,
+      video_ended_by: null, source_entity_type: null, source_entity_id: null,
+    };
+  };
+
+  const openDetail = async (url: string | null) => {
+    stubFetch();
+    setProfileId("pa");
+    const meeting = meetingAt(url);
+    replies = {
+      list_meetings: { ok: true, value: [meeting] },
+      calendar_aggregate: { ok: true, value: [{
+        id: meeting.id, source_id: meeting.id, kind: "meeting", title: meeting.title,
+        starts_at: meeting.starts_at, ends_at: meeting.ends_at, project_id: null, calendar_id: null,
+        date: dateKey(new Date(meeting.starts_at * 1000)),
+      }] },
+    };
+    const host = mount();
+    await settle();
+    const entry = [...host.querySelectorAll("button, a")].find((element) => element.textContent?.includes("Design review")) as HTMLElement;
+    entry?.click();
+    await settle();
+    return host;
+  };
+
+  test("the link is editable, and Join appears only once there is one", async () => {
+    let host = await openDetail(null);
+    const field = host.querySelector('input[aria-label="Meeting link"]') as HTMLInputElement;
+    expect(field).not.toBeNull();
+    expect(field.value).toBe("");
+    // No link, no way in — and no button pretending there is one.
+    expect([...host.querySelectorAll("button, a")].some((element) => element.textContent?.trim() === "Join")).toBe(false);
+    unmount(host);
+
+    host = await openDetail("https://meet.google.com/abc-defg-hij");
+    expect((host.querySelector('input[aria-label="Meeting link"]') as HTMLInputElement).value)
+      .toBe("https://meet.google.com/abc-defg-hij");
+    expect([...host.querySelectorAll("button, a")].some((element) => element.textContent?.trim() === "Join")).toBe(true);
+  });
+});
+
+// WHO IS COMING IS ASKED WHILE THE MEETING IS BEING MADE. The day composer could set
+// a time, a place and who may SEE the meeting, but never who is IN it — the people had
+// to be added afterwards, in another view. They are gathered here and invited the
+// moment the meeting exists, because the invite command needs an id create() mints.
+describe("the day composer invites people", () => {
+  const openComposer = async () => {
+    stubFetch();
+    setProfileId("pa");
+    replies = {
+      calendar_aggregate: { ok: true, value: [] },
+      list_profiles: { ok: true, value: [
+        { id: "pa", username: "alice", display_name: "Alice", email: null, archived: false },
+        { id: "pb", username: "bob", display_name: "Bob", email: null, archived: false },
+        { id: "pc", username: "carol", display_name: "Carol", email: null, archived: false },
+      ] },
+      create_meeting: { ok: true, value: null },
+      attach_meeting_channel: { ok: true, value: "channel-1" },
+      invite_meeting_participant: { ok: true, value: null },
+    };
+    const host = mount();
+    await settle();
+    (host.querySelector(".cal-side-add") as HTMLButtonElement).click();
+    await settle();
+    return host;
+  };
+
+  test("other people are offered, the organizer is not, and each one is invited on create", async () => {
+    const host = await openComposer();
+    /* ADDRESS ONLY: participants are chosen with the product's own picker now, and
+       each chosen person stands as a removable chip — a grid of checkboxes was a
+       panel wearing the shape of a form. The rule under test is unchanged. */
+    const picker = host.querySelector('button[aria-label="Add participant"]') as HTMLButtonElement;
+    const offered = async () => {
+      picker.click();
+      await settle();
+      return [...document.querySelectorAll('[role="option"]')].map((option) => option.textContent);
+    };
+    const choose = async (name: string) => {
+      ([...document.querySelectorAll('[role="option"]')].find((option) => option.textContent === name) as HTMLElement)
+        .dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+      await settle();
+    };
+    // The acting profile is the organizer; inviting yourself is not a choice.
+    expect(await offered()).toEqual(["Bob", "Carol"]);
+    await choose("Bob");
+    // Somebody already coming is not offered again.
+    expect(await offered()).toEqual(["Carol"]);
+    await choose("Carol");
+    expect([...host.querySelectorAll(".cal-invitee")].map((chip) => chip.textContent?.replace("×", "").trim()))
+      .toEqual(["Bob", "Carol"]);
+
+    (host.querySelector('input[aria-label="Meeting title"]') as HTMLInputElement).value = "Design review";
+    (host.querySelector('input[aria-label="Meeting title"]') as HTMLInputElement)
+      .dispatchEvent(new Event("input", { bubbles: true }));
+    await settle();
+    (host.querySelector('form[aria-label="New meeting"]') as HTMLFormElement)
+      .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    await settle();
+
+    const invites = calls.filter((entry) => entry.cmd === "invite_meeting_participant");
+    expect(invites.length).toBe(2);
+    expect(invites.map((entry) => (entry.args as Record<string, unknown>).profileId).sort()).toEqual(["pb", "pc"]);
+    // The meeting is made first: an invite needs the id create() mints.
+    expect(calls.findIndex((entry) => entry.cmd === "create_meeting"))
+      .toBeLessThan(calls.findIndex((entry) => entry.cmd === "invite_meeting_participant"));
+  });
+
+  test("a link that is not a web address stops the create, and says why", async () => {
+    const host = await openComposer();
+    (host.querySelector('input[aria-label="Meeting title"]') as HTMLInputElement).value = "Design review";
+    (host.querySelector('input[aria-label="Meeting title"]') as HTMLInputElement)
+      .dispatchEvent(new Event("input", { bubbles: true }));
+    const link = host.querySelector('input[aria-label="Meeting link"]') as HTMLInputElement;
+    link.value = "meet.google.com/bad";
+    link.dispatchEvent(new Event("input", { bubbles: true }));
+    await settle();
+    (host.querySelector('form[aria-label="New meeting"]') as HTMLFormElement)
+      .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    await settle();
+
+    expect(host.querySelector(".calendar-error")?.textContent).toContain("http");
+    expect(calls.some((entry) => entry.cmd === "create_meeting")).toBe(false);
+  });
+});
+
+// WHERE A DUE DATE BELONGS. The organisation's calendar shows what binds people to a
+// moment: meetings and project deadlines. A task is the business of its project, so it
+// is drawn on THAT project's calendar — and there only that project's, never another's.
+// Who may see any of it stays the backend's word (`calendar_aggregate` answers with the
+// owner's, the members' and the assignee's rows only).
+describe("a task is drawn on its project's calendar and nowhere else", () => {
+  const feed = () => {
+    const today = new Date();
+    const key = dateKey(today);
+    return [
+      { id: "m1", source_id: "m1", kind: "meeting", title: "Standup", starts_at: Math.floor(today.getTime() / 1000), ends_at: Math.floor(today.getTime() / 1000) + 3600, project_id: null, calendar_id: null, date: null },
+      { id: "t-mine", source_id: "t-mine", kind: "task", title: "Ship the draft", starts_at: 0, ends_at: null, project_id: "p1", calendar_id: null, date: key },
+      { id: "t-other", source_id: "t-other", kind: "task", title: "Somebody else's project task", starts_at: 0, ends_at: null, project_id: "p2", calendar_id: null, date: key },
+      { id: "deadline-p1", source_id: "p1", kind: "deadline", title: "Apollo deadline", starts_at: 0, ends_at: null, project_id: "p1", calendar_id: null, date: key },
+    ];
+  };
+
+  test("the organisation calendar carries meetings and deadlines, not tasks", async () => {
+    stubFetch();
+    setProfileId("pa");
+    replies = { calendar_aggregate: { ok: true, value: feed() } };
+    const host = mount();
+    await settle();
+    const agenda = host.querySelector(".cal-agenda")?.textContent ?? "";
+    expect(agenda).toContain("Standup");
+    expect(agenda).toContain("Apollo deadline");
+    expect(agenda).not.toContain("Ship the draft");
+    unmount(host);
+  });
+
+  test("the project's calendar carries its own tasks, and only its own", async () => {
+    stubFetch();
+    setProfileId("pa");
+    replies = { calendar_aggregate: { ok: true, value: feed() } };
+    // The view reads its scope from the route; the router module is the only place
+    // that owns it, so the test speaks through it rather than through a prop.
+    const { navigate, registerViews, setAvailableViews } = await import("./router");
+    registerViews(["Calendar"]);
+    setAvailableViews(null);
+    navigate({ view: "Calendar", projectId: "p1" });
+    const host = mount();
+    await settle();
+    const agenda = host.querySelector(".cal-agenda")?.textContent ?? "";
+    expect(agenda).toContain("Ship the draft");
+    expect(agenda).toContain("Apollo deadline");
+    // Another project's work never leaks onto this grid.
+    expect(agenda).not.toContain("Somebody else's project task");
+    (await import("./router")).navigate({ view: "Calendar" });
   });
 });

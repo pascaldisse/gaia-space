@@ -69,16 +69,504 @@
 .cal-agenda-link:hover{text-decoration:underline}
 .cal-side-add{width:100%;margin-top:var(--cal-space-4xl);padding:var(--cal-space-lg);border:var(--cal-hairline) dashed var(--surface-line-dashed);border-radius:var(--radius-option);background:transparent;color:var(--text-faint);cursor:pointer}
 .cal-side-add:hover{color:var(--text-strong);border-color:var(--accent)}
-.calendar-filter{display:inline-flex;align-items:center;gap:var(--cal-space-sm);margin:0 0 var(--cal-space-2xl);color:var(--text-faint);font-size:var(--cal-fs-sm)}
-.calendar-filter select{border:var(--cal-hairline) solid var(--surface-line);border-radius:var(--radius-option);background:var(--surface-sunken);color:var(--text);padding:var(--cal-space-sm) var(--cal-space-lg)}
-.calendar-filter{display:inline-flex;align-items:center;gap:var(--cal-space-sm);margin:0 0 var(--cal-space-2xl);color:var(--text-faint);font-size:var(--cal-fs-sm)}
-.calendar-filter select{border:var(--cal-hairline) solid var(--surface-line);border-radius:var(--radius-option);background:var(--surface-sunken);color:var(--text);padding:var(--cal-space-sm) var(--cal-space-lg)}
+/* `.calendar-filter` / `.calendar-filters` are GONE, not just unstyled: the
+   captioned fields in a bordered card they described no longer exist in any
+   theme — the filters are pills in the header lane. */
 
 .calendar-grid.day{grid-template-columns:minmax(0,1fr)}
 .calendar-grid.day .calendar-day{min-height:var(--cal-week-cell-min-h);border-right:0}
 .cal-schedule{display:flex;flex-direction:column;gap:var(--cal-space-xl);border:var(--cal-hairline) solid var(--surface-line);border-radius:var(--cal-radius-grid);background:var(--cal-grid-bg);padding:var(--cal-space-xl)}
 .cal-schedule-day h3{margin:0 0 var(--cal-space-xs);font-size:.82rem;color:var(--text-faint)}
 
-.calendar-filters{display:flex;flex-wrap:wrap;align-items:end;gap:var(--cal-space-xl);margin:0 0 var(--cal-space-2xl)}.calendar-filters .picker,.calendar-filters .calendar-filter{margin:0}
-
 .calendar-options{display:flex;gap:var(--cal-space-lg);border:0;padding:0;margin:0;color:var(--text-faint);font-size:var(--cal-fs-sm)}.calendar-options label{display:flex;gap:var(--cal-space-3xs);align-items:center}
+
+/* ── toolbar + view-options popover ────────────────────────────────────────
+   STRUCTURE ONLY, deliberately unscoped: these class names are new, so nothing
+   dark rendered them before and an unscoped rule here cannot move one pixel of
+   the grouped/flat layouts. Their COLOUR comes from App.css's global button
+   rules in dark and from the `.theme-space-light` block far below in light.
+   (The lane that broke dark three times did the opposite: it scoped sizes and
+   positions, so the dark theme lost its layout. Sizes live here.) */
+.cal-toolbar{flex-wrap:wrap}
+.cal-toolbar-gap{flex:1 1 auto;min-width:0}
+/* The seam between the two halves of ONE control cluster (view shape | which
+   period). Structure, so both themes get the same lane. */
+.cal-toolbar-div{flex:none;align-self:center;width:1px;height:20px;background:var(--surface-border)}
+.cal-nav{display:inline-flex;align-items:center;gap:var(--cal-space-sm)}
+.cal-viewopts{position:relative;display:inline-flex}
+/* A popover is one of the few new elements that needs a SURFACE in every theme
+   — without one it would print its text straight onto the page underneath. The
+   dark values come from App.css's own tokens, and the light block below
+   overrides them; neither theme is left with a transparent dialog. */
+.cal-viewopts-menu{position:absolute;top:calc(100% + 8px);right:0;z-index:60;min-width:216px;padding:var(--cal-space-3xl);border:var(--cal-hairline) solid var(--surface-border);border-radius:var(--radius-control);background:var(--surface-raised);color:var(--text);box-shadow:0 16px 40px rgba(0,0,0,.45)}
+.cal-viewopts-menu .calendar-options{display:grid;gap:var(--cal-space-sm)}
+.cal-viewopts-menu .calendar-legend{display:grid;gap:var(--cal-space-sm);margin:0}
+
+/* ══ Space-light restyle ═══════════════════════════════════════════════════
+   The month grid was a bordered spreadsheet while Home was a calm paper card,
+   which is exactly the "mix of the new variant and the old one" the product
+   owner saw. Everything below re-draws Calendar in HomeCalendar's language:
+   the grid IS the card, days are number chips (today ringed, selection filled
+   teal), and an event is a quiet line with a coloured dot — never a colour
+   block. Scoped to `.theme-space-light` so grouped/flat stay untouched.
+
+   Deliberately NOT shared as a component with HomeCalendar: see the note at
+   the top of Calendar.tsx. The look is shared here, in CSS, which is the part
+   that actually drifted. */
+
+.theme-space-light .calendar-view { background: var(--wash); color: var(--ink); }
+
+/* ── the grid is the card ─────────────────────────────────────────────────── */
+.theme-space-light .calendar-grid {
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  padding: 22px 24px 24px;
+  background: var(--paper);
+  box-shadow: var(--shadow);
+  gap: 6px 10px;
+  overflow: visible;
+}
+.theme-space-light .calendar-weekday {
+  padding: 0 0 8px;
+  background: transparent;
+  border: 0;
+  text-align: center;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 680;
+}
+
+/* ── days ─────────────────────────────────────────────────────────────────── */
+.theme-space-light .calendar-day {
+  min-height: 78px;
+  padding: 6px 6px 8px;
+  border: 0;
+  border-radius: 14px;
+  background: transparent;
+  align-content: start;
+}
+.theme-space-light .calendar-day:hover { background: var(--wash); }
+.theme-space-light .calendar-day.selected { background: var(--wash); box-shadow: none; }
+.theme-space-light .calendar-day.muted { background: transparent; }
+
+/* The date is a chip, so "today" can be a ring and "selected" a teal fill
+   without the whole cell turning into a colour block. Same shape as Home. */
+.theme-space-light .calendar-day time {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  margin: 0 auto 4px;
+  border-radius: 12px;
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 620;
+  line-height: 1;
+}
+.theme-space-light .calendar-day.muted time { color: var(--quiet); }
+.theme-space-light .calendar-day.today time { box-shadow: inset 0 0 0 1.5px var(--teal); }
+.theme-space-light .calendar-day.selected time {
+  background: var(--teal);
+  color: #04211d;
+  box-shadow: 0 10px 22px rgba(0, 191, 166, .22);
+}
+.theme-space-light .calendar-day:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; box-shadow: none; }
+
+.theme-space-light .calendar-day-add {
+  top: 4px;
+  right: 4px;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--wash-2);
+  color: var(--muted);
+}
+.theme-space-light .calendar-day-add:hover { background: var(--teal-soft); color: var(--teal-ink); }
+
+/* ── an event is a line, not a block ──────────────────────────────────────── */
+/* The kind still reads at a glance, but through one small dot obeying the
+   colour law rather than a filled bar per row. */
+.theme-space-light .calendar-event {
+  display: grid;
+  grid-template-columns: 6px minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+  margin-top: 2px;
+  padding: 3px 5px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink);
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: -.01em;
+}
+.theme-space-light .calendar-event::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--teal);
+}
+.theme-space-light .calendar-event:hover { background: var(--wash-2); }
+.theme-space-light .calendar-event.task::before,
+.theme-space-light .calendar-event.blog::before { background: var(--amber); }
+.theme-space-light .calendar-event.deadline::before { background: var(--red); }
+.theme-space-light .calendar-event.external::before { background: var(--quiet); }
+.theme-space-light .calendar-event.deadline { font-weight: 600; }
+/* Inside a cell the dot already says which kind it is; a second label per row
+   is the noise that made the old grid unreadable. */
+.theme-space-light .calendar-day .cal-tag { display: none; }
+
+/* ── toolbar: view pills left, range navigation right ─────────────────────── */
+/* One primitive family with #/development's section pills: same height, same
+   radius, soft wash at rest, hairline on hover only, teal for the chosen one.
+   The container's box (border + sunken fill) is dropped — a segmented control
+   inside a frame was a third box on a page that is losing its boxes. */
+.theme-space-light .cal-toolbar { gap: 8px; margin: 0 0 16px; }
+.theme-space-light .cal-viewtoggle {
+  gap: 8px;
+  margin-left: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+.theme-space-light .cal-toolbar-div { background: var(--line); }
+/* HEADER-EDGE RULE (controls.css): on a lane without a card, a control at rest
+   is transparent with a hairline. The switcher used to be the only filled thing
+   on this lane and read as four pressed buttons; now only the CHOSEN one is
+   filled, which is what "active" is supposed to mean. */
+.theme-space-light .cal-viewtoggle button {
+  min-height: var(--pillctl-h);
+  padding: 0 var(--pillctl-pad-x);
+  border: 1px solid var(--line);
+  border-radius: var(--pillctl-r);
+  background: transparent;
+  color: var(--muted);
+  font-family: var(--font-body);
+  font-size: var(--pillctl-font);
+  font-weight: var(--pillctl-weight);
+}
+.theme-space-light .cal-viewtoggle button:hover { background: var(--wash-2); border-color: var(--line-strong); color: var(--ink); }
+.theme-space-light .cal-viewtoggle button.active { background: var(--teal-soft); color: var(--teal-ink); border-color: transparent; }
+.theme-space-light .cal-viewtoggle button:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+.theme-space-light .cal-nav { gap: 8px; }
+/* The month/week label is type, not a control — it carries the same weight as
+   the card headings beside it instead of sitting in its own chip. */
+.theme-space-light .cal-toolbar strong {
+  min-width: 148px;
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -.02em;
+}
+.theme-space-light .cal-toolbar .cal-today { font-family: var(--font-body); border-color: var(--line); }
+.theme-space-light .cal-toolbar .cal-today:hover { border-color: var(--line-strong); background: var(--wash-2); }
+
+/* ── view options popover ─────────────────────────────────────────────────── */
+/* Display toggles AND the colour key live here. See the note in Calendar.tsx:
+   both are consulted once and then not again, so neither earns a permanent
+   line above the calendar — but neither is deleted. */
+/* controls.css gives header GhostPills a resting hairline because nothing sits
+   behind them there; this one is a grandchild of `.pgh-actions`, so it has to
+   ask for the same concession by name rather than inherit it. */
+.theme-space-light .pgh-actions .cal-viewopts > .ghost-pill { border-color: var(--line); }
+.theme-space-light .pgh-actions .cal-viewopts > .ghost-pill:hover { border-color: var(--line-strong); background: var(--wash-2); }
+.theme-space-light .cal-viewopts-menu {
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--paper);
+  box-shadow: 0 18px 40px rgba(31, 35, 40, .12);
+}
+.theme-space-light .cal-viewopts-menu .calendar-options { color: var(--ink); font-size: 13px; font-weight: 600; }
+.theme-space-light .cal-viewopts-menu legend,
+.theme-space-light .cal-viewopts-menu .cal-viewopts-title {
+  padding: 0;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+}
+.theme-space-light .cal-viewopts-menu .cal-viewopts-title { margin: 14px 0 8px; padding-top: 12px; border-top: 1px solid var(--line); }
+.theme-space-light .cal-viewopts-menu .calendar-options label { gap: 9px; }
+
+/* ── legend ───────────────────────────────────────────────────────────────── */
+.theme-space-light .calendar-legend { gap: 8px; margin: 0; color: var(--ink); font-size: 13px; font-weight: 600; }
+.theme-space-light .cal-key { gap: 9px; }
+.theme-space-light .cal-key::before { width: 8px; height: 8px; }
+
+/* The agenda column is the same 360px paper column Home uses, so the two
+   screens line up when placed side by side. */
+.theme-space-light .calendar-main { grid-template-columns: minmax(0, 1fr) 360px; gap: 18px; }
+
+/* ── side panel ───────────────────────────────────────────────────────────── */
+.theme-space-light .calendar-side {
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: var(--paper);
+  padding: 20px;
+  box-shadow: 0 16px 36px rgba(31, 35, 40, .06);
+}
+.theme-space-light .cal-side-head { border-bottom: 0; padding-bottom: 0; margin-bottom: 14px; }
+.theme-space-light .cal-side-head h2 { font-size: 21px; font-weight: 720; letter-spacing: -.04em; line-height: 1.15; }
+.theme-space-light .cal-side-head span {
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--wash);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 680;
+}
+.theme-space-light .cal-agenda { gap: 0; }
+.theme-space-light .cal-agenda li { gap: 10px; border-top: 1px solid var(--line); }
+.theme-space-light .cal-agenda li:first-child { border-top: 0; }
+.theme-space-light .cal-agenda li > button {
+  gap: 3px;
+  padding: 11px 8px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  transition: background .12s ease;
+}
+.theme-space-light .cal-agenda li > button:hover { background: var(--wash); border: 0; }
+.theme-space-light .cal-agenda li.active > button { background: var(--teal-soft); border: 0; }
+.theme-space-light .cal-agenda-time { text-transform: none; letter-spacing: 0; font-size: 12.5px; color: var(--muted); font-weight: 680; }
+.theme-space-light .cal-agenda li > button strong { font-size: 14.5px; font-weight: 710; letter-spacing: -.015em; }
+.theme-space-light .cal-agenda-link {
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--teal-soft);
+  color: var(--teal-ink);
+  font-size: 12px;
+  font-weight: 680;
+}
+.theme-space-light .cal-side-add {
+  margin-top: 14px;
+  padding: 11px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 14px;
+  color: var(--muted);
+  font-weight: 620;
+}
+.theme-space-light .cal-side-add:hover { background: var(--wash); color: var(--ink); border-color: var(--teal); }
+
+/* ── schedule ─────────────────────────────────────────────────────────────── */
+.theme-space-light .cal-schedule {
+  gap: 18px;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: var(--paper);
+  padding: 20px 22px;
+  box-shadow: var(--shadow);
+}
+.theme-space-light .cal-schedule-day h3 {
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 680;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+}
+/* In the schedule there is no grid position to read the kind from, so the one
+   pill per row is allowed back. */
+.theme-space-light .cal-schedule .calendar-event { padding: 8px 6px; border-top: 1px solid var(--line); border-radius: 0; grid-template-columns: 6px minmax(0, 1fr) auto; }
+.theme-space-light .cal-schedule .cal-tag {
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 680;
+}
+
+/* ── composer / detail ────────────────────────────────────────────────────── */
+.theme-space-light .calendar-detail {
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: var(--paper);
+  box-shadow: 0 16px 36px rgba(31, 35, 40, .06);
+}
+.theme-space-light .calendar-error,
+.theme-space-light .calendar-notice { border-radius: 14px; }
+
+@media (max-width: 1100px) {
+  .theme-space-light .calendar-grid { padding: 18px; }
+  .theme-space-light .calendar-day { min-height: 68px; }
+}
+/* Must restate the collapse: the scoped two-column rule above outranks the
+   unscoped one further up this file, so it would otherwise survive narrow. */
+@media (max-width: 56.25em) {
+  .theme-space-light .calendar-main { grid-template-columns: minmax(0, 1fr); }
+}
+
+.theme-space-light .cal-viewopts-note { margin: 0; color: var(--muted); font-size: 12.5px; line-height: 1.45; }
+
+/* ── the sweep: everything else that still spoke the old idiom ─────────────
+   Applied by reading the four modes and the two panes side by side with
+   #/home, which is the acceptance question. */
+
+/* The per-day quick-create was a small SQUARE with a hairline — the only
+   square control left on the page. It is the rail `+` now: round, soft, and
+   it appears on hover/focus exactly as before. */
+.theme-space-light .calendar-day-add { border-radius: 999px; }
+
+/* The composer's kind switch (Meeting · Task · Deadline) is a switch, like the
+   view switcher — so it is the same pill family, not a bordered segment box. */
+.theme-space-light .calendar-kind-picker {
+  gap: 8px;
+  padding: 0;
+  margin-bottom: 18px;
+  border: 0;
+  background: transparent;
+}
+.theme-space-light .calendar-kind-picker button {
+  min-height: var(--pillctl-h);
+  padding: 0 var(--pillctl-pad-x);
+  border: 1px solid transparent;
+  border-radius: var(--pillctl-r);
+  background: var(--wash-2);
+  color: var(--muted);
+  font-family: var(--font-body);
+  font-size: var(--pillctl-font);
+  font-weight: var(--pillctl-weight);
+}
+.theme-space-light .calendar-kind-picker button:hover { background: var(--paper); border-color: var(--line-strong); color: var(--ink); }
+.theme-space-light .calendar-kind-picker button.active { background: var(--teal-soft); color: var(--teal-ink); border-color: transparent; }
+.theme-space-light .calendar-kind-picker button:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+
+/* ── composer / detail forms ───────────────────────────────────────────────
+   A FORM is the one place a visible caption above a field is right — you are
+   filling in named values, not filtering a list — so the captions stay. What
+   was wrong is that they flowed as one long horizontal wall, caption and field
+   on the same line, wrapping wherever the width ran out. Two columns of
+   labelled fields, each caption over its own control.
+
+   Scoped under `.calendar-detail` on purpose: `.meeting-create`,
+   `.detail-actions` and `.meeting-detail` are also Meetings.css's vocabulary,
+   which another lane owns. Nothing here reaches outside this view. */
+.theme-space-light .calendar-detail { padding: 22px 24px; }
+.theme-space-light .calendar-detail h2 {
+  margin: 0 0 14px;
+  color: var(--ink);
+  font-size: 19px;
+  font-weight: 720;
+  letter-spacing: -.03em;
+}
+.theme-space-light .calendar-detail form,
+.theme-space-light .calendar-detail .meeting-detail {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px 16px;
+  align-items: start;
+}
+.theme-space-light .calendar-detail :is(form, .meeting-detail) > :is(h2, .detail-actions, .hint, .rsvp, .meeting-source, .meeting-permalink, [data-meeting-room]) { grid-column: 1 / -1; }
+.theme-space-light .calendar-detail :is(form, .meeting-detail) > label {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  color: var(--muted);
+  font-family: var(--font-head);
+  font-size: var(--type-kicker, 11px);
+  font-weight: 700;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+}
+/* One field silhouette, the same height and radius as every pill on the page,
+   soft at rest and a hairline only where you are working. */
+.theme-space-light .calendar-detail :is(input, select, textarea) {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: var(--pillctl-h);
+  padding: 0 var(--pillctl-pad-x);
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: var(--wash-2);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: var(--pillctl-font);
+  font-weight: 600;
+  letter-spacing: normal;
+  text-transform: none;
+}
+.theme-space-light .calendar-detail :is(input, select, textarea):hover { border-color: var(--line-strong); background: var(--paper); }
+.theme-space-light .calendar-detail :is(input, select, textarea):focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+.theme-space-light .calendar-detail input::placeholder { color: var(--quiet); }
+.theme-space-light .calendar-detail .meeting-title { font-size: 17px; font-weight: 700; }
+.theme-space-light .calendar-detail .hint { margin: 0; color: var(--muted); font-size: 12.5px; line-height: 1.5; }
+.theme-space-light .calendar-detail .detail-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 4px; }
+/* Secondary actions in a form are quiet pills; the teal one stays the only
+   loud thing, and `danger` keeps its warning colour. */
+.theme-space-light .calendar-detail .detail-actions button {
+  min-height: var(--pillctl-h);
+  padding: 0 var(--pillctl-pad-x);
+  border: 1px solid var(--line);
+  border-radius: var(--pillctl-r);
+  background: var(--paper);
+  color: var(--muted);
+  font-family: var(--font-body);
+  font-size: var(--pillctl-font);
+  font-weight: var(--pillctl-weight);
+}
+.theme-space-light .calendar-detail .detail-actions button:hover { border-color: var(--line-strong); background: var(--wash-2); color: var(--ink); }
+.theme-space-light .calendar-detail .detail-actions button.primary { border-color: transparent; }
+.theme-space-light .calendar-detail .detail-actions button.danger { color: var(--red); }
+.theme-space-light .calendar-detail .rsvp { margin: 0; }
+.theme-space-light .calendar-detail .rsvp h3 {
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+}
+.theme-space-light .calendar-detail .inline-form { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.theme-space-light .calendar-detail .participant { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-top: 1px solid var(--line); }
+
+/* ── A DATE IS A BUTTON NOW ────────────────────────────────────────────────
+   The day halves of this view's forms are DateField/DateTimeField, so the caption
+   can no longer be a <label> wrapping the control: `.cal-field` is that caption
+   plus its control. UNSCOPED ON PURPOSE — this is structure, and the dark shell
+   needs the stacking exactly as much as the light one. */
+.cal-field { display: grid; gap: 6px; }
+.theme-space-light .calendar-detail :is(form, .meeting-detail) > .cal-field {
+  margin: 0;
+  color: var(--muted);
+  font-family: var(--font-head);
+  font-size: var(--type-kicker, 11px);
+  font-weight: 700;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+}
+/* The shipped controls keep their own geometry: the clock half is a pill of the
+   button height, not a full-width field box. */
+.calendar-detail .date-time-field input.date-time-clock { width: auto; }
+.theme-space-light .calendar-detail .date-time-field input.date-time-clock {
+  min-height: var(--btn-height, 37px);
+  border-radius: var(--pillctl-r, 999px);
+  border-color: var(--ctl-border, var(--line));
+  background: var(--ctl-bg, var(--paper));
+  font-family: var(--font-head);
+  font-size: var(--btn-font-size, 13px);
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+
+/* WHO IS COMING — chips, not a panel of checkboxes. The picker above adds one
+   person at a time (the same control every other field uses); each chosen person
+   stands here as a small removable fact, so the row grows by a line instead of a
+   box, and the create button never gets pushed off the panel. */
+.cal-invitees { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.cal-invitee {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 6px 4px 10px;
+  border: 1px solid var(--line, #e5ddd3); border-radius: 999px;
+  background: var(--paper, #fff); font-size: 12.5px; font-weight: 600;
+}
+.cal-invitee button {
+  display: grid; place-items: center; width: 18px; height: 18px; padding: 0;
+  border: 0; border-radius: 999px; background: none;
+  color: var(--muted, #68717d); font-size: 14px; line-height: 1; cursor: pointer;
+}
+.cal-invitee button:hover { background: var(--wash, #faf8f4); color: var(--danger, #c2384a); }

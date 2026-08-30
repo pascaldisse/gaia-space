@@ -33,6 +33,19 @@ pub struct ChannelSummary {
     pub unread_count: i64,
     pub last_message_at: Option<i64>,
 }
+/// One thread that is waiting on the caller. Carries everything a worklist row
+/// needs (who replied, where, how many) so the surface makes no second round trip.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct UnreadThread {
+    pub channel_id: String,
+    pub parent_channel_id: String,
+    pub parent_channel_name: Option<String>,
+    pub root_message_id: String,
+    pub root_excerpt: String,
+    pub unread_count: i64,
+    pub last_reply_at: Option<i64>,
+    pub last_reply_author: Option<String>,
+}
 /// A content thread is a channel linked to one root item in its parent channel.
 /// `skip_first_message` keeps that root in the parent pane rather than duplicating it.
 #[derive(Debug, Serialize, Deserialize)]
@@ -252,6 +265,89 @@ pub fn measure_data_url(data_url: &str, declared: i64) -> Result<i64> {
     Ok(measured)
 }
 
+/// THE BYTES BEHIND A DATA URL, decoded server side.
+///
+/// A chat attachment stores its payload as a data URL in the row; the document library
+/// stores files on disk. Filing a chat upload into a project library therefore needs the
+/// octets once, here — never in the webview, which would mean shipping the blob back out
+/// and trusting what comes in. `measure_data_url` runs first, so an oversized or malformed
+/// payload is refused by arithmetic before anything is allocated.
+/// PUT AN ATTACHMENT ON DISK SO THE SYSTEM CAN OPEN IT.
+///
+/// In the browser a `<a download>` on a data URL is a download; in the desktop shell
+/// it is nothing at all — WKWebView has no download manager, so clicking a file in a
+/// message did exactly nothing. The bytes live in the row as a data URL, so the way
+/// to open a document is to write it where the operating system can reach it and hand
+/// the path to the default application.
+///
+/// The name is the attachment's own, sanitised: a file called `../../space.db` must
+/// land in the staging directory, not on top of the database.
+///
+/// Desktop only, and deliberately so: the web build has a real browser under it, which
+/// downloads the data URL by itself — there is nothing for a server to do.
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn stage_message_attachment(attachment_id: String) -> Result<String> {
+    let c = db::conn()?;
+    let (file_name, byte_length, data_url): (String, i64, String) = c
+        .query_row(
+            "SELECT file_name,byte_length,data_url FROM message_attachments WHERE id=?1",
+            [&attachment_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .map_err(|_| "attachment not found".to_string())?;
+    let bytes = decode_data_url(&data_url, byte_length)?;
+    let dir = db::data_dir()?.join("attachment_opens");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("create staging directory: {e}"))?;
+    let safe: String = file_name
+        .chars()
+        .map(|c| if c.is_alphanumeric() || "._- ".contains(c) { c } else { '_' })
+        .collect();
+    let safe = if safe.trim().is_empty() { "attachment".to_string() } else { safe };
+    let target = dir.join(format!("{attachment_id}-{safe}"));
+    std::fs::write(&target, bytes).map_err(|e| format!("write attachment: {e}"))?;
+    Ok(target.to_string_lossy().to_string())
+}
+
+pub fn decode_data_url(data_url: &str, declared: i64) -> Result<Vec<u8>> {
+    measure_data_url(data_url, declared)?;
+    let rest = data_url
+        .strip_prefix("data:")
+        .ok_or_else(|| "invalid attachment: not a data URL".to_string())?;
+    let comma = rest
+        .find(',')
+        .ok_or_else(|| "invalid attachment: data URL has no payload".to_string())?;
+    let (meta, payload) = rest.split_at(comma);
+    let payload = &payload[1..];
+    if meta.ends_with(";base64") {
+        use base64::Engine as _;
+        return base64::engine::general_purpose::STANDARD
+            .decode(payload)
+            .map_err(|_| "invalid attachment: bad base64 payload".to_string());
+    }
+    let bytes = payload.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0usize;
+    while i < bytes.len() {
+        if bytes[i] == b'%' {
+            let hex = bytes
+                .get(i + 1..i + 3)
+                .filter(|h| h.iter().all(u8::is_ascii_hexdigit))
+                .ok_or_else(|| "invalid attachment: bad percent escape".to_string())?;
+            let value = u8::from_str_radix(
+                std::str::from_utf8(hex).map_err(|_| "invalid attachment: bad percent escape")?,
+                16,
+            )
+            .map_err(|_| "invalid attachment: bad percent escape".to_string())?;
+            out.push(value);
+            i += 3;
+        } else {
+            out.push(bytes[i]);
+            i += 1;
+        }
+    }
+    Ok(out)
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct MessageAttachment {
     pub id: String,
@@ -466,6 +562,100 @@ fn channel_allows_actor(
         None => Ok(false),
     }
 }
+/// Threads that are asking the caller something. THREE conditions, all required:
+///
+///  1. PARTICIPATION — they wrote the root message, or replied in the thread. An
+///     unread reply in a thread you never joined is somebody else's conversation;
+///     the worklist is for what is ADDRESSED to you, and joining a thread is that
+///     address. (Deliberately NOT widened to "member of the parent channel": that
+///     is every busy channel's traffic, exactly the noise `attention.ts` excludes.)
+///  2. UNREAD REPLIES BY SOMEBODY ELSE — the read-state definition is the shared
+///     `unread_count_impl`; authorship is added on top because posting does not mark
+///     a channel read, so without it every reply YOU send would file a task against
+///     yourself. Your own message is never a claim on your attention.
+///  3. THE PARENT'S ACL ADMITS THEM — through `channel_allows_profile`, which is the
+///     same predicate the rest of chat uses and which resolves a thread to its parent
+///     itself. No second ACL path exists here, so the inheritance law cannot drift.
+fn list_unread_threads_impl(c: &Connection, profile_id: &str) -> Result<Vec<UnreadThread>> {
+    let mut s = c
+        .prepare(
+            "SELECT tc.channel_id, tc.parent_channel_id, pc.name, tc.root_message_id, m.text, m.author_id \
+             FROM thread_channels tc \
+             JOIN channels ch ON ch.id=tc.channel_id AND ch.archived=0 \
+             JOIN channels pc ON pc.id=tc.parent_channel_id \
+             JOIN messages m ON m.id=tc.root_message_id AND m.archived=0",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows: Vec<(String, String, Option<String>, String, String, Option<String>)> = s
+        .query_map([], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?))
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<_, _>>()
+        .map_err(|e| e.to_string())?;
+
+    let mut out: Vec<UnreadThread> = Vec::new();
+    for (channel_id, parent_channel_id, parent_channel_name, root_message_id, root_text, root_author) in rows {
+        // (3) first: never compute anything about a thread the caller cannot see.
+        if !channel_allows_profile(c, &channel_id, profile_id)? {
+            continue;
+        }
+        // (1) participation.
+        let replied: i64 = c
+            .query_row(
+                "SELECT COUNT(*) FROM messages WHERE channel_id=?1 AND archived=0 AND author_id=?2",
+                rusqlite::params![channel_id, profile_id],
+                |r| r.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        let participates = root_author.as_deref() == Some(profile_id) || replied > 0;
+        if !participates {
+            continue;
+        }
+        // (2) unread at all, by the shared definition …
+        if unread_count_impl(c, &channel_id, profile_id)? <= 0 {
+            continue;
+        }
+        // … and unread because somebody ELSE wrote it.
+        let (unread_count, last_reply_at): (i64, Option<i64>) = c
+            .query_row(
+                "SELECT COUNT(*), MAX(created_at) FROM messages WHERE channel_id=?1 AND archived=0 \
+                 AND author_id IS NOT ?2 AND created_at > \
+                 COALESCE((SELECT read_at FROM read_state WHERE channel_id=?1 AND profile_id=?2), 0)",
+                rusqlite::params![channel_id, profile_id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .map_err(|e| e.to_string())?;
+        if unread_count <= 0 {
+            continue;
+        }
+        let last_reply_author: Option<String> = c
+            .query_row(
+                "SELECT COALESCE(p.display_name, m.author_id) FROM messages m \
+                 LEFT JOIN profiles p ON p.id=m.author_id \
+                 WHERE m.channel_id=?1 AND m.archived=0 AND m.author_id IS NOT ?2 AND m.created_at > \
+                 COALESCE((SELECT read_at FROM read_state WHERE channel_id=?1 AND profile_id=?2), 0) \
+                 ORDER BY m.created_at DESC LIMIT 1",
+                rusqlite::params![channel_id, profile_id],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(|e| e.to_string())?
+            .flatten();
+        out.push(UnreadThread {
+            channel_id,
+            parent_channel_id,
+            parent_channel_name,
+            root_message_id,
+            root_excerpt: root_text.chars().take(140).collect(),
+            unread_count,
+            last_reply_at,
+            last_reply_author,
+        });
+    }
+    out.sort_by(|a, b| b.last_reply_at.cmp(&a.last_reply_at));
+    Ok(out)
+}
 fn list_channels_with_meta_impl(c: &Connection, profile_id: &str) -> Result<Vec<ChannelSummary>> {
     // Thread channels are opened from their root item, never shown as peer channels.
     let channels: Vec<Channel> = list_channels_impl(c)?
@@ -556,6 +746,133 @@ fn create_channel_impl(c: &Connection, channel: &Channel, member_ids: &[String])
             rusqlite::params![channel.id, profile_id, index == 0],
         )
         .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+/// Erase one channel and everything that only exists because of it, in one transaction.
+///
+/// Two rules make this more than a `DELETE`:
+/// 1. A thread is itself a channel (`thread_channels`), so a parent takes its threads
+///    with it — otherwise the thread channel outlives its root message as an
+///    unreachable room full of messages.
+/// 2. A vanished message may not leave a mention notification behind. That is the same
+///    rule `remove_channel_member_impl` applies when someone loses access: the generic
+///    notification list would otherwise still render the body of a message that no
+///    longer exists.
+///
+/// Rows in other domains merely *point* at the channel (a review, a meeting, a team, a
+/// location). Those are not channel content and are never deleted here; their pointer
+/// is cleared, so the review survives without a discussion room.
+fn delete_channel_impl(c: &mut Connection, id: &str, actor_id: &str) -> Result<()> {
+    let exists: bool = c
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM channels WHERE id=?1)",
+            [id],
+            |r| r.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    if !exists {
+        return Err("Channel not found".into());
+    }
+    // Same gate as every other channel write (`update_channel`, member changes):
+    // Channel.ManageChannel at the channel's own scope. A missing right is an error,
+    // never a silent no-op that reports success.
+    crate::platform::require_right_on(
+        c,
+        actor_id,
+        crate::rights::Right::ManageChannel,
+        "channel",
+        Some(id),
+    )?;
+    let tx = c.transaction().map_err(|e| e.to_string())?;
+    // Threads first: `thread_channels.parent_channel_id` names the rooms that only
+    // exist under this one, and each of them is a channel with its own content.
+    let mut pending = vec![id.to_string()];
+    let mut order: Vec<String> = Vec::new();
+    while let Some(current) = pending.pop() {
+        let children: Vec<String> = {
+            let mut s = tx
+                .prepare("SELECT channel_id FROM thread_channels WHERE parent_channel_id=?1")
+                .map_err(|e| e.to_string())?;
+            let rows = s
+                .query_map([&current], |r| r.get::<_, String>(0))
+                .map_err(|e| e.to_string())?
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .map_err(|e| e.to_string())?;
+            rows
+        };
+        for child in children {
+            if !order.contains(&child) && child != current {
+                pending.push(child);
+            }
+        }
+        order.retain(|existing| existing != &current);
+        order.push(current);
+    }
+    for channel_id in order.iter().rev() {
+        purge_channel_rows(&tx, channel_id)?;
+    }
+    tx.commit().map_err(|e| e.to_string())
+}
+/// Every table that holds a row *because of* this channel, deepest first. Message-level
+/// rows are removed explicitly rather than left to `ON DELETE CASCADE`: several of these
+/// tables predate the cascade clauses, and this way the guarantee does not depend on the
+/// `foreign_keys` pragma being on for the connection that happens to call us.
+fn purge_channel_rows(tx: &rusqlite::Transaction<'_>, channel_id: &str) -> Result<()> {
+    // A deleted message must not leave a claim on anyone's attention behind.
+    tx.execute(
+        "DELETE FROM notifications WHERE (entity_type='message' AND entity_id IN (SELECT id FROM messages WHERE channel_id=?1)) \
+         OR (entity_type='channel' AND entity_id=?1)",
+        [channel_id],
+    )
+    .map_err(|e| e.to_string())?;
+    const MESSAGE_SCOPED: &[&str] = &[
+        "message_poll_votes WHERE poll_id IN (SELECT id FROM message_polls WHERE channel_id=?1)",
+        "message_poll_options WHERE poll_id IN (SELECT id FROM message_polls WHERE channel_id=?1)",
+        "message_polls WHERE channel_id=?1",
+        "reactions WHERE message_id IN (SELECT id FROM messages WHERE channel_id=?1)",
+        "message_mentions WHERE message_id IN (SELECT id FROM messages WHERE channel_id=?1)",
+        "message_team_mentions WHERE message_id IN (SELECT id FROM messages WHERE channel_id=?1)",
+        "message_entity_mentions WHERE message_id IN (SELECT id FROM messages WHERE channel_id=?1)",
+        "message_links WHERE message_id IN (SELECT id FROM messages WHERE channel_id=?1)",
+        "message_attachments WHERE message_id IN (SELECT id FROM messages WHERE channel_id=?1)",
+    ];
+    for clause in MESSAGE_SCOPED {
+        tx.execute(&format!("DELETE FROM {clause}"), [channel_id])
+            .map_err(|e| e.to_string())?;
+    }
+    // Pointers from other domains: cleared, not followed. Their owner keeps existing.
+    for clause in [
+        "UPDATE reviews SET channel_id=NULL WHERE channel_id=?1",
+        "UPDATE review_discussions SET channel_id=NULL WHERE channel_id=?1",
+        "UPDATE meetings SET channel_id=NULL WHERE channel_id=?1",
+        "UPDATE teams SET channel_id=NULL WHERE channel_id=?1",
+        "UPDATE locations SET channel_id=NULL WHERE channel_id=?1",
+    ] {
+        tx.execute(clause, [channel_id])
+            .map_err(|e| e.to_string())?;
+    }
+    const CHANNEL_SCOPED: &[&str] = &[
+        "read_state WHERE channel_id=?1",
+        "message_drafts WHERE channel_id=?1",
+        "channel_typing WHERE channel_id=?1",
+        "scheduled_messages WHERE channel_id=?1",
+        "channel_subscriptions WHERE channel_id=?1",
+        "channel_notification_preferences WHERE channel_id=?1",
+        "channel_notes WHERE channel_id=?1",
+        "channel_members WHERE channel_id=?1",
+        "private_feeds WHERE channel_id=?1",
+        "document_discussions WHERE channel_id=?1",
+        "thread_channels WHERE channel_id=?1 OR parent_channel_id=?1 \
+         OR root_message_id IN (SELECT id FROM messages WHERE channel_id=?1)",
+        // Replies before roots: `messages.thread_of` points at another message.
+        "messages WHERE channel_id=?1 AND thread_of IS NOT NULL",
+        "messages WHERE channel_id=?1",
+        "channels WHERE id=?1",
+    ];
+    for clause in CHANNEL_SCOPED {
+        tx.execute(&format!("DELETE FROM {clause}"), [channel_id])
+            .map_err(|e| e.to_string())?;
     }
     Ok(())
 }
@@ -2450,6 +2767,14 @@ pub fn save_channel_notification_preference(
 pub fn list_channels_with_meta(profile_id: String) -> Result<Vec<ChannelSummary>> {
     list_channels_with_meta_impl(&db::conn()?, &profile_id)
 }
+/// Threads with replies the caller has not read. `list_channels_with_meta` filters
+/// thread channels out on purpose (they are opened from their root, never listed as
+/// peers), which left unread replies invisible to every surface. This is the read that
+/// makes them visible — as attention, not as a destination.
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_unread_threads(profile_id: String) -> Result<Vec<UnreadThread>> {
+    list_unread_threads_impl(&db::conn()?, &profile_id)
+}
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn create_channel(channel: Channel, member_ids: Vec<String>) -> Result<Channel> {
     let c = db::conn()?;
@@ -2461,6 +2786,12 @@ pub fn update_channel(channel: Channel) -> Result<()> {
     let c = db::conn()?;
     c.execute("UPDATE channels SET content_type=?2,name=?3,description=?4,project_id=?5,archived=?6 WHERE id=?1",rusqlite::params![channel.id,channel.content_type,channel.name,channel.description,channel.project_id,channel.archived]).map_err(|e|e.to_string())?;
     Ok(())
+}
+/// Delete a channel and its whole content. `actor_id` must hold `Channel.ManageChannel`.
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn delete_channel(id: String, actor_id: String) -> Result<()> {
+    let mut c = db::conn()?;
+    delete_channel_impl(&mut c, &id, &actor_id)
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn join_channel(channel_id: String, profile_id: String) -> Result<()> {
@@ -2497,6 +2828,83 @@ pub fn create_entity_channel(
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn get_channel_by_entity(entity_type: String, entity_id: String) -> Result<Option<Channel>> {
     get_channel_impl(&db::conn()?, &entity_channel_id(&entity_type, &entity_id))
+}
+/// Enough of an anchor's target to render a back-link into the conversation it came
+/// from. Work created out of a message (`todos`/`issues`/`meetings.source_entity_*`)
+/// stores only the pair `(entity_type, entity_id)`; this is the one reader that turns
+/// that pair back into something a person can click.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SourceRef {
+    pub entity_type: String,
+    pub entity_id: String,
+    pub channel_id: String,
+    pub channel_name: Option<String>,
+    pub author_name: Option<String>,
+    pub created_at: i64,
+    /// A short, single-line rendering of the message body — never the whole text.
+    pub excerpt: String,
+}
+/// One line, at most `SOURCE_EXCERPT_CHARS` characters, cut on a char boundary.
+const SOURCE_EXCERPT_CHARS: usize = 160;
+fn source_excerpt(text: &str) -> String {
+    let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    if flat.chars().count() <= SOURCE_EXCERPT_CHARS {
+        return flat;
+    }
+    let head: String = flat.chars().take(SOURCE_EXCERPT_CHARS).collect();
+    format!("{head}\u{2026}")
+}
+fn resolve_message_source(c: &Connection, entity_id: &str) -> Result<SourceRef> {
+    c.query_row(
+        "SELECT m.channel_id,ch.name,p.display_name,m.created_at,m.text FROM messages m JOIN channels ch ON ch.id=m.channel_id LEFT JOIN profiles p ON p.id=m.author_id WHERE m.id=?1",
+        [entity_id],
+        |r| {
+            Ok(SourceRef {
+                entity_type: "message".into(),
+                entity_id: entity_id.to_string(),
+                channel_id: r.get(0)?,
+                channel_name: r.get(1)?,
+                author_name: r.get(2)?,
+                created_at: r.get(3)?,
+                excerpt: source_excerpt(&r.get::<_, String>(4)?),
+            })
+        },
+    )
+    .optional()
+    .map_err(|e| e.to_string())?
+    .ok_or_else(|| format!("No message found for source anchor {entity_id}"))
+}
+fn resolve_source_ref_impl(
+    c: &Connection,
+    entity_type: &str,
+    entity_id: &str,
+) -> Result<SourceRef> {
+    match entity_type {
+        "message" => resolve_message_source(c, entity_id),
+        // A file filed out of a conversation points back at the MESSAGE it arrived in:
+        // the attachment is not a place a person can stand, the message is.
+        crate::documents::CHAT_ATTACHMENT_SOURCE => {
+            let message_id: String = c
+                .query_row(
+                    "SELECT message_id FROM message_attachments WHERE id=?1",
+                    [entity_id],
+                    |r| r.get(0),
+                )
+                .optional()
+                .map_err(|e| e.to_string())?
+                .ok_or_else(|| format!("No attachment found for source anchor {entity_id}"))?;
+            resolve_message_source(c, &message_id)
+        }
+        other => Err(format!("Cannot resolve a {other} source anchor")),
+    }
+}
+/// Resolve one `(source_entity_type, source_entity_id)` anchor into a renderable
+/// back-link. It is a pure read of already-visible conversation metadata, so it is
+/// session-scoped like `get_channel`; a deleted or unknown source errors cleanly
+/// rather than silently returning an empty card.
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn resolve_source_ref(entity_type: String, entity_id: String) -> Result<SourceRef> {
+    resolve_source_ref_impl(&db::conn()?, &entity_type, &entity_id)
 }
 /// Creates (idempotently) the channel that backs one root message's content thread.
 #[cfg_attr(feature = "desktop", tauri::command)]
@@ -2744,8 +3152,89 @@ pub fn create_message(message: Message) -> Result<MessageView> {
     create_message_impl(&c, &message)?;
     to_view(&c, message, None)
 }
+/// Where a channel's uploads belong in the library, if anywhere: the project behind the
+/// message's channel, plus the channel's name for the shelf label. `None` for a channel
+/// with no project — there is no library to file into, so nothing is filed anywhere.
+fn library_target_for_message(c: &Connection, message_id: &str) -> Result<Option<(String, String, String)>> {
+    c.query_row(
+        "SELECT ch.id, ch.project_id, ch.name FROM messages m JOIN channels ch ON ch.id=m.channel_id WHERE m.id=?1",
+        [message_id],
+        |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, Option<String>>(1)?,
+                r.get::<_, String>(2)?,
+            ))
+        },
+    )
+    .optional()
+    .map_err(|e| e.to_string())
+    .map(|found| {
+        found.and_then(|(channel_id, project_id, name)| {
+            project_id
+                .filter(|id| !id.trim().is_empty())
+                .map(|project_id| (channel_id, project_id, name))
+        })
+    })
+}
+
+/// A FILE SHARED IN A PROJECT CHANNEL IS ALSO THE PROJECT'S FILE.
+///
+/// The attachment row is left exactly as it is; the library gets its own copy of the
+/// bytes on disk, on the channel's shelf. Failure here never costs the person their
+/// message: the attachment is already stored, so a library that cannot be written is
+/// reported to the log and the send still succeeds.
+fn file_attachment_into_library(
+    c: &Connection,
+    store: Option<&std::path::Path>,
+    message_id: &str,
+    attachment: &MessageAttachment,
+) -> Result<Option<String>> {
+    let Some(store) = store else {
+        return Ok(None);
+    };
+    let Some((channel_id, project_id, channel_name)) = library_target_for_message(c, message_id)?
+    else {
+        return Ok(None);
+    };
+    let author: Option<String> = c
+        .query_row(
+            "SELECT author_id FROM messages WHERE id=?1",
+            [message_id],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?
+        .flatten();
+    let bytes = decode_data_url(&attachment.data_url, attachment.byte_length)?;
+    crate::documents::file_chat_attachment_tx(
+        c,
+        store,
+        crate::documents::ChatAttachmentFiling {
+            attachment_id: &attachment.id,
+            project_id: &project_id,
+            channel_id: &channel_id,
+            channel_name: &channel_name,
+            file_name: &attachment.file_name,
+            created_by: author.as_deref(),
+        },
+        &bytes,
+    )
+    .map(Some)
+}
+
 fn add_message_attachment_impl(
     c: &Connection,
+    message_id: &str,
+    attachment: NewMessageAttachment,
+) -> Result<MessageAttachment> {
+    let store = crate::documents::upload_dir().ok();
+    add_message_attachment_in(c, store.as_deref(), message_id, attachment)
+}
+
+fn add_message_attachment_in(
+    c: &Connection,
+    store: Option<&std::path::Path>,
     message_id: &str,
     attachment: NewMessageAttachment,
 ) -> Result<MessageAttachment> {
@@ -2765,6 +3254,14 @@ fn add_message_attachment_impl(
             && existing.byte_length == attachment.byte_length
             && existing.data_url == attachment.data_url;
         return if same {
+            // A retry files nothing twice: the anchor already exists, so this is a no-op
+            // that simply repairs a first attempt whose library copy failed.
+            if let Err(e) = file_attachment_into_library(c, store, message_id, &existing) {
+                eprintln!(
+                    "attachment {} not filed into the project library: {e}",
+                    existing.id
+                );
+            }
             Ok(existing)
         } else {
             Err(format!(
@@ -2774,10 +3271,14 @@ fn add_message_attachment_impl(
         };
     }
     c.execute("INSERT INTO message_attachments(id,message_id,file_name,mime_type,byte_length,data_url,upload_state,error) VALUES(?1,?2,?3,?4,?5,?6,?7,NULL)", rusqlite::params![attachment.id, message_id, attachment.file_name, attachment.mime_type, attachment.byte_length, attachment.data_url, state]).map_err(|e| e.to_string())?;
-    attachments_for_impl(c, message_id)?
+    let stored = attachments_for_impl(c, message_id)?
         .into_iter()
         .find(|item| item.id == attachment.id)
-        .ok_or_else(|| "attachment missing".into())
+        .ok_or_else(|| "attachment missing".to_string())?;
+    if let Err(e) = file_attachment_into_library(c, store, message_id, &stored) {
+        eprintln!("attachment {} not filed into the project library: {e}", stored.id);
+    }
+    Ok(stored)
 }
 
 fn attachment_by_id_impl(c: &Connection, id: &str) -> Result<Option<MessageAttachment>> {
@@ -2983,6 +3484,54 @@ mod tests {
             &["default-org".to_string()],
         )
         .unwrap();
+    }
+
+    /// `resolve_source_ref` is the whole back-link contract: work created out of a
+    /// message stores only `("message", <id>)`, so this reader must hand back the
+    /// channel, the author and a readable excerpt — and must fail loudly when the
+    /// anchor points at nothing, rather than rendering an empty source card.
+    #[test]
+    fn resolve_source_ref_returns_the_channel_behind_a_message_anchor() {
+        let (c, _temp) = conn();
+        seed_channel(&c, "c-source");
+        c.execute("INSERT OR IGNORE INTO profiles(id,username,display_name,created_at) VALUES('p-author','author','Ada Lovelace',unixepoch())", []).unwrap();
+        c.execute(
+            "INSERT INTO messages(id,channel_id,author_id,text,created_at) VALUES('m-1','c-source','p-author','Can  someone\nship the release notes?',4242)",
+            [],
+        )
+        .unwrap();
+        let resolved = resolve_source_ref_impl(&c, "message", "m-1").expect("anchor resolves");
+        assert_eq!(resolved.entity_type, "message");
+        assert_eq!(resolved.entity_id, "m-1");
+        assert_eq!(resolved.channel_id, "c-source");
+        assert_eq!(resolved.channel_name.as_deref(), Some("General"));
+        assert_eq!(resolved.author_name.as_deref(), Some("Ada Lovelace"));
+        assert_eq!(resolved.created_at, 4242);
+        assert_eq!(
+            resolved.excerpt, "Can someone ship the release notes?",
+            "the excerpt is one flat line, never the raw body"
+        );
+        let missing = resolve_source_ref_impl(&c, "message", "m-gone").unwrap_err();
+        assert!(
+            missing.contains("m-gone"),
+            "a dangling anchor names itself: {missing}"
+        );
+        let unknown = resolve_source_ref_impl(&c, "asteroid", "m-1").unwrap_err();
+        assert!(
+            unknown.contains("asteroid"),
+            "unknown kinds fail loudly: {unknown}"
+        );
+    }
+
+    /// An excerpt is a preview, not a payload: long bodies are cut on a char boundary
+    /// (never a byte boundary — multi-byte text must not panic here).
+    #[test]
+    fn source_excerpt_is_one_short_line() {
+        assert_eq!(source_excerpt("  a   b \n c "), "a b c");
+        let long = "\u{00e4}".repeat(400);
+        let cut = source_excerpt(&long);
+        assert_eq!(cut.chars().count(), SOURCE_EXCERPT_CHARS + 1);
+        assert!(cut.ends_with('\u{2026}'));
     }
 
     fn seed_scheduler(c: &Connection, channel: &str) {
@@ -3427,6 +3976,151 @@ mod tests {
             },
         )
         .unwrap();
+    }
+
+    /// A channel that belongs to a project, plus one message in it. The project row is
+    /// created here because `channels.project_id` is a real foreign key.
+    fn seed_project_message(c: &Connection, channel: &str, id: &str, project: Option<&str>) {
+        if let Some(project) = project {
+            c.execute(
+                "INSERT INTO projects(id,name,key,created_at) VALUES(?1,'Filing','FIL',unixepoch())",
+                [project],
+            )
+            .unwrap();
+        }
+        seed_message(c, channel, id);
+        c.execute(
+            "UPDATE channels SET project_id=?2, name='general' WHERE id=?1",
+            rusqlite::params![channel, project],
+        )
+        .unwrap();
+    }
+
+    fn library_documents(c: &Connection, project: &str) -> Vec<(String, String, String)> {
+        let mut s = c
+            .prepare(
+                "SELECT d.id, d.title, f.name FROM documents d JOIN document_folders f ON f.id=d.folder_id \
+                 WHERE d.container_type='project' AND d.container_id=?1 ORDER BY d.id",
+            )
+            .unwrap();
+        let rows = s
+            .query_map([project], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        rows
+    }
+
+    /// A FILE SHARED IN A PROJECT CHANNEL IS THE PROJECT'S FILE. It appears on the
+    /// channel's own shelf under the project root — not loose in the root, where chat
+    /// screenshots would bury the written documents — and it carries the same bytes.
+    #[test]
+    fn an_attachment_in_a_project_channel_is_filed_on_the_channels_library_shelf() {
+        let (c, path) = conn();
+        let store = path.path().parent().unwrap().join("document_files");
+        seed_project_message(&c, "chan-lib", "msg-lib", Some("proj-lib"));
+        add_message_attachment_in(
+            &c,
+            Some(&store),
+            "msg-lib",
+            NewMessageAttachment {
+                id: "att-lib".into(),
+                file_name: "plan.txt".into(),
+                mime_type: "text/plain".into(),
+                byte_length: 5,
+                data_url: "data:text/plain;base64,aGVsbG8=".into(),
+                upload_state: None,
+            },
+        )
+        .expect("attachment stored");
+
+        let filed = library_documents(&c, "proj-lib");
+        assert_eq!(filed.len(), 1, "exactly one library document");
+        assert_eq!(filed[0].1, "plan.txt", "the title is the file name");
+        assert_eq!(filed[0].2, "From #general", "filed on the channel's shelf");
+
+        // The shelf hangs under the project root, never beside it.
+        let (parent, container): (Option<String>, Option<String>) = c
+            .query_row(
+                "SELECT parent_id, container_id FROM document_folders WHERE name='From #general'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(container.as_deref(), Some("proj-lib"));
+        assert!(parent.is_some(), "the shelf sits under the project root");
+
+        // Origin is recorded and resolves back to the message it arrived in.
+        let anchor: (String, String) = c
+            .query_row(
+                "SELECT source_entity_type, source_entity_id FROM documents WHERE id=?1",
+                [&filed[0].0],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(anchor, ("message-attachment".to_string(), "att-lib".into()));
+        let back = resolve_source_ref_impl(&c, "message-attachment", "att-lib").expect("back-link");
+        assert_eq!(back.channel_id, "chan-lib");
+
+        // Bytes on disk ARE the attachment's bytes, stored once.
+        let stored_path: String = c
+            .query_row(
+                "SELECT stored_path FROM document_files WHERE document_id=?1",
+                [&filed[0].0],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(std::fs::read(stored_path).unwrap(), b"hello");
+        drop(c);
+        drop(path);
+    }
+
+    /// A RETRY IS NOT A SECOND DOCUMENT. The client repeats an upload it lost the answer
+    /// to; the library must not grow a duplicate card for it.
+    #[test]
+    fn refiling_the_same_attachment_leaves_one_library_document() {
+        let (c, path) = conn();
+        let store = path.path().parent().unwrap().join("document_files");
+        seed_project_message(&c, "chan-twice", "msg-twice", Some("proj-twice"));
+        let attachment = || NewMessageAttachment {
+            id: "att-twice".into(),
+            file_name: "shot.png".into(),
+            mime_type: "image/png".into(),
+            byte_length: 5,
+            data_url: "data:image/png;base64,aGVsbG8=".into(),
+            upload_state: None,
+        };
+        add_message_attachment_in(&c, Some(&store), "msg-twice", attachment()).unwrap();
+        add_message_attachment_in(&c, Some(&store), "msg-twice", attachment()).unwrap();
+        assert_eq!(
+            library_documents(&c, "proj-twice").len(),
+            1,
+            "the same attachment files once"
+        );
+        drop(c);
+        drop(path);
+    }
+
+    /// NO PROJECT, NO FILING. A channel without a project has no library to file into,
+    /// so the upload stays what it is: an attachment on a message.
+    #[test]
+    fn an_attachment_in_a_projectless_channel_creates_no_document() {
+        let (c, path) = conn();
+        let store = path.path().parent().unwrap().join("document_files");
+        seed_project_message(&c, "chan-loose", "msg-loose", None);
+        add_message_attachment_in(
+            &c,
+            Some(&store),
+            "msg-loose",
+            new_attachment("att-loose", "data:text/plain;base64,aGVsbG8=", 5, None),
+        )
+        .unwrap();
+        let documents: i64 = c
+            .query_row("SELECT count(*) FROM documents", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(documents, 0, "nothing is filed anywhere");
+        drop(c);
+        drop(path);
     }
 
     fn new_attachment(
@@ -4409,6 +5103,170 @@ mod tests {
         drop(path);
     }
 
+    /// Builds `parent` (private, members = `members`), a root message by `root_author`,
+    /// its thread channel, and returns the thread channel id. Replies are added by the
+    /// caller so each test controls authorship and time explicitly.
+    fn seed_thread(c: &Connection, parent: &str, members: &[&str], root_author: &str) -> String {
+        create_channel_impl(
+            c,
+            &Channel {
+                id: parent.into(),
+                content_type: "private".into(),
+                name: Some("Design".into()),
+                description: None,
+                project_id: None,
+                archived: false,
+                read_only: false,
+            },
+            &members.iter().map(|m| m.to_string()).collect::<Vec<_>>(),
+        )
+        .unwrap();
+        let root = format!("{parent}-root");
+        reply_at(c, parent, &root, root_author, 10, "the root question");
+        ensure_thread_channel_impl(c, &root, Some("Discuss".into()), Some(root_author))
+            .unwrap()
+            .channel
+            .id
+    }
+    fn reply_at(c: &Connection, channel: &str, id: &str, author: &str, at: i64, text: &str) {
+        create_message_impl(
+            c,
+            &Message {
+                id: id.into(),
+                channel_id: channel.into(),
+                author_id: Some(author.into()),
+                text: text.into(),
+                created_at: at,
+                edited_at: None,
+                thread_of: None,
+                archived: false,
+                pinned: false,
+                content_kind: "text".into(),
+                mention_ids: Vec::new(),
+                mention_team_ids: Vec::new(),
+                mention_targets: Vec::new(),
+            },
+        )
+        .unwrap();
+    }
+
+    /// The whole point: I asked, somebody answered, and that answer is work for me.
+    /// The row must arrive complete — a worklist that needs a second call to say who
+    /// replied would render "someone replied somewhere".
+    #[test]
+    fn a_participant_sees_their_thread_with_unread_replies_and_the_row_is_complete() {
+        let (c, path) = conn();
+        seed_profiles(&c, &["asker", "answerer"]);
+        let thread = seed_thread(&c, "chan-unread", &["asker", "answerer"], "asker");
+        reply_at(&c, &thread, "r1", "answerer", 20, "first answer");
+        reply_at(&c, &thread, "r2", "answerer", 30, "second answer");
+
+        let rows = list_unread_threads_impl(&c, "asker").unwrap();
+        assert_eq!(rows.len(), 1, "the thread I started and have not read");
+        let row = &rows[0];
+        assert_eq!(row.channel_id, thread);
+        assert_eq!(row.parent_channel_id, "chan-unread");
+        assert_eq!(row.parent_channel_name.as_deref(), Some("Design"));
+        assert_eq!(row.root_message_id, "chan-unread-root");
+        assert_eq!(row.root_excerpt, "the root question");
+        assert_eq!(row.unread_count, 2);
+        assert_eq!(row.last_reply_at, Some(30));
+        assert_eq!(row.last_reply_author.as_deref(), Some("answerer-user"));
+        drop(c);
+        drop(path);
+    }
+
+    /// Participation is the address. A member of the parent channel who never touched
+    /// the thread is a bystander; putting that traffic in the worklist is the exact
+    /// noise the one attention rule exists to keep out.
+    #[test]
+    fn a_non_participant_of_the_thread_is_not_asked_to_attend_it() {
+        let (c, path) = conn();
+        seed_profiles(&c, &["asker", "answerer", "bystander"]);
+        let thread = seed_thread(&c, "chan-bystander", &["asker", "answerer", "bystander"], "asker");
+        reply_at(&c, &thread, "r1", "answerer", 20, "answer");
+
+        assert!(
+            channel_allows_profile(&c, &thread, "bystander").unwrap(),
+            "the bystander CAN read the thread — so absence below is the participation \
+             rule, not an access failure"
+        );
+        assert!(list_unread_threads_impl(&c, "bystander").unwrap().is_empty());
+        assert_eq!(list_unread_threads_impl(&c, "asker").unwrap().len(), 1);
+        drop(c);
+        drop(path);
+    }
+
+    /// THE INHERITANCE LAW. A thread never widens its parent's boundary, and this read
+    /// must not be the hole. Checked through `channel_allows_profile`, the same
+    /// predicate the rest of chat uses — there is no second ACL path here to drift.
+    #[test]
+    fn a_non_member_of_the_parent_channel_never_sees_the_thread() {
+        let (c, path) = conn();
+        seed_profiles(&c, &["asker", "outsider"]);
+        let thread = seed_thread(&c, "chan-private", &["asker", "outsider"], "asker");
+        // The outsider even PARTICIPATES: they replied while they were still a member,
+        // and were then removed from the PARENT. Participation survives in the data;
+        // the parent's boundary must still overrule it.
+        reply_at(&c, &thread, "r1", "outsider", 20, "answer");
+        reply_at(&c, &thread, "r2", "asker", 25, "thanks");
+        remove_channel_member_impl(&c, "chan-private", "outsider").unwrap();
+
+        assert!(!channel_allows_profile(&c, &thread, "outsider").unwrap());
+        assert!(
+            list_unread_threads_impl(&c, "outsider").unwrap().is_empty(),
+            "the parent ACL overrules participation"
+        );
+        assert_eq!(list_unread_threads_impl(&c, "asker").unwrap().len(), 1);
+        drop(c);
+        drop(path);
+    }
+
+    /// The worklist EMPTIES. Reading the replies is the resolution, and it must clear
+    /// the row through the ordinary read-state write — no separate dismissal state.
+    #[test]
+    fn reading_the_replies_clears_the_thread_from_the_worklist() {
+        let (c, path) = conn();
+        seed_profiles(&c, &["asker", "answerer"]);
+        let thread = seed_thread(&c, "chan-clear", &["asker", "answerer"], "asker");
+        reply_at(&c, &thread, "r1", "answerer", 20, "answer");
+        assert_eq!(list_unread_threads_impl(&c, "asker").unwrap().len(), 1);
+
+        mark_channel_read_impl(&c, &thread, "asker", None).unwrap();
+        assert!(list_unread_threads_impl(&c, "asker").unwrap().is_empty());
+        drop(c);
+        drop(path);
+    }
+
+    /// A thread with nothing new is not work. Includes the case that would otherwise
+    /// make this feature self-defeating: posting does NOT mark a channel read, so
+    /// without the authorship condition your own reply would file a task against you.
+    #[test]
+    fn a_thread_with_no_unread_replies_from_others_is_absent() {
+        let (c, path) = conn();
+        seed_profiles(&c, &["asker", "answerer"]);
+        let quiet = seed_thread(&c, "chan-quiet", &["asker", "answerer"], "asker");
+        assert!(
+            list_unread_threads_impl(&c, "asker").unwrap().is_empty(),
+            "a thread nobody has replied in yet"
+        );
+
+        reply_at(&c, &quiet, "mine", "asker", 20, "following up on myself");
+        assert!(
+            list_unread_threads_impl(&c, "asker").unwrap().is_empty(),
+            "my own reply is never a claim on my attention"
+        );
+
+        reply_at(&c, &quiet, "theirs", "answerer", 30, "real answer");
+        assert_eq!(
+            list_unread_threads_impl(&c, "asker").unwrap()[0].unread_count,
+            1,
+            "only the other person's reply counts"
+        );
+        drop(c);
+        drop(path);
+    }
+
     #[test]
     fn a_thread_is_a_hidden_channel_that_inherits_private_parent_access() {
         let (c, path) = conn();
@@ -4965,6 +5823,216 @@ mod tests {
         })
         .unwrap();
         assert_eq!(calls.get(), 1, "a refused link must not be re-fetched");
+        drop(c);
+        drop(path);
+    }
+
+    /// Deleting a channel is the one operation that must leave *nothing* behind: after
+    /// it, no table may still point at the room or at any message that lived in it —
+    /// including the mention notification, which otherwise keeps rendering the body of a
+    /// message that no longer exists (the same defect `remove_channel_member_impl`
+    /// already fixes on exit).
+    #[test]
+    fn deleting_a_channel_leaves_no_row_pointing_at_it() {
+        let (mut c, path) = conn();
+        seed_poll_voters(&c, "chan-doomed");
+        add_channel_member_impl(&c, "chan-doomed", "voter-a", false).unwrap();
+        create_message_impl(
+            &c,
+            &Message {
+                id: "m-root".to_string(),
+                channel_id: "chan-doomed".to_string(),
+                author_id: Some("default-org".to_string()),
+                text: "hello @voter-a".to_string(),
+                created_at: now_secs(),
+                edited_at: None,
+                thread_of: None,
+                archived: false,
+                pinned: true,
+                content_kind: default_message_content_kind(),
+                mention_ids: vec!["voter-a".to_string()],
+                mention_team_ids: Vec::new(),
+                mention_targets: Vec::new(),
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            mentions_for_impl(&c, "m-root").unwrap(),
+            vec!["voter-a".to_string()],
+            "the fixture must really carry a mention, or the cascade proves nothing"
+        );
+        let mention_notifications: i64 = c
+            .query_row(
+                "SELECT count(*) FROM notifications WHERE entity_type='message' AND entity_id='m-root'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(mention_notifications, 1);
+        add_reaction_impl(&c, "m-root", "voter-a", "\u{1f44d}").unwrap();
+        mark_channel_read_impl(&c, "chan-doomed", "voter-a", None).unwrap();
+        save_draft_impl(&c, "chan-doomed", "voter-a", "", "half a thought").unwrap();
+        create_poll_impl(
+            &c,
+            "poll-doomed",
+            "chan-doomed",
+            "default-org",
+            "lunch?",
+            &["Pizza".into(), "Salad".into()],
+            false,
+            false,
+        )
+        .unwrap();
+        let thread = ensure_thread_channel_impl(&c, "m-root", None, Some("default-org"))
+            .unwrap()
+            .channel;
+        create_message_impl(
+            &c,
+            &Message {
+                id: "m-in-thread".to_string(),
+                channel_id: thread.id.clone(),
+                author_id: Some("default-org".to_string()),
+                text: "in the thread".to_string(),
+                created_at: now_secs(),
+                edited_at: None,
+                thread_of: None,
+                archived: false,
+                pinned: false,
+                content_kind: default_message_content_kind(),
+                mention_ids: Vec::new(),
+                mention_team_ids: Vec::new(),
+                mention_targets: Vec::new(),
+            },
+        )
+        .unwrap();
+
+        delete_channel_impl(&mut c, "chan-doomed", "default-org").unwrap();
+
+        assert_eq!(
+            delete_channel_impl(&mut c, "chan-doomed", "default-org").unwrap_err(),
+            "Channel not found",
+            "a second delete has nothing to delete and says so"
+        );
+        // Every table that can name a channel or one of its messages, asked directly.
+        for (table, clause) in [
+            ("channels", "id='chan-doomed'"),
+            ("messages", "channel_id='chan-doomed'"),
+            ("channel_members", "channel_id='chan-doomed'"),
+            ("read_state", "channel_id='chan-doomed'"),
+            ("message_drafts", "channel_id='chan-doomed'"),
+            ("channel_typing", "channel_id='chan-doomed'"),
+            ("scheduled_messages", "channel_id='chan-doomed'"),
+            ("channel_subscriptions", "channel_id='chan-doomed'"),
+            (
+                "channel_notification_preferences",
+                "channel_id='chan-doomed'",
+            ),
+            ("channel_notes", "channel_id='chan-doomed'"),
+            ("message_polls", "channel_id='chan-doomed'"),
+            ("thread_channels", "parent_channel_id='chan-doomed'"),
+            ("reactions", "message_id='m-root'"),
+            ("message_mentions", "message_id='m-root'"),
+            ("message_team_mentions", "message_id='m-root'"),
+            ("message_entity_mentions", "message_id='m-root'"),
+            ("message_links", "message_id='m-root'"),
+            ("message_attachments", "message_id='m-root'"),
+            ("message_poll_votes", "poll_id='poll-doomed'"),
+            ("message_poll_options", "poll_id='poll-doomed'"),
+            (
+                "notifications",
+                "entity_type='message' AND entity_id='m-root'",
+            ),
+            (
+                "notifications",
+                "entity_type='channel' AND entity_id='chan-doomed'",
+            ),
+        ] {
+            let left: i64 = c
+                .query_row(
+                    &format!("SELECT count(*) FROM {table} WHERE {clause}"),
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(left, 0, "{table} still points at the deleted channel");
+        }
+        // A thread is a channel: it goes with its parent, messages and all.
+        for (table, clause) in [
+            ("channels", format!("id='{}'", thread.id)),
+            ("messages", format!("channel_id='{}'", thread.id)),
+        ] {
+            let left: i64 = c
+                .query_row(
+                    &format!("SELECT count(*) FROM {table} WHERE {clause}"),
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(left, 0, "the thread channel outlived its parent in {table}");
+        }
+        drop(c);
+        drop(path);
+    }
+
+    /// Deletion is a channel *write*: without `Channel.ManageChannel` it fails loudly and
+    /// the room is still there afterwards. (The catalog is opt-in — a right nobody has
+    /// configured is not yet enforced — so the fixture grants it to a role first.)
+    #[test]
+    fn deleting_a_channel_without_the_right_fails_and_changes_nothing() {
+        let (mut c, path) = conn();
+        seed_scheduler(&c, "chan-guarded");
+        c.execute(
+            "INSERT OR IGNORE INTO profiles(id,username,display_name,created_at) VALUES('outsider','outsider','Outsider',unixepoch())",
+            [],
+        )
+        .unwrap();
+        c.execute(
+            "INSERT OR IGNORE INTO rights(id,code,title,right_type,implied_rights_json) VALUES('right-manage-channel','Channel.ManageChannel','Manage channel','Channel','[]')",
+            [],
+        )
+        .unwrap();
+        c.execute(
+            "INSERT INTO roles(id,name) VALUES('role-chan','Channel manager')",
+            [],
+        )
+        .unwrap();
+        let right_id: String = c
+            .query_row(
+                "SELECT id FROM rights WHERE code='Channel.ManageChannel'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        c.execute(
+            "INSERT INTO role_rights(role_id,right_id) VALUES('role-chan',?1)",
+            rusqlite::params![right_id],
+        )
+        .unwrap();
+
+        let refusal = delete_channel_impl(&mut c, "chan-guarded", "outsider").unwrap_err();
+        assert!(
+            !refusal.is_empty(),
+            "a missing right must be an error, never a silent success"
+        );
+        let still_there: i64 = c
+            .query_row(
+                "SELECT count(*) FROM channels WHERE id='chan-guarded'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(still_there, 1, "the refused delete must not have run");
+
+        c.execute("INSERT INTO role_assignments(id,role_id,profile_id,scope_type,scope_id) VALUES('ra-chan','role-chan','outsider','channel','chan-guarded')", []).unwrap();
+        delete_channel_impl(&mut c, "chan-guarded", "outsider").unwrap();
+        let gone: i64 = c
+            .query_row(
+                "SELECT count(*) FROM channels WHERE id='chan-guarded'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(gone, 0, "the granted right opens the same door");
         drop(c);
         drop(path);
     }

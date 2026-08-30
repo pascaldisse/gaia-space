@@ -1,0 +1,107 @@
+/* ── THE TASK ROW (stage 20) ────────────────────────────────────────────────
+   A task is not a ticket. It has no number and no status column, so the ticket
+   grid (`.issue-row`: `#number | title | status`) had nothing to put in two of
+   its three columns — which is why the check mark, the title and the creator
+   fell apart across the width of the project Tasks tab.
+
+   So tasks get their OWN row: a done marker, the title, and ONE quiet meta line
+   under it (creator · assignees · due date). The shape is My tasks' `.task-card`
+   (views/Todo.css), which was already right; this file is that language made
+   shareable for the project and team surfaces.
+
+   STRUCTURE IS UNSCOPED. Everything a layout needs to exist lives above the
+   `.theme-space-light` section; only the paper restyle is scoped, so the dark
+   grouped/flat layouts keep a working list. */
+
+.task-list-plain { list-style: none; margin: 0; padding: 0; }
+.task-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+  padding: 11px 10px;
+  border-top: 1px solid var(--surface-border);
+}
+.task-list-plain > li:first-child > .task-row { border-top: 0; }
+.task-row:hover { background: var(--surface-hover); }
+.task-row-check { width: 16px !important; height: 16px !important; margin: 3px 0 0; flex: none; }
+/* A read-only marker on a surface that does not own the completion write. */
+.task-row-marker { margin-top: 1px; color: var(--text-muted); font-size: 13px; line-height: 1.3; }
+.task-row-main {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+.task-row-main:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.task-row-title {
+  display: block;
+  font-family: var(--font-head);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--text-strong);
+  overflow-wrap: anywhere;
+}
+.task-row.done .task-row-title { text-decoration: line-through; color: var(--text-faint); }
+.task-row-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: baseline;
+  margin-top: 3px;
+  color: var(--text-muted);
+  font-size: 11.5px;
+  line-height: 1.35;
+}
+.task-row-meta > * { color: inherit; font-size: inherit; }
+/* URGENCY LIVES ON THE DATE, NEVER ON THE TITLE (src/statusTone.ts owns the rule;
+   this file only paints what it is told). */
+.task-row-meta time.overdue { color: var(--status-danger-ink); font-weight: 600; }
+.task-row-meta time.soon,
+.task-row-meta time.today { color: var(--status-warning-ink); font-weight: 600; }
+
+/* ══ Space-light restyle ═══════════════════════════════════════════════════ */
+.theme-space-light .task-list-plain {
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: var(--paper);
+  padding: 6px 8px;
+  box-shadow: 0 16px 36px rgba(31, 35, 40, .06);
+}
+.theme-space-light .task-row { gap: 12px; padding: 13px 12px; border-top: 1px solid var(--line); border-radius: 12px; }
+.theme-space-light .task-row:hover { background: var(--wash); }
+.theme-space-light .task-row-marker { color: var(--quiet); }
+.theme-space-light .task-row-title { font-size: 14.5px; font-weight: 710; letter-spacing: -.015em; color: var(--ink); }
+.theme-space-light .task-row.done .task-row-title { color: var(--quiet); }
+.theme-space-light .task-row-meta { margin-top: 3px; color: var(--muted); font-size: 12.5px; }
+.theme-space-light .task-row-meta time.overdue { color: var(--red-ink); font-weight: 700; }
+.theme-space-light .task-row-meta time.soon,
+.theme-space-light .task-row-meta time.today { color: var(--amber); font-weight: 700; }
+.theme-space-light .task-row-main:focus-visible { outline-color: var(--teal); }
+
+/* ── the one quiet affordance over the list ────────────────────────────────
+   The default view is a list and a button, so search and the assignee filter
+   rest behind this pill. The row stays IN THE DOM (`hidden`), so nothing that
+   could read it before has lost its subject. */
+/* `[hidden]`'s UA rule is one attribute selector and loses to `.filter-row{display:flex}`.
+   The disclosure must actually close, in every theme, so it is stated once here. */
+.control-row[hidden], .filter-row[hidden] { display: none !important; }
+.task-tools { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 0 0 10px; }
+.task-tools h2 { display: flex; align-items: center; gap: 7px; margin: 0; font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--text-muted); }
+.task-tools h2 small { border-radius: 10px; padding: 1px 6px; background: var(--surface-hover); }
+.theme-space-light .task-tools { margin-bottom: 12px; }
+.theme-space-light .task-tools h2 { font-size: 12px; font-weight: 680; letter-spacing: .07em; color: var(--muted); }
+.theme-space-light .task-tools h2 small { background: transparent; color: var(--quiet); font-weight: 620; padding: 0; }
+/* QUIET IS NOT INVISIBLE. A GhostPill is borderless by default; the header's action
+   area already gives it a hairline (`.pgh-actions > .ghost-pill`) so it reads as a
+   button. This one is the only control over the list — it gets the same. */
+.theme-space-light .task-tools .ghost-pill { border-color: var(--line); }
+.theme-space-light .task-tools .ghost-pill:hover:not(:disabled) { border-color: var(--line-strong); }

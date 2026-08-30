@@ -1,7 +1,27 @@
+import { UI_LOCALE } from "../calendar";
 import { createResource, createSignal, createEffect, For, Match, Show, Switch } from "solid-js";
+import PageHeader from "../components/PageHeader";
+import ContentHead from "../components/ContentHead";
 import { api } from "../api";
 import { pipelinesApi, newId, PACKAGE_FORMATS, REPO_MODES, type DependencyOverview, type PackageRepository, type PackageVersion, type PackageDetail, type RetentionCandidate } from "../api/pipelines";
+import EmptyState from "../components/EmptyState";
+import { Icon } from "../components/Icon";
+import { GhostPill, PillSelect, QuietSearch } from "../components/controls";
+import "./devCards.css";
 import "./Packages.css";
+import "./operatorForm.css";
+
+/** A picker's resting value IS its label, so the label has to be a word rather
+ *  than the wire constant. `formMode` was rendering `HOSTING` in shouting caps
+ *  as the control's own resting text; `format` was rendering `pypi`. The stored
+ *  values are untouched — only what the operator reads. */
+const modeLabel = (mode: string): string =>
+  mode === "HOSTING" ? "Hosting" : mode === "PROXY" ? "Proxy" : mode === "COMPOSITE" ? "Composite" : mode;
+const FORMAT_NAMES: Record<string, string> = {
+  maven: "Maven", npm: "npm", nuget: "NuGet", pypi: "PyPI",
+  dart: "Dart", container: "Container", composer: "Composer", file: "File",
+};
+const formatLabel = (format: string): string => FORMAT_NAMES[format] ?? format;
 
 export default function Packages() {
   const [error, setError] = createSignal<string | null>(null);
@@ -159,40 +179,70 @@ async function togglePinned(v: PackageVersion) {
 
   return (
     <section class="packages-view">
-      <header class="packages-head">
-        <h1>Packages</h1>
-        <p>Package repositories across Space-supported formats — publish and browse versions, no upstream proxying.</p>
-      </header>
+      <PageHeader icon="package" title="Packages" subline="Publish and browse package versions" />
+      {/* What this surface carries, above the things themselves. */}
+      <ContentHead icon="package" title="Packages" line="Package repositories and the versions published into them." />
 
       <Show when={error()}>
         <div class="packages-error" onClick={() => setError(null)}>{error()}</div>
       </Show>
 
-      <form class="new-repo-form" onSubmit={createRepo}>
-        <input placeholder="repository name" value={formName()} onInput={(e) => setFormName(e.currentTarget.value)} />
-        <select value={formProjectId()} onChange={(e) => setFormProjectId(e.currentTarget.value)}>
+      {/* This band STAYS on the surface: Packages is an operator tool and
+         repositories are created in runs (L3 relaxed). L4 is not relaxed — the
+         two fields and three pickers now sit on one line at one height. */}
+      <form class="new-repo-form op-form" onSubmit={createRepo}>
+        <input class="op-input op-grow" aria-label="Repository name" placeholder="Repository name" value={formName()} onInput={(e) => setFormName(e.currentTarget.value)} />
+        <PillSelect label="Project" value={formProjectId()} onChange={setFormProjectId}>
           <For each={projects()}>{(p) => <option value={p.id}>{p.name}</option>}</For>
-        </select>
-        <select value={formFormat()} onChange={(e) => setFormFormat(e.currentTarget.value)}>
-          <For each={PACKAGE_FORMATS}>{(f) => <option value={f}>{f}</option>}</For>
-        </select>
-        <select value={formMode()} onChange={(e) => setFormMode(e.currentTarget.value)}>
-          <For each={REPO_MODES}>{(m) => <option value={m}>{m}</option>}</For>
-        </select>
-        <input class="grow" placeholder="description" value={formDescription()} onInput={(e) => setFormDescription(e.currentTarget.value)} />
+        </PillSelect>
+        <PillSelect label="Package format" value={formFormat()} onChange={setFormFormat}>
+          <For each={PACKAGE_FORMATS}>{(f) => <option value={f}>{formatLabel(f)}</option>}</For>
+        </PillSelect>
+        <PillSelect label="Repository mode" value={formMode()} onChange={setFormMode}>
+          <For each={REPO_MODES}>{(m) => <option value={m}>{modeLabel(m)}</option>}</For>
+        </PillSelect>
+        <input class="op-input op-grow" aria-label="Description" placeholder="Description" value={formDescription()} onInput={(e) => setFormDescription(e.currentTarget.value)} />
         <button class="primary">Create repository</button>
       </form>
 
+      {/* ONE ACTION, ONE PLACE, operator-tool form: the creation band above is
+          permanently visible and "Create repository" is the act, so this state
+          names the absence and does not draw that act again — and it is a page
+          lead, not a card wedged into the 240px list column with its title
+          broken across two lines. */}
+      <Show when={repos()?.length} fallback={
+        <div class="packages-lead">
+          <EmptyState
+            title="No package repositories yet"
+            hint="A repository holds published versions of one package format."
+          />
+        </div>
+      }>
       <div class="packages-body">
         <aside class="repos-list">
-          <Show when={repos()?.length} fallback={<p class="hint pad">No repositories yet — create one above.</p>}>
-            <ul>
+          <Show when={repos()?.length}>
+            {/* THE KNOWLEDGE CARD in one column (design rollout): a repository has a
+                name and one quiet line of facts (its format, its mode), which is the
+                library card's shape exactly. Format and mode used to be two loose
+                spans stacked under the name — three lines saying one thing. */}
+            <ul class="dev-card-list">
               <For each={repos()}>
                 {(r) => (
-                  <li classList={{ active: r.id === selectedId(), archived: r.archived }} onClick={() => setSelectedId(r.id)}>
-                    <strong>{r.name}</strong>
-                    <span class="fmt">{r.format}</span>
-                    <span class="mode">{r.mode}</span>
+                  <li classList={{ active: r.id === selectedId() }}>
+                    <button
+                      type="button"
+                      class="dev-card"
+                      classList={{ archived: r.archived }}
+                      aria-pressed={r.id === selectedId()}
+                      onClick={() => setSelectedId(r.id)}
+                    >
+                      <span class="dev-card-icon" aria-hidden="true"><Icon name="package" size={20} /></span>
+                      <span class="dev-card-copy">
+                        <strong>{r.name}</strong>
+                        <small>{formatLabel(r.format)} · {modeLabel(r.mode)}{r.archived ? " · archived" : ""}</small>
+                      </span>
+                      <span class="dev-card-open" aria-hidden="true"><Icon name="chevron-right" size={16} /></span>
+                    </button>
                   </li>
                 )}
               </For>
@@ -200,7 +250,13 @@ async function togglePinned(v: PackageVersion) {
           </Show>
         </aside>
 
-        <Show when={selected()} fallback={<p class="hint pad">Select or create a repository.</p>}>
+        {/* A missing SELECTION, not an empty store: the repositories are one
+            click to the left, so nothing is offered here — and with no
+            repository at all there is nothing to select, so the pane says
+            nothing rather than repeating the absence beside it. */}
+        <Show when={selected()} fallback={<Show when={repos()?.length}>
+          <EmptyState variant="no-match" title="No repository selected" hint="Pick a repository on the left to publish, browse and retain its versions." />
+        </Show>}>
           {(repo) => (
             <section class="repo-detail">
               <header class="repo-detail-head">
@@ -208,15 +264,15 @@ async function togglePinned(v: PackageVersion) {
                 <span class="fmt">{repo().format}</span>
                 <span class="mode">{repo().mode}</span>
                 <div class="repo-actions">
-                  <button class="ghost small" onClick={() => toggleArchived(repo())}>{repo().archived ? "Unarchive" : "Archive"}</button>
-                  <button class="ghost small danger" onClick={() => deleteRepo(repo().id)}>Delete</button>
+                  <GhostPill class="small" onClick={() => toggleArchived(repo())}>{repo().archived ? "Unarchive" : "Archive"}</GhostPill>
+                  <GhostPill class="small danger" onClick={() => deleteRepo(repo().id)}>Delete</GhostPill>
                 </div>
               </header>
               <p class="hint">{repo().description ?? "no description"} · {repo().access_level}</p>
               <div class="repo-actions">
-                <button class="ghost small" onClick={previewRetention}>Preview retention</button>
-                <button class="ghost small" onClick={applyRetention}>Apply retention</button>
-                <button class="ghost small" onClick={showRepoCves}>Repository CVEs</button>
+                <GhostPill class="small" onClick={previewRetention}>Preview retention</GhostPill>
+                <GhostPill class="small" onClick={applyRetention}>Apply retention</GhostPill>
+                <GhostPill class="small" onClick={showRepoCves}>Repository CVEs</GhostPill>
               </div>
               <Show when={candidates()}>
                 <div class="metadata-view">
@@ -255,7 +311,7 @@ async function togglePinned(v: PackageVersion) {
               <section class="versions-section">
                 <header class="versions-head">
                   <h3>Versions</h3>
-                  <input class="search" placeholder="search by package name…" value={search()} onInput={(e) => setSearch(e.currentTarget.value)} />
+                  <QuietSearch label="Search versions by package name" placeholder="Search by package name…" value={search()} onInput={setSearch} />
                 </header>
                 <Show when={versions()?.length} fallback={<p class="hint pad">No versions published yet.</p>}>
                   <table class="versions-table">
@@ -266,7 +322,7 @@ async function togglePinned(v: PackageVersion) {
                           <tr>
                             <td>{v.package_name}</td>
                             <td><code>{v.version}</code>{v.pinned && " 📌"}{v.immutable && " 🔒"}</td>
-                            <td>{new Date(v.created_at * 1000).toLocaleString()}</td>
+                            <td>{new Date(v.created_at * 1000).toLocaleString(UI_LOCALE)}</td>
                             <td class="row-actions">
                               <button class="ghost small" onClick={() => setViewingMeta(v)}>Metadata</button>
 <button class="ghost small" onClick={() => showDetail(v)}>Detail</button>
@@ -373,6 +429,7 @@ async function togglePinned(v: PackageVersion) {
           )}
         </Show>
       </div>
+      </Show>
     </section>
   );
 }

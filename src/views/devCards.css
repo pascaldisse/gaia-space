@@ -1,0 +1,109 @@
+/* ── THE DEVELOPMENT CARD ──────────────────────────────────────────────────
+   ONE raster, not a second one. Every value below is the Knowledge library
+   card's (`documents-library-card` / `documents-shelf` in Documents.css) read
+   from the SAME tokens — hairline, --dk-space-*, --dk-radius-lg, --surface,
+   --surface-border, --accent-soft/--accent-text. If Knowledge moves, this
+   moves with it, because neither file hardcodes anything.
+
+   WHAT A CARD IS FOR: a row whose object has a NAME and one quiet line of
+   facts. A row that exists to be compared column-by-column (pipeline runs and
+   their durations, published package versions and their dates) is a TABLE and
+   stays one — a card cannot align a column.
+
+   STRUCTURE ONLY, never scoped to a theme: the dark layouts get the same
+   geometry, the light palette comes from the tokens. */
+
+/* Wide surfaces: cards flow. Narrow surfaces (a 240px list column) get
+   `.dev-card-list`, which is the same card in one column. */
+.dev-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr));
+  gap: var(--dk-space-sm);
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  text-align: left;
+}
+.dev-card-list {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--dk-space-sm);
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  text-align: left;
+}
+.dev-card-grid > li,
+.dev-card-list > li { min-width: 0; list-style: none; }
+
+.dev-card {
+  display: flex;
+  align-items: center;
+  gap: var(--dk-space-md);
+  width: 100%;
+  min-width: 0;
+  padding: var(--dk-space-lg);
+  border: var(--dk-hairline) solid var(--surface-border);
+  border-radius: var(--dk-radius-lg);
+  background: var(--surface);
+  color: inherit;
+  text-decoration: none;
+  text-align: left;
+  cursor: pointer;
+}
+.dev-card:hover { border-color: var(--accent); box-shadow: 0 8px 20px color-mix(in srgb, var(--accent) 10%, transparent); }
+.dev-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* The chosen card in a list/detail pair. Same wash Knowledge uses for a hover,
+   held instead of flashed. */
+li.active > .dev-card,
+.dev-card.active { border-color: var(--accent); background: color-mix(in srgb, var(--accent-soft) 45%, var(--surface)); }
+.dev-card.archived { opacity: 0.6; }
+
+/* A card that is a <button> must be told to stop looking like one. `font: inherit`
+   is forbidden in this repo (spaceTheme owns button metrics through --btn-*), so
+   the three properties that actually matter are named one by one and no button
+   metric is touched. */
+button.dev-card { font-family: inherit; font-size: inherit; font-weight: inherit; line-height: inherit; }
+
+.dev-card-icon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: var(--dk-radius-md);
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+
+/* `flex: 1 1 auto` IS the fix for a measured collapse, not decoration: with the
+   default `0 1 auto` a card carrying row actions (dev environments) shrank its copy
+   to ZERO width — name and meta line vanished while icon and state pill stayed, and
+   the card looked empty in the running app. The copy takes the free width; the
+   actions never shrink. */
+.dev-card-copy { flex: 1 1 auto; display: grid; min-width: 0; gap: 0.15rem; }
+.dev-card-copy strong,
+.dev-card-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dev-card-copy small { color: var(--text-muted); font-size: var(--dk-fs-xs); }
+
+/* ONE quiet meta line. Two would be a paragraph, and a paragraph is not a row. */
+.dev-card-open { margin-left: auto; flex: 0 0 auto; color: var(--accent-text); display: grid; place-items: center; }
+
+/* Actions that belong to the row itself (hibernate, delete). They sit where the
+   arrow would, because a card that DOES something has no "open" to point at. */
+.dev-card-actions { margin-left: auto; flex: 0 0 auto; display: flex; align-items: center; gap: var(--dk-space-sm); flex-wrap: wrap; justify-content: flex-end; }
+
+/* A state word on a card is a pill, not loose text: `RUNNING` beside a name
+   reads as part of the name otherwise. */
+.dev-card-state {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  padding: 2px 9px;
+  background: var(--surface-hover);
+  color: var(--text-muted);
+  font-size: var(--dk-fs-xs);
+  font-weight: 650;
+  white-space: nowrap;
+}

@@ -1,0 +1,46 @@
+/* Dev environments had NO stylesheet of its own. It was borrowing `.view`,
+ * `.view-header` and — by accident, only because some other view happened to
+ * import Reviews.css first — `.new-rule-form`. A view whose layout depends on
+ * another view's import order is one refactor away from falling apart, so the
+ * handful of rules it actually needs live here now.
+ *
+ * Structure is UNSCOPED (the dark layouts need the same list and the same form
+ * line); only colour is scoped to `.theme-space-light`.
+ */
+
+.dev-environments { height: 100%; overflow: auto; padding: var(--view-pad-y, 24px) var(--view-pad-x, 30px) var(--view-pad-bottom, 60px); }
+
+/* THE LIST IS CARDS NOW (design rollout): the grid, the padding, the radius and
+   the hairline all come from `.dev-card-grid` / `.dev-card` in devCards.css, which
+   is the Knowledge library card read from the same tokens. Nothing about the row's
+   geometry is restated here — one raster, one home. */
+/* A wider column than the card's default 17rem, MEASURED not guessed: an
+   environment carries three acts (Activity, Hibernate/Resume, forget) on the
+   card's edge, and at 17rem those acts ate the whole row — the name and the meta
+   line were squeezed to zero width in the running app. */
+/* The view's own class is in the selector ON PURPOSE: devCards.css is imported by
+   several views, so which stylesheet lands last is decided by module order, not by
+   this file — a bare `.devenv-list` lost the tie and the column stayed 17rem. */
+.dev-environments .devenv-list { margin: 0 0 16px; grid-template-columns: repeat(auto-fill, minmax(34rem, 1fr)); }
+/* The empty state is a panel answer, not a card: it spans the grid instead of
+   sitting in one 17rem column with a dashed frame around three words. */
+.devenv-list > li.devenv-empty { grid-column: 1 / -1; display: block; padding: 0; }
+
+.devenv-state { font-size: 11px; font-weight: 680; letter-spacing: .04em; text-transform: uppercase; }
+
+.devenv-standby { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; font-size: 13px; }
+
+.new-rule-form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; margin-top: 6px; }
+
+/* ── light theme colour ──────────────────────────────────────────────────── */
+.theme-space-light .devenv-list > li strong { color: var(--ink); font-weight: 710; }
+.theme-space-light .devenv-list .dev-card-copy small { color: var(--muted); }
+/* Colour law: a RUNNING environment is open work (teal); HIBERNATED is finished
+   for now and goes quiet (neutral). Nothing here is critical, so nothing is red. */
+.theme-space-light .devenv-state { color: var(--muted); }
+.theme-space-light .devenv-running, .theme-space-light .devenv-starting { color: var(--teal-ink); }
+.theme-space-light .devenv-standby { color: var(--ink); }
+
+/* The empty state is a lead on the page, so it starts where the page's content
+   starts instead of floating in the middle of an empty list. */
+.devenv-list > li.devenv-empty > .empty-lead { max-width: 560px; margin: 12px 0 0; }

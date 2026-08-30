@@ -22,6 +22,13 @@ export type ChannelSummary = Channel & {
 };
 // A thread is its own channel; its root stays in `parent_channel_id` and is not repeated.
 export type ThreadChannel = Channel & { root_message_id: string; parent_channel_id: string; skip_first_message: boolean; title: string | null; always_show: boolean; };
+// A thread waiting on you, complete enough to render a worklist row without a second call.
+export type UnreadThread = { channel_id: string; parent_channel_id: string; parent_channel_name: string | null; root_message_id: string; root_excerpt: string; unread_count: number; last_reply_at: number | null; last_reply_author: string | null };
+/** A thread channel's id is `thread:<root message id>` (`ensure_thread_channel_impl`).
+ *  That format is the backend's invariant, decoded in ONE place so a URL naming a
+ *  thread can be reopened at its root instead of dead-ending on "No channel selected". */
+export const threadRootOf = (channelId: string): string | null =>
+  channelId.startsWith("thread:") ? channelId.slice("thread:".length) : null;
 
 export type ChannelNotificationPreference = { profile_id:string; channel_id:string; email_enabled:boolean; push_enabled:boolean; thread_scope:"all"|"followed"|"none"; };
 export type ChannelMember = {
@@ -138,6 +145,9 @@ export type ProfileLite = {
   username: string;
   display_name: string; archived?: boolean };
 
+// Enough of an anchor's target to render a back-link into the conversation that
+// produced a task/ticket/meeting. `excerpt` is a one-line preview, never the body.
+export type SourceRef = { entity_type: string; entity_id: string; channel_id: string; channel_name: string | null; author_name: string | null; created_at: number; excerpt: string };
 export const chatApi = {
   // profiles (acting-user picker for local, auth-less app)
   listProfiles: () => invoke<ProfileLite[]>("list_profiles"),
@@ -146,6 +156,9 @@ export const chatApi = {
   listChannels: () => invoke<Channel[]>("list_channels"),
   listChannelsWithMeta: (profileId: string) =>
     invoke<ChannelSummary[]>("list_channels_with_meta", { profileId }),
+  // Threads are filtered OUT of listChannelsWithMeta on purpose; this is the only
+  // way a surface learns that replies are waiting in one.
+  listUnreadThreads: (profileId: string) => invoke<UnreadThread[]>("list_unread_threads", { profileId }),
   getChannel: (id: string) => invoke<Channel | null>("get_channel", { id }),
 privateFeed: (profileId:string) => invoke<Channel>("private_feed", {profileId}),
 channelNotificationPreference: (profileId:string,channelId:string) => invoke<ChannelNotificationPreference>("get_channel_notification_preference", {profileId,channelId}),
@@ -153,6 +166,13 @@ saveChannelNotificationPreference: (preference:ChannelNotificationPreference) =>
   createChannel: (channel: Channel, memberIds: string[]) =>
     invoke<Channel>("create_channel", { channel, memberIds }),
   updateChannel: (channel: Channel) => invoke<void>("update_channel", { channel }),
+  /** Ends a conversation for everyone: the channel, its messages and everything
+   *  hanging off them. Always ask first (ConfirmDialog). */
+  deleteChannel: (id: string, actorId: string) => invoke<void>("delete_channel", { id, actorId }),
+  /** Desktop only: write an attachment's bytes to a real path and return it, so the
+   *  operating system can open the file. In the browser the anchor's own download
+   *  does the job — there the webview IS a browser. */
+  stageAttachment: (attachmentId: string) => invoke<string>("stage_message_attachment", { attachmentId }),
   joinChannel: (channelId: string, profileId: string) =>
     invoke<void>("join_channel", { channelId, profileId }),
   leaveChannel: (channelId: string, profileId: string) =>
@@ -169,6 +189,11 @@ saveChannelNotificationPreference: (preference:ChannelNotificationPreference) =>
     invoke<Channel>("create_entity_channel", { entityType, entityId, name: name ?? null }),
   getChannelByEntity: (entityType: string, entityId: string) =>
     invoke<Channel | null>("get_channel_by_entity", { entityType, entityId }),
+  // Turns a work item's `(source_entity_type, source_entity_id)` anchor back into a
+  // clickable origin. Rejects (never returns null) when the source is gone or the
+  // kind is unknown, so a dead link is visible instead of an empty source card.
+  resolveSourceRef: (entityType: string, entityId: string) =>
+    invoke<SourceRef>("resolve_source_ref", { entityType, entityId }),
   // Idempotent: opening a root creates its backing channel once, guarded by the parent ACL.
   ensureThreadChannel: (rootMessageId: string, title?: string | null, actingProfileId?: string | null) =>
     invoke<ThreadChannel>("ensure_thread_channel", { rootMessageId, title: title ?? null, actingProfileId: actingProfileId ?? null }),

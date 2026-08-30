@@ -35,7 +35,9 @@
 .org-profile-readonly { display: grid; gap: 3px; font-size: 13px; color: var(--text-muted); }
 .org-profile-readonly strong { color: var(--text-strong); }
 .org-profile-edit { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)) auto; gap: 10px; align-items: end; margin-top: 12px; }
-.org-profile-edit label { display: grid; gap: 4px; font-size: 11px; color: var(--text-muted); }
+/* `.org-profile-edit label` styled the caption that used to float above each of
+   the three boxes. The placeholder is the field's name now (and its aria-label),
+   so there is no caption left to style. */
 .org-profile-settings { display: grid; gap: 8px; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--surface-border); }
 .org-profile-settings > label { display: grid; gap: 4px; max-width: 220px; font-size: 11px; color: var(--text-muted); }
 .org-directory-addons { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-top: 16px; }
@@ -48,9 +50,26 @@
 }
 
 /* ── forms ── */
-.org-view input, .org-view select { min-width: 0; width: 100%; }
+/* Blanket full width was correct when every control was a boxed input in a
+   stacked column. The pill controls size themselves and sit on a shared line,
+   so the rule is narrowed to the plain fields it was written for — otherwise a
+   PillSelect stretches across the panel and the filter row stacks again. */
+.org-view input:not(.op-input):not([type="checkbox"]), .org-view select { min-width: 0; width: 100%; }
+.org-view .op-input { min-width: 0; }
+.org-view .quiet-search input, .org-view .pill-select select { width: auto; }
+/* `.org-form` is a stacked operator column and stays one; `.op-form` on the same
+   element only re-styles the CONTROLS inside it. The one block that must read as
+   a LINE is the directory filter row — search + two pills — because that is the
+   exact line Development already draws, and the two surfaces are now next to
+   each other in the same product. Structure, so unscoped: dark needs it too. */
 .org-form { display: grid; gap: 7px; margin-bottom: 14px; }
-.org-form-inline { display: flex; gap: 7px; margin-bottom: 14px; }
+.org-filter-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.org-filter-row .quiet-search { flex: 1 1 200px; }
+/* A pill in a stacked column must not be stretched to the panel's full width:
+   a pill IS its content, and a 900px-wide "Add location" reads as a banner. */
+.org-form > .ghost-pill, .org-form > button:not(.primary) { justify-self: start; }
+.row-buttons .primary, .row-buttons .ghost-pill { flex: 0 0 auto; }
+.org-form-inline { display: flex; gap: 7px; margin-bottom: 14px; align-items: center; }
 .org-form-inline input { flex: 1; }
 .row-buttons { display: flex; gap: 7px; }
 
@@ -102,17 +121,13 @@
 .role-pill.none { background: var(--status-neutral-bg); color: var(--status-neutral-ink); font-weight: 550; }
 
 /* ── inline empty states ── */
-.org-empty-inline {
-  display: flex; flex-direction: column; align-items: center; gap: 8px; text-align: center;
-  padding: 18px 14px; margin: 4px 0 10px;
-  border: 1px dashed var(--surface-border-hover); border-radius: 12px;
-}
-.org-empty-inline.tall { min-height: 120px; padding: 24px 18px; align-items: flex-start; text-align: left; }
-.org-empty-inline p { margin: 0; color: #9297a3; font-size: 12.5px; line-height: 1.5; }
-.org-empty-icon {
-  width: 40px; height: 40px; display: grid; place-items: center; border-radius: 12px;
-  background: rgba(0,194,168,0.10); border: 1px solid rgba(0,194,168,0.26); color: #5fe6d4;
-}
+/* DELETED: `.org-empty-inline`, `.org-empty-inline.tall` and `.org-empty-icon`.
+   The last of those was the 40px teal-on-teal lozenge — four of them, one per
+   empty panel, and the thing the owner keeps pointing at as "some old icon".
+   Their markup is already gone (these panels use `EmptyState`, whose icon is
+   explicitly quiet and never a coloured lozenge), so all three rules had no
+   call site left in the app. Dead CSS outlives the mistake it made unless it
+   is removed with it. */
 
 .muted { font-size: 11px; color: var(--text-muted); }
 

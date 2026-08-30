@@ -1,0 +1,197 @@
+/* Every rule is scoped under `.wid-root`, and every prototype token is declared
+   locally with a fallback, so this drawer renders identically whether it is mounted
+   inside the light chat-first shell or on top of the old dark theme — and nothing
+   in here can leak out and repaint either of them. */
+.wid-root {
+  --wid-ink: var(--ink, #1f2328);
+  --wid-muted: var(--muted, #68717d);
+  --wid-paper: var(--paper, #ffffff);
+  --wid-wash: var(--wash, #faf8f4);
+  --wid-line: var(--line, #e5ddd3);
+  --wid-teal: var(--teal, #00bfa6);
+  --wid-teal-dark: var(--teal-dark, #008d7b);
+  --wid-teal-soft: var(--teal-soft, #dcf7f2);
+  --wid-amber: var(--amber, #d99b24);
+  --wid-red: var(--red, #bd3f3f);
+  --wid-red-soft: var(--red-soft, #fbe3e0);
+  /* The field fill was the literal `#fbfaf8` in three places — a hair off white, which
+     is right on paper and unreadable on a dark canvas. It reads the control token now,
+     so the drawer follows every palette (src/palettes.css) instead of pinning itself
+     to the light one. */
+  --wid-field: var(--ctl-bg, #fbfaf8);
+  /* ONE SILHOUETTE PER DRAWER (stage 13). Every control in this form — text
+     field, textarea, native select, PillSelect, PillMenu, button — answers to
+     these two numbers. The screenshot that started this: Status and Priority
+     were square 11px boxes with no chevron while Assignee, one row between
+     them, was a full-round pill with one. Four controls, three shapes, one
+     form. */
+  --wid-ctl-h: 40px;
+  --wid-ctl-r: 11px;
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  color: var(--wid-ink);
+  font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+.wid-root * { box-sizing: border-box; }
+
+.wid-root .wid-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(25, 16, 30, 0.28);
+}
+
+.wid-root .wid-panel {
+  position: absolute;
+  top: 0;
+  right: 0;
+  height: 100%;
+  width: 420px;
+  max-width: 92vw;
+  background: var(--wid-paper);
+  box-shadow: -22px 0 60px rgba(31, 35, 40, 0.18);
+  padding: 22px;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  gap: 18px;
+  overflow: hidden;
+  animation: wid-slide-in 180ms ease-out;
+}
+@keyframes wid-slide-in { from { transform: translateX(24px); opacity: 0; } to { transform: none; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .wid-root .wid-panel { animation: none; } }
+
+.wid-root .wid-head h2 { margin: 0; font-size: 22px; letter-spacing: -0.04em; font-weight: 720; color: var(--wid-ink); }
+.wid-root .wid-head p { margin: 6px 0 0; color: var(--wid-muted); font-size: 14px; line-height: 1.45; }
+
+.wid-root .wid-form { display: grid; gap: 14px; align-content: start; overflow-y: auto; padding-right: 2px; }
+.wid-root .wid-field { display: grid; gap: 6px; margin: 0; border: 0; padding: 0; min-width: 0; }
+/* THE CAPTION KEEPS ITS PLACE AND LOSES ITS VOLUME. A drawer is a FORM: unlike
+   a filter row, where the value is the label, here a visible caption is
+   correct and stays. What was wrong was the shouting — TITLE, DESCRIPTION,
+   STATUS, ASSIGNEE — an idiom deleted everywhere else in the redesign. Sentence
+   case, kicker weight, no tracking: it names the field and then gets out of the
+   way of the answer. */
+.wid-root .wid-field > span,
+.wid-root .wid-field > legend {
+  color: var(--wid-muted);
+  font-size: 12.5px;
+  font-weight: 620;
+  text-transform: none;
+  letter-spacing: 0;
+  padding: 0;
+}
+.wid-root .wid-input {
+  min-height: var(--wid-ctl-h);
+  width: 100%;
+  border: 1px solid var(--wid-line);
+  border-radius: var(--wid-ctl-r);
+  padding: 10px 11px;
+  background: var(--wid-field);
+  color: var(--wid-ink);
+  font: inherit;
+  font-size: 14px;
+}
+/* A NATIVE SELECT IS STILL A PICKER AND MUST LOOK LIKE ONE. Long lists (repos,
+   branches, every profile) keep the platform popup on purpose — see
+   controls.tsx — but at rest they must not read as a text field. Own chevron,
+   native chassis off, room made for the glyph. */
+.wid-root select.wid-input {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 34px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.5 6 8l3.5-3.5' fill='none' stroke='%2368717d' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 12px 12px;
+  cursor: pointer;
+}
+
+/* THE PILL CONTROLS JOIN THE FORM. `.wid-form` in the selector on purpose: it
+   makes these (0,3,0) so they outrank controls.css's `.theme-space-light
+   .pill-*` (0,2,0) whatever order the sheets happen to land in. The pill shape
+   is right on a filter LANE, where controls sit side by side and the row is the
+   unit; in a stacked form the unit is the field, and a field is full width. */
+.wid-root .wid-form :is(.pill-select, .pill-menu) {
+  display: flex;
+  width: 100%;
+  min-height: var(--wid-ctl-h);
+  border: 1px solid var(--wid-line);
+  border-radius: var(--wid-ctl-r);
+  background: var(--wid-field);
+  color: var(--wid-ink);
+  font-size: 14px;
+  font-weight: 400;
+}
+.wid-root .wid-form :is(.pill-select, .pill-menu):hover { border-color: var(--wid-line); background: var(--wid-field); }
+.wid-root .wid-form :is(.pill-select select, .pill-menu-trigger) {
+  width: 100%;
+  height: calc(var(--wid-ctl-h) - 2px);
+  padding: 0 12px 0 11px;
+  border-radius: inherit;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+.wid-root .wid-form .pill-select select { padding-right: 34px; }
+.wid-root .wid-form .pill-select-chevron { right: 12px; }
+/* MEASURED, NOT ASSUMED: with only `min-height`, the text field came out at
+   42.3px and the date field at 46px next to a 40px picker — three heights in
+   one column. A single-line control gets the height, not a floor; the textarea
+   is the one control that is allowed to be tall. */
+.wid-root input.wid-input,
+.wid-root select.wid-input { height: var(--wid-ctl-h); padding-top: 0; padding-bottom: 0; }
+.wid-root textarea.wid-input { min-height: 92px; resize: vertical; }
+.wid-root .wid-input:focus-visible { outline: 2px solid var(--wid-teal); outline-offset: 1px; }
+.wid-root .wid-input:disabled { background: var(--wid-wash); color: var(--wid-muted); }
+.wid-root .wid-when-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
+
+.wid-root .wid-people { display: grid; gap: 4px; }
+.wid-root .wid-person { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--wid-ink); }
+.wid-root .wid-hint { margin: 0; color: var(--wid-muted); font-size: 13px; line-height: 1.45; }
+/* The task drawer's assignee list is a fieldset, so it needs the field's own gap
+   back; its source bookmark is the one place two inputs share a line. */
+.wid-root .task-drawer-people { gap: 8px; }
+.wid-root .task-drawer-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+
+/* Quelle is a fact, not a field: flat, unclickable, and visibly not an input. */
+.wid-root .wid-source-card {
+  border: 1px solid var(--wid-line);
+  border-left: 3px solid var(--wid-teal);
+  border-radius: 11px;
+  background: var(--wid-wash);
+  padding: 10px 11px;
+  display: grid;
+  gap: 4px;
+}
+.wid-root .wid-source-line { margin: 0; font-size: 13px; color: var(--wid-ink); }
+.wid-root .wid-source-line strong { font-weight: 680; }
+.wid-root .wid-source-line em { color: var(--wid-amber); font-style: normal; }
+.wid-root .wid-source-excerpt { margin: 0; font-size: 13px; line-height: 1.45; color: var(--wid-muted); }
+
+.wid-root .wid-error {
+  margin: 0;
+  border: 1px solid var(--wid-red);
+  border-radius: 11px;
+  background: var(--wid-red-soft);
+  color: var(--wid-red);
+  padding: 9px 11px;
+  font-size: 13px;
+}
+
+.wid-root .wid-actions { display: flex; justify-content: flex-end; gap: 10px; padding-top: 2px; }
+.wid-root .wid-btn {
+  min-height: var(--wid-ctl-h);
+  border: 1px solid var(--wid-line);
+  border-radius: var(--wid-ctl-r);
+  padding: 0 15px;
+  background: var(--wid-paper);
+  color: var(--wid-ink);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 640;
+  cursor: pointer;
+}
+.wid-root .wid-btn:hover:not(:disabled) { background: var(--wid-wash); }
+.wid-root .wid-primary { background: var(--wid-teal); border-color: var(--wid-teal-dark); color: var(--brand-navy, #05302a); }
+.wid-root .wid-primary:hover:not(:disabled) { background: var(--wid-teal-dark); color: var(--wid-teal-soft); }
+.wid-root .wid-btn:disabled { opacity: 0.55; cursor: not-allowed; }

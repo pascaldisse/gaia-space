@@ -2,7 +2,9 @@ import { invoke } from "@tauri-apps/api/core";
 
 // `assignee_ids` is the truth (an issue is worked by people); `assignee_id` is the
 // first of them and stays for legacy filters.
-export type Issue = { id:string; project_id:string; number:number; title:string; description:string|null; status_id:string|null; assignee_id:string|null; created_by:string|null; due_date:string|null; priority:string|null; archived:boolean; assignee_ids:string[] };
+// `source_entity_*` is where the ticket came from, e.g. ("message", <id>) for one
+// raised in a channel; send both halves or neither (`chatApi.resolveSourceRef` reads it back).
+export type Issue = { id:string; project_id:string; number:number; title:string; description:string|null; status_id:string|null; assignee_id:string|null; created_by:string|null; due_date:string|null; priority:string|null; archived:boolean; assignee_ids:string[]; source_entity_type:string|null; source_entity_id:string|null };
 export type Status = { id:string; project_id:string; name:string; resolved:boolean; color:string; ordering:number };
 export type Board = { id:string; project_id:string; name:string; backlog_type:string; archived:boolean };
 export type BoardColumn = { id:string; board_id:string; name:string; ordering:number; status_ids:string[] };
@@ -32,7 +34,9 @@ export const planningApi = {
     const issue = (raw.issue ?? raw) as Issue;
     return { issue, tags: (raw.tags as PlanningTag[]) ?? [], checklists: (raw.checklists as Checklist[]) ?? [], time_total_minutes: (raw.time_total_minutes as number) ?? 0, children: (raw.children as Issue[]) ?? [], attachments: (raw.attachments as IssueAttachment[]) ?? [], comments: (raw.comments as IssueComment[]) ?? [], activities: (raw.activities as IssueActivity[]) ?? [], tracker_links: (raw.tracker_links as TrackerLink[]) ?? [] };
   },
-  createIssue: (input: Omit<Issue,"id"|"number"|"assignee_ids"> & { id?:string; assignee_ids?:string[] }) => call<Issue>("create_issue", { input }),
+  // The anchor is optional on the way in (native defaults it to null) and always
+  // present on the way out, so writers with no origin stay unchanged.
+  createIssue: (input: Omit<Issue,"id"|"number"|"assignee_ids"|"source_entity_type"|"source_entity_id"> & { id?:string; assignee_ids?:string[]; source_entity_type?:string|null; source_entity_id?:string|null }) => call<Issue>("create_issue", { input }),
   assignees: (issue_id:string) => call<string[]>("list_issue_assignees", { issueId: issue_id }),
   setAssignees: (issue_id:string, profile_ids:string[]) => call<string[]>("set_issue_assignees", { issueId: issue_id, profileIds: profile_ids }),
   updateIssue: (issue:Issue) => call<Issue>("update_issue", { issue }), cloneIssue: (issue_id:string, target_project_id:string) => call<Issue>("clone_issue", { input: { issueId: issue_id, targetProjectId: target_project_id } }), moveIssueToProject: (issue_id:string, target_project_id:string) => call<Issue>("move_issue_to_project", { input: { issueId: issue_id, targetProjectId: target_project_id } }), archiveIssue: (id:string, archived:boolean) => call<void>("archive_issue", {id, archived}),

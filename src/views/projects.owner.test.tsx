@@ -43,10 +43,16 @@ const createProjectThrough = async () => {
   document.body.appendChild(host);
   dispose = render(() => <Projects /> as any, host);
   await settle();
-  const [name, key] = Array.from(host.querySelectorAll<HTMLInputElement>(".project-form input"));
+  // Creation lives in a drawer behind the header primary (audit L3): open it, then
+  // fill exactly the same form. Nothing about the write path changed.
+  const open = Array.from(host.querySelectorAll<HTMLButtonElement>("button")).find((b) => b.textContent === "New project")!;
+  expect(open).toBeTruthy();
+  open.click();
+  await settle();
+  // No key field any more: the key is derived from the name (see uniqueKey).
+  const [name] = Array.from(host.querySelectorAll<HTMLInputElement>(".project-form input"));
   name.value = "Local project"; name.dispatchEvent(new Event("input", { bubbles: true }));
-  key.value = "loc"; key.dispatchEvent(new Event("input", { bubbles: true }));
-  host.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+  host.querySelector("form.project-form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
   await settle();
   const created = calls.find((c) => c.cmd === "create_project");
   expect(created).toBeTruthy();

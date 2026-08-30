@@ -1,1 +1,22 @@
-.apps-view{height:100%;overflow:auto;padding:var(--view-pad-y) var(--view-pad-x) var(--view-pad-bottom);max-width:var(--view-canvas);color:var(--text)}.apps-grid{display:grid;grid-template-columns:minmax(230px,.8fr) minmax(300px,1fr) minmax(330px,1.1fr);gap:14px;align-items:start}.apps-panel{background:var(--surface);border:1px solid var(--surface-border);border-radius:10px;padding:14px;display:grid;gap:10px}.apps-panel h2,.apps-panel h3{margin:0}.apps-panel h2{font-size:15px}.apps-panel h3{font-size:12px;color:var(--text-muted);text-transform:uppercase}.apps-form{display:grid;gap:7px}.apps-panel input,.apps-panel select{min-width:0;width:100%}.apps-list{padding:0;margin:0;list-style:none;display:grid;gap:5px}.apps-list li{display:grid;gap:2px;padding:8px;border-bottom:1px solid var(--surface-border);cursor:pointer}.apps-list li.active,.apps-list li:hover{background:var(--surface-hover)}.apps-list span,.apps-hint,.extension-row span{color:var(--text-muted);font-size:12px}.apps-error{background:var(--status-danger-bg);color:var(--status-danger-ink);padding:8px 12px;border-radius:8px}.extension-actions{display:flex;gap:6px;flex-wrap:wrap}.extension-row{display:grid;grid-template-columns:minmax(90px,.6fr) 1fr auto;align-items:center;gap:8px;margin:0;padding:7px 0;border-bottom:1px solid var(--surface-border);font-size:12px;overflow-wrap:anywhere}@media(max-width:1050px){.apps-grid{grid-template-columns:1fr 1fr}.apps-extensions{grid-column:1/-1}}@media(max-width:700px){.apps-grid{grid-template-columns:1fr}.apps-extensions{grid-column:auto}}
+.apps-view{height:100%;overflow:auto;padding:var(--view-pad-y) var(--view-pad-x) var(--view-pad-bottom);max-width:var(--view-canvas);color:var(--text)}.apps-grid{display:grid;grid-template-columns:minmax(230px,.8fr) minmax(300px,1fr) minmax(330px,1.1fr);gap:14px;align-items:start}.apps-panel{background:var(--surface);border:1px solid var(--surface-border);border-radius:10px;padding:14px;display:grid;gap:10px}.apps-panel h2,.apps-panel h3{margin:0}.apps-panel h2{font-size:15px}.apps-panel h3{font-size:12px;color:var(--text-muted);text-transform:uppercase}.apps-form{display:grid;gap:7px}.apps-panel input,.apps-panel select{min-width:0;width:100%}.apps-list span,.apps-hint,.extension-row span{color:var(--text-muted);font-size:12px}.apps-error{background:var(--status-danger-bg);color:var(--status-danger-ink);padding:8px 12px;border-radius:8px}.extension-actions{display:flex;gap:6px;flex-wrap:wrap}.extension-row{display:grid;grid-template-columns:minmax(90px,.6fr) 1fr auto;align-items:center;gap:8px;margin:0;padding:7px 0;border-bottom:1px solid var(--surface-border);font-size:12px;overflow-wrap:anywhere}@media(max-width:1050px){.apps-grid{grid-template-columns:1fr 1fr}.apps-extensions{grid-column:1/-1}}@media(max-width:700px){.apps-grid{grid-template-columns:1fr}.apps-extensions{grid-column:auto}}
+
+/* ── Lane D: seating the shared control language in these three panels ─────
+   Structure only, therefore UNSCOPED — the dark layouts need the same rules. */
+
+/* `.apps-panel input, .apps-panel select { width: 100% }` was right when every
+   control was a boxed input in a stacked column. A pill sizes itself, so the
+   blanket rule is narrowed to the plain fields it was written for; otherwise a
+   PillSelect stretches across the panel and the IDE row stacks again. */
+.apps-panel .op-input { width: 100%; }
+.apps-panel .pill-select select { width: auto; }
+/* A primary that spans the whole panel reads as a banner, not as a button. */
+.apps-form > button, .apps-form > .primary { justify-self: start; }
+/* The two lists in these panels are Knowledge's card in one column (devCards.css).
+   The hairline-separated rows they used to be are gone, frame and all — one raster
+   for a document, an application and a devfile. What stays is the muted voice of the
+   meta line, which this panel sets one size smaller than the card default. */
+.apps-list .dev-card-copy small { font-size: 12px; }
+
+/* The delivery filter is a captioned field, not a bare box in the action row:
+   it takes the free width and drops onto its own line when the row is full. */
+.extension-actions .hook-filters-field { flex: 1 1 240px; min-width: 180px; }

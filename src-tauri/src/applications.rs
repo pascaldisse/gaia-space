@@ -2115,6 +2115,8 @@ mod delivery_tests {
             due_date: None,
             priority: Some("HIGH".into()),
             archived: None,
+            source_entity_type: None,
+            source_entity_id: None,
         })
         .expect("issue");
 

@@ -1,15 +1,47 @@
 .meetings-view{max-width:var(--view-max-wide);padding:var(--view-pad-y) var(--view-pad-x) var(--view-pad-bottom);color:var(--text)}
 .meeting-calendar-link,.detail-actions a{border:1px solid var(--surface-border);border-radius:var(--radius-control);background:var(--ctl-bg-raised);color:var(--text);padding:8px 11px;font-family:var(--font-head);font-size:.84rem;font-weight:600;text-decoration:none}
-.meetings-layout{display:grid;grid-template-columns:minmax(18rem,.85fr) minmax(17rem,.8fr) minmax(22rem,1.25fr);gap:var(--cal-space-5xl);align-items:start}
-.meeting-create,.meeting-list,.meeting-detail,.call-panel{border:1px solid var(--surface-border);border-radius:var(--radius-control);background:var(--surface);box-shadow:0 2px 10px rgba(0,0,0,.18)}
-.meeting-create{overflow:hidden}.meeting-create form{display:grid;gap:0}.mc-head{padding:18px 20px 16px;border-bottom:1px solid var(--surface-border);background:linear-gradient(150deg,var(--ctl-bg),var(--surface))}.mc-head h2,.meeting-list h2,.meeting-detail h2,.rsvp h3,.call-heading h3{margin:0;color:var(--text-strong);font-family:var(--font-head)}.mc-head p,.meeting-list-head p,.section-heading p{margin:4px 0 0;color:var(--text-faint);font-size:.78rem;line-height:1.45}
-.mc-field{display:grid;gap:6px;padding:14px 20px 0}.mc-field>label,.mc-when label,.meeting-detail>label,.meeting-detail-when label{display:grid;gap:6px;font-family:var(--font-head);font-size:.75rem;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--text-faint)}.mc-field .picker{display:grid;gap:6px;font-family:var(--font-head);font-size:.75rem;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--text-faint)}
-.meetings-view input,.meetings-view textarea,.meetings-view select{box-sizing:border-box;width:100%;border:1px solid var(--surface-border);border-radius:var(--radius-option);background:var(--ctl-bg);color:var(--text);padding:9px 10px;font:inherit}.meetings-view textarea{min-height:4.6rem;resize:vertical}.meetings-view input:focus,.meetings-view textarea:focus,.meetings-view select:focus{outline:none;border-color:var(--accent);box-shadow:var(--ctl-focus-ring)}.mc-title-input{font-weight:600}.mc-when,.meeting-detail-when{display:grid;grid-template-columns:1fr 1fr;gap:10px}.mc-hint{font-size:.72rem;line-height:1.35;color:var(--text-faint)}
-.meetings-view button{border:1px solid var(--surface-border);border-radius:var(--radius-option);background:var(--ctl-bg-raised);color:var(--text);padding:8px 10px;font-family:var(--font-head);font-weight:600;cursor:pointer}.meetings-view button:hover,.meeting-calendar-link:hover,.detail-actions a:hover{border-color:var(--accent)}.meetings-view button.primary{border-color:var(--accent);background:var(--accent);color:var(--brand-navy)}.mc-submit{margin:18px 20px 20px;padding:11px!important}.danger{color:var(--status-danger-ink)!important;border-color:var(--status-danger-ink)!important}
+/* Two columns, not three: the composer left with the wall of form (it lives in
+   MeetingDrawer now), so the list and the detail pane share the surface. */
+.meetings-layout{display:grid;grid-template-columns:minmax(20rem,.9fr) minmax(22rem,1.25fr);gap:var(--cal-space-5xl);align-items:start}
+.meeting-list,.meeting-detail,.call-panel{border:1px solid var(--surface-border);border-radius:var(--radius-control);background:var(--surface);box-shadow:0 2px 10px rgba(0,0,0,.18)}
+.meeting-new{white-space:nowrap}
+.meeting-list h2,.meeting-detail h2,.rsvp h3,.call-heading h3{margin:0;color:var(--text-strong);font-family:var(--font-head)}.meeting-list-head p,.section-heading p{margin:4px 0 0;color:var(--text-faint);font-size:.78rem;line-height:1.45}
+.meeting-detail>label,.meeting-detail-when label{display:grid;gap:6px;font-family:var(--font-head);font-size:.75rem;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--text-faint)}
+.meetings-view input,.meetings-view textarea,.meetings-view select{box-sizing:border-box;width:100%;border:1px solid var(--surface-border);border-radius:var(--radius-option);background:var(--ctl-bg);color:var(--text);padding:9px 10px;font:inherit}.meetings-view textarea{min-height:4.6rem;resize:vertical}.meetings-view input:focus,.meetings-view textarea:focus,.meetings-view select:focus{outline:none;border-color:var(--accent);box-shadow:var(--ctl-focus-ring)}
+/* `1fr` is `minmax(auto,1fr)`, and `auto` floors each track at the item's min-content.
+   A native date and a native time input have a sizeable intrinsic width, so the two
+   tracks refused to shrink and the row pushed out of its card. `auto-fit` with an
+   explicit floor stacks the pair when the pane is narrow instead of overflowing.
+   The composer half of this fix moved with the composer: MeetingDrawer.css carries
+   the same rule as `.mtd-when`. What stays here guards the DETAIL pane. */
+.meeting-detail-when{display:grid;grid-template-columns:repeat(auto-fit,minmax(12.5rem,1fr));gap:10px}
+.meetings-view button{border:1px solid var(--surface-border);border-radius:var(--radius-option);background:var(--ctl-bg-raised);color:var(--text);padding:8px 10px;font-family:var(--font-head);font-weight:600;cursor:pointer}.meetings-view button:hover,.meeting-calendar-link:hover,.detail-actions a:hover{border-color:var(--accent)}.meetings-view button.primary{border-color:var(--accent);background:var(--accent);color:var(--brand-navy)}/* Was a GLOBAL `.danger{...!important}`: it left this file and painted a red
+   ring around every destructive pill in the app at rest — Pipelines' "Delete
+   script" among them — beating that view's own light-theme rule. Red belongs in
+   the ink, and this rule belongs to Meetings. */
+.meetings-view .danger{color:var(--status-danger-ink)!important;border-color:var(--status-danger-ink)!important}
 .meeting-list,.meeting-detail{padding:16px}.meeting-list-head,.detail-actions,.section-heading{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}.meeting-list-head{margin-bottom:12px}.meeting-list-head button{padding:6px 8px;font-size:.76rem;white-space:nowrap}.meeting-filter{margin-bottom:10px}.meeting-rows{display:grid;gap:6px;max-height:calc(100vh - 20rem);overflow:auto}.meeting-row{display:grid;gap:3px;width:100%;text-align:left}.meeting-row strong{color:var(--text-strong)}.meeting-row time,.meeting-row span{font-size:.77rem;color:var(--text-faint)}.meeting-row.active{border-color:var(--accent);background:var(--accent-soft)}.meeting-empty{margin:0;padding:12px 0;color:var(--text-faint);font-size:.88rem}.meeting-empty h2{margin-bottom:6px}.meeting-error,.meeting-notice{margin:0 0 var(--cal-space-2xl);padding:10px 12px;border-radius:var(--radius-option)}.meeting-error{border:1px solid var(--status-danger-ink);background:var(--status-danger-bg);color:var(--status-danger-ink)}.meeting-notice{border:1px solid var(--surface-border);background:var(--accent-soft);color:var(--accent-text)}
 .detail-actions{margin-bottom:14px;align-items:center}.detail-actions a{margin-right:auto;padding:7px 9px}.meeting-detail>label{margin-bottom:12px}.meeting-title{font-size:1rem;font-weight:700}.meeting-detail-when{margin-bottom:12px}.rsvp,.meeting-availability{margin-top:18px;padding-top:16px;border-top:1px solid var(--surface-border)}.availability-conflict,.availability-clear{margin:10px 0 0;padding:8px 10px;border-radius:var(--radius-option);font-size:.82rem}.availability-conflict{background:var(--status-danger-bg);color:var(--status-danger-ink)}.availability-clear{background:var(--accent-soft);color:var(--accent-text)}.room-suggestions{display:grid;grid-template-columns:repeat(auto-fit,minmax(9rem,1fr));gap:8px;margin-top:10px}.room-suggestion{display:grid;gap:3px;text-align:left}.room-suggestion small{color:var(--text-faint);font-weight:400}.inline-form{display:flex;align-items:end;gap:8px;margin:12px 0}.inline-form .picker{flex:1;min-width:0}.inline-form .picker select{margin-top:6px}.participant{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 0;border-top:1px solid var(--surface-border);font-size:.86rem}.participant select{width:auto;min-width:7.4rem;padding:6px 8px}.call-panel{margin-top:16px;padding:16px;background:var(--ctl-bg)}.call-heading,.call-actions{display:flex;align-items:center;justify-content:space-between;gap:8px}.call-heading p{margin:3px 0 0;color:var(--text-faint);font-size:.8rem}.call-capture{padding:7px;border-radius:var(--radius-option);background:var(--accent-soft);color:var(--accent-text);font-size:.82rem}.call-room{color:var(--text-faint)}.call-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;margin-top:12px}.call-tile{display:grid;gap:5px;min-height:100px;padding:8px;border-radius:var(--radius-option);background:#0b1220;color:#fff}.call-tile video{width:100%;aspect-ratio:16/9;object-fit:cover;border-radius:5px;background:#060a14}.call-tile small{color:#b9c4d8}
-@media(max-width:70rem){.meetings-layout{grid-template-columns:minmax(18rem,.8fr) minmax(22rem,1.2fr)}.meeting-list{grid-row:span 2}.meeting-detail{grid-column:2}.meeting-rows{max-height:19rem}}@media(max-width:52rem){.meetings-layout{grid-template-columns:1fr}.meeting-list,.meeting-detail{grid-column:auto;grid-row:auto}.meeting-rows{max-height:18rem}.mc-when,.meeting-detail-when{grid-template-columns:1fr}.inline-form{align-items:stretch;flex-direction:column}.inline-form button{align-self:flex-end}}
-@media(max-width:1000px){.mc-when{grid-template-columns:1fr}}
+@media(max-width:70rem){.meeting-rows{max-height:19rem}}@media(max-width:52rem){.meetings-layout{grid-template-columns:1fr}.meeting-list,.meeting-detail{grid-column:auto;grid-row:auto}.meeting-rows{max-height:18rem}.meeting-detail-when{grid-template-columns:1fr}.inline-form{align-items:stretch;flex-direction:column}.inline-form button{align-self:flex-end}}
+
+/* ── THE SHIPPED CONTROLS KEEP THEIR OWN GEOMETRY ─────────────────────────
+   The blanket `.meetings-view input/select/button` rules above exist for the raw
+   <label><input> pairs in the DETAIL pane. They must not repaint a QuietSearch or
+   a PillSelect: `width:100%` on a <select> inside `.pill-select` (an inline-flex
+   span) collapses the pill, and a second border/background around a quiet search
+   draws a field inside a field.
+
+   UNSCOPED ON PURPOSE. This is STRUCTURE — width, border-box, padding — and the
+   dark layout needs it exactly as much as the light one; scoping geometry to
+   `.theme-space-light` is what broke the dark layout three times before. The
+   COLOUR of these controls still comes from controls.css and stays thematic. */
+.meetings-view .pill-select select{width:auto}
+.meetings-view .quiet-search input{width:auto;border:0;background:transparent;padding:0}
+.meetings-view .quiet-search input:focus{outline:none;border:0;box-shadow:none}
+/* The section heading owns the spacing the old hand-rolled head carried. */
+.meetings-view .section-heading{margin-bottom:10px}
+.meeting-filter-row{display:flex;margin-bottom:10px}
+.meetings-view .empty-lead{margin:4px 0}
 
 /* Native LiveKit call surface — existing Space tokens only. */
 .call-panel{display:grid;gap:14px;padding:18px;background:var(--surface-sunken)}
@@ -20,3 +52,65 @@
 .call-chat{display:grid;gap:8px;padding:11px;border:1px solid var(--surface-border);border-radius:var(--radius-option);background:var(--ctl-bg)}.call-chat-heading,.call-chat-compose{display:flex;align-items:center;gap:8px}.call-chat-heading{justify-content:space-between;font-size:.84rem}.call-chat-heading span{color:var(--text-faint);font-size:.76rem}.call-chat-messages{display:grid;gap:6px;max-height:10rem;overflow:auto}.call-chat-messages p{display:grid;gap:2px;margin:0;padding:7px 8px;border-radius:6px;background:var(--surface);font-size:.83rem}.call-chat-messages p>strong{font-size:.76rem;color:var(--accent-text)}.call-chat-messages p>span{overflow-wrap:anywhere}.call-chat-messages>p{color:var(--text-faint)}.call-chat-compose input{min-width:0;flex:1}.call-chat-compose button{flex:none}
 
 .call-transcript{display:grid;gap:8px;padding:11px;border:1px solid var(--surface-border);border-radius:var(--radius-option);background:var(--ctl-bg)}
+
+/* ── THE MEETING CARD ─────────────────────────────────────────────────────────
+   Same card as the Knowledge library (`.documents-library-card`, Documents.css):
+   icon tile left, title bold, ONE quiet meta line (when · where · recurrence),
+   arrow right. Repeated measures, identical tokens — no second raster.
+   UNSCOPED: structure belongs to both themes. */
+/* The card is the SHELL, not the button: a card that carries two acts (open it,
+   join it) cannot be one button, because a button may not contain another. So the
+   border, background and hover live on the shell and the selecting button fills it. */
+.meetings-view .meeting-row-shell {
+  display: flex; align-items: center; gap: var(--dk-space-md); min-width: 0;
+  padding: var(--dk-space-lg); border: var(--dk-hairline) solid var(--surface-border);
+  border-radius: var(--dk-radius-lg); background: var(--surface);
+}
+.meetings-view .meeting-row-shell:hover {
+  border-color: var(--accent); box-shadow: 0 8px 20px color-mix(in srgb, var(--accent) 10%, transparent);
+}
+.meetings-view .meeting-row-shell.active { border-color: var(--accent); background: var(--accent-soft); }
+.meetings-view .meeting-row {
+  display: flex; align-items: center; gap: var(--dk-space-md); min-width: 0; flex: 1;
+  padding: 0; border: 0; border-radius: 0; background: transparent; text-align: left;
+}
+.meetings-view .meeting-row:hover { border-color: transparent; box-shadow: none; background: transparent; }
+.meeting-row-icon {
+  display: grid; place-items: center; flex: 0 0 auto; width: 2.25rem; height: 2.25rem;
+  border-radius: var(--dk-radius-md); background: var(--accent-soft); color: var(--accent-text);
+}
+.meetings-view .meeting-row-copy { display: grid; min-width: 0; gap: 0.15rem; font-size: 1rem; }
+.meeting-row-copy strong, .meeting-row-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The legacy `.meeting-row time, .meeting-row span` rule shrank the whole card to
+   .77rem. The card's own type is stated here, in the Knowledge card's measures:
+   title at body size and bold, ONE meta line at the small step. */
+.meetings-view .meeting-row-copy strong { font-size: 1rem; font-weight: 700; color: var(--text-strong); }
+.meetings-view .meeting-row-copy small,
+.meetings-view .meeting-row-copy small time { color: var(--text-muted); font-size: var(--dk-fs-xs); font-weight: 400; }
+.meeting-row-open { margin-left: auto; color: var(--accent-text); }
+
+/* ── JOIN ─────────────────────────────────────────────────────────────────────
+   The act that takes you to the meeting itself. An act-button, so its size, weight,
+   height and radius come from the `--btn-*` tokens like every other one; the anchor
+   form (web) is dressed identically, because the runtime must not change how the
+   same act looks. UNSCOPED: this is structure, not a theme's opinion. */
+.meetings-view .meeting-join {
+  flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
+  min-height: var(--btn-height); padding: 0 var(--btn-pad-x);
+  border: var(--dk-hairline) solid var(--accent); border-radius: var(--btn-radius);
+  background: var(--accent-soft); color: var(--accent-text);
+  font-family: var(--font-body); font-size: var(--btn-font-size); font-weight: var(--btn-font-weight);
+  text-decoration: none; white-space: nowrap; cursor: pointer;
+}
+.meetings-view .meeting-join:hover { background: var(--accent); color: var(--surface); }
+.meeting-link-actions { display: flex; align-items: center; gap: var(--dk-space-md); min-width: 0; }
+.meeting-link-url { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); font-size: var(--dk-fs-xs); }
+.meeting-link-error { margin: 0; color: var(--status-danger-ink); font-size: var(--dk-fs-xs); }
+
+/* ── A DATE IS A BUTTON NOW ────────────────────────────────────────────────
+   Start and End are DateTimeField (day = the product's month grid, clock = a time
+   input), so their captions stopped being <label>s wrapping a control. Structure,
+   unscoped: the dark detail pane stacks caption over control just like the light one,
+   and the blanket `.meetings-view input` rule must not repaint the clock half. */
+.meeting-detail-when .when-field { display: grid; gap: 6px; font-family: var(--font-head); font-size: .75rem; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--text-faint); }
+.meetings-view .date-time-field input.date-time-clock { width: auto; font-family: var(--font-head); font-size: var(--btn-font-size, 13px); letter-spacing: normal; text-transform: none; }

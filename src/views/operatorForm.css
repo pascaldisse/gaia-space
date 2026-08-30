@@ -1,0 +1,134 @@
+/* ── THE OPERATOR FORM ──────────────────────────────────────────────────────
+ *
+ *  Lane D's one addition to the control language, and the reason it exists:
+ *
+ *  Law L3 says a creation form lives in a drawer. On the ADMIN and ORGANISATION
+ *  surfaces that law is deliberately relaxed — an administrator granting a role
+ *  or registering a worker is an operator, not a visitor, and hiding the form
+ *  behind a button would cost them a click on every single repetition. So the
+ *  form stays on the surface.
+ *
+ *  Law L4 is NOT relaxed. A form that stays on the surface must speak the same
+ *  language as the filter row two cards above it, or the page reads as two
+ *  products stacked. That is exactly what these surfaces looked like: pill
+ *  filters in one card, 1990s boxed inputs with captions floating to their left
+ *  in the next.
+ *
+ *  So: `.op-input` is `QuietSearch`'s field without the magnifier — one height
+ *  (`--pillctl-h`), one radius (`--pillctl-r`), soft fill, no resting border,
+ *  hairline on hover/focus. Put a `PillSelect`, an `.op-input` and a `.primary`
+ *  next to each other in an `.op-form` and the row reads as ONE line.
+ *
+ *  WHERE A CAPTION IS STILL CORRECT, and where it is not:
+ *    - a `<select>` carries its value as its label -> caption DELETED, name
+ *      moves to `aria-label`. This is the sweep.
+ *    - a text input at rest is EMPTY. It has no value to be its own label, so
+ *      it needs a name. The name is the PLACEHOLDER for a short obvious field
+ *      ("worker name") and an `.op-field > span` caption only where the field
+ *      is genuinely not guessable (a raw JSON payload, a normalised
+ *      coordinate). A caption is a last resort here, not the default.
+ *
+ *  STRUCTURE IS UNSCOPED, colour is scoped to `.theme-space-light` — same rule
+ *  as controls.css, and safe for the same reason: every class name in this file
+ *  is NEW, so no unscoped rule here can move a pixel of a pre-existing dark
+ *  surface. The dark theme keeps getting its input colours from App.css's
+ *  global `input`/`textarea` rules.
+ */
+
+/* ── structure (both themes) ─────────────────────────────────────────────── */
+
+.op-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px;
+  min-width: 0;
+}
+/* The field that should eat the leftover width of the row. */
+.op-form .op-grow,
+.op-field.op-grow { flex: 1 1 220px; min-width: 0; }
+
+.op-field {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  margin: 0;
+  border: 0;
+  padding: 0;
+}
+.op-field > span,
+.op-field > legend {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.op-input {
+  box-sizing: border-box;
+  min-height: var(--pillctl-h, 36px);
+  border-radius: var(--pillctl-r, 999px);
+  min-width: 0;
+  max-width: 100%;
+}
+/* A textarea is the one control that cannot be a pill: it is a block of text,
+   not a value. It keeps the soft fill and a readable corner radius instead. */
+textarea.op-input {
+  border-radius: 10px;
+  min-height: 84px;
+  resize: vertical;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+/* A number that is a normalised 0–1 coordinate does not need 220px of runway. */
+.op-input.op-narrow { width: 96px; flex: 0 0 auto; }
+.op-input.op-date { width: 158px; flex: 0 0 auto; }
+
+.op-hint {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+  max-width: 62ch;
+}
+
+/* ── light theme colour ──────────────────────────────────────────────────── */
+
+.theme-space-light .op-field > span,
+.theme-space-light .op-field > legend { color: var(--quiet); }
+
+.theme-space-light .op-input {
+  border: 1px solid transparent;   /* reserved, so hover does not resize the row */
+  background: var(--wash-2);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: var(--pillctl-font, 13.5px);
+  font-weight: 500;
+  padding: 0 var(--pillctl-pad-x, 14px);
+  transition: background .12s ease, border-color .12s ease;
+}
+.theme-space-light textarea.op-input {
+  padding: 10px 14px;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 12.5px;
+}
+.theme-space-light .op-input::placeholder { color: var(--quiet); -webkit-text-fill-color: var(--quiet); }
+.theme-space-light .op-input:hover:not(:disabled) { border-color: var(--line-strong); background: var(--paper); }
+.theme-space-light .op-input:focus-visible {
+  border-color: var(--line-strong);
+  background: var(--paper);
+  outline: 2px solid var(--teal);
+  outline-offset: 2px;
+}
+.theme-space-light .op-input:disabled { color: var(--quiet); cursor: not-allowed; }
+
+.theme-space-light .op-hint { color: var(--muted); }
+
+/* A ghost pill sitting IN an operator form row: at rest it was borderless, so
+   between two filled `.op-input` pills it read as a sentence, not as a control
+   ("Set pool target", "Trigger run", "Fire event"). Same reasoning as the page
+   header's action line, which already draws the hairline (controls.css §415):
+   a control among controls has to look pressable. Colour only. */
+.theme-space-light .op-form > .ghost-pill { border-color: var(--line); }
+.theme-space-light .op-form > .ghost-pill:hover:not(:disabled) { border-color: var(--line-strong); background: var(--wash-2); }
+.theme-space-light .op-form > .ghost-pill:disabled { border-color: var(--line); }

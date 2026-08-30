@@ -1,0 +1,315 @@
+/* ── GAIA Space light layer: TYPOGRAPHY · FORM CONTROLS · SHAPE ─────────────
+   Stage 5a. Stage 4 remapped COLOUR only, so every view still carried the old
+   type voice (Poppins, heavy) and the old control shape (9px radius, filled
+   navy fields, dark chevron). Colour was right and everything else was not —
+   which is exactly the "mix of the new variant and the old one" complaint.
+
+   HARD RULE, same as ChatSpaceLight.css: every selector starts at
+   `.theme-space-light`. The grouped and flat layouts never set that class, so
+   the shipped dark theme is byte-identical — nothing in App.css is edited.
+
+   Source of truth: FINAL_GAIA_SPACE_PROTOTYP.html. Values are harvested, not
+   invented; the prototype rule each block restates is named above it. Token
+   definitions live in spaceTheme.css; this file is only the RESTATEMENT of
+   rules App.css writes as literals rather than through a token. */
+
+/* ── 1 · type foundation ────────────────────────────────────────────────────
+   prototype: :root { font-family: <system stack> }  ·  body .text 15px/1.52 */
+.theme-space-light {
+  font-family: var(--font-body);
+  font-size: var(--type-body);
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: geometricPrecision;
+}
+
+/* App.css puts Poppins on h1-h4 + brand/nav classes by FAMILY. In this scope
+   the family token already resolves to the system stack, so these only need
+   the prototype's size/weight/tracking restated — the app runs several steps
+   heavier (600-700 Poppins reads far bolder than 720 system). */
+.theme-space-light h1 {
+  font-family: var(--font-head);
+  font-size: var(--type-h1);
+  line-height: var(--type-h1-lh);
+  letter-spacing: var(--type-h1-ls);
+  font-weight: var(--type-weight-head);
+  color: var(--ink);
+}
+.theme-space-light h2 {
+  font-size: var(--type-h2);
+  letter-spacing: var(--type-h2-ls);
+  font-weight: var(--type-weight-head);
+}
+.theme-space-light h3 {
+  font-size: var(--type-h3);
+  letter-spacing: var(--type-h3-ls);
+  font-weight: var(--type-weight-head);
+}
+.theme-space-light h4 {
+  font-size: var(--type-h4);
+  letter-spacing: var(--type-h4-ls);
+  font-weight: var(--type-weight-strong);
+}
+.theme-space-light h1, .theme-space-light h2,
+.theme-space-light h3, .theme-space-light h4 { margin-block: 0 .5em; }
+
+/* .subtitle 14px muted · .item-sub / .time 13px · .text 15px/1.52 */
+.theme-space-light p { line-height: var(--type-body-lh); }
+.theme-space-light small,
+.theme-space-light time { font-size: var(--type-meta); }
+.theme-space-light strong { font-weight: var(--type-weight-strong); }
+
+/* prototype .kicker / .field label / .summary-label — one micro-label voice.
+   App.css draws these in Poppins 11px/600; the prototype is 12px/680 with
+   wider tracking, which is why app labels read cramped next to Home's. */
+.theme-space-light .field-label,
+.theme-space-light .form-label,
+.theme-space-light .kicker,
+.theme-space-light .nav-section,
+.theme-space-light .dropdown-label {
+  font-family: var(--font-head);
+  font-size: var(--type-kicker);
+  font-weight: var(--type-kicker-weight);
+  letter-spacing: var(--type-kicker-ls);
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+/* Brand/nav lock-ups: App.css sets Poppins + a weight tuned for it. Poppins
+   at 650-700 ≈ system at 720-760 optically, so weight is restated too. */
+.theme-space-light .brand,
+.theme-space-light .space-mark,
+.theme-space-light .topbar-brand em {
+  font-family: var(--font-head);
+  font-weight: 730;
+  letter-spacing: -.035em;
+}
+
+/* ── 2 · form controls ──────────────────────────────────────────────────────
+   prototype .input { min-height:40px; 1px solid var(--line); radius 11px;
+   padding 10px 11px; background #fbfaf8; font-size 14px } — all of that is now
+   in the --ctl-* tokens, so App.css's own field rule produces it. What is left
+   are the LITERALS App.css hardcodes for the dark theme. */
+
+/* App.css pins `color-scheme: dark` on every field: native date pickers,
+   spinners, scrollbars and autofill would all render dark-on-paper. */
+/* THE LIGHT FIELD RULES ARE ABOUT THE PAPER, so they stop at the paper. The shell's
+   rail and sidebar are dark chrome INSIDE the light layout, and a blanket
+   `select { color: ink; -webkit-text-fill-color: ink }` painted the sidebar's
+   identity picker in near-black on plum — the CSS `color` measured correct and the
+   text was still unreadable, because `-webkit-text-fill-color` wins. Scoping the
+   field rules to the content area fixes the cause instead of adding an exception
+   for every dark control we later put in the chrome. */
+.theme-space-light .space-content input,
+.theme-space-light .space-content select,
+.theme-space-light .space-content textarea,
+.theme-space-light .space-content { color-scheme: light; }
+
+.theme-space-light .space-content textarea,
+.theme-space-light .space-content select,
+.theme-space-light .space-content input[type="text"], .theme-space-light .space-content input[type="search"],
+.theme-space-light .space-content input[type="email"], .theme-space-light .space-content input[type="password"],
+.theme-space-light .space-content input[type="date"], .theme-space-light .space-content input[type="time"],
+.theme-space-light .space-content input[type="datetime-local"], .theme-space-light .space-content input[type="month"],
+.theme-space-light .space-content input[type="number"], .theme-space-light .space-content input[type="url"],
+.theme-space-light .space-content input[type="tel"], .theme-space-light .space-content input:not([type]) {
+  min-height: 40px;
+  color: var(--ink);
+  -webkit-text-fill-color: var(--ink);
+  /* Date/time/number inputs size INTRINSICALLY from font-size + padding, so
+     the step up to the prototype's 14px field type pushed them past the edge
+     of their card in the denser forms (Meetings). Cap them at their column. */
+  max-width: 100%;
+  min-width: 0;
+}
+.theme-space-light textarea { min-height: 92px; }  /* prototype textarea.input */
+.theme-space-light input::placeholder,
+.theme-space-light textarea::placeholder {
+  color: var(--ctl-placeholder);
+  -webkit-text-fill-color: var(--ctl-placeholder);
+  font-weight: 400;
+}
+
+/* The chevron App.css draws is stroked #8b96ad — a navy-theme grey that reads
+   as a smudge on paper. Redrawn in --muted (#68717d). */
+.theme-space-light select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='none' stroke='%2368717d' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round' d='M2.5 4.5 6 8l3.5-3.5'/%3E%3C/svg%3E");
+  padding-right: 2.4em;
+}
+.theme-space-light select:hover {
+  background-color: var(--ctl-bg-hover);
+  border-color: var(--ctl-border-hover);
+}
+.theme-space-light select option { background: var(--paper); color: var(--ink); }
+
+/* every control state, explicitly */
+.theme-space-light input:focus,
+.theme-space-light select:focus,
+.theme-space-light textarea:focus {
+  border-color: var(--teal);
+  box-shadow: var(--ctl-focus-ring);
+  background-color: var(--paper);
+  outline: none;
+}
+.theme-space-light button:focus-visible,
+.theme-space-light input:focus-visible,
+.theme-space-light select:focus-visible,
+.theme-space-light textarea:focus-visible,
+.theme-space-light a:focus-visible {
+  outline: 2px solid var(--teal-dark);
+  outline-offset: 1px;
+}
+.theme-space-light input:disabled,
+.theme-space-light select:disabled,
+.theme-space-light textarea:disabled {
+  opacity: 1;                 /* opacity on paper just washes text out */
+  background-color: var(--wash-2);
+  border-color: var(--line);
+  color: var(--quiet);
+  -webkit-text-fill-color: var(--quiet);
+  cursor: not-allowed;
+  box-shadow: none;
+}
+/* Buttons keep App.css's opacity fade: a fill here would paint a box behind
+   the transparent icon/cell buttons that have no chrome of their own. */
+.theme-space-light button:disabled { color: var(--quiet); box-shadow: none; }
+.theme-space-light input[aria-invalid="true"],
+.theme-space-light select[aria-invalid="true"],
+.theme-space-light textarea[aria-invalid="true"],
+.theme-space-light input:user-invalid,
+.theme-space-light textarea:user-invalid {
+  border-color: var(--red);
+  background-color: var(--red-soft);
+  color: var(--red-ink);
+}
+.theme-space-light input[aria-invalid="true"]:focus,
+.theme-space-light textarea[aria-invalid="true"]:focus,
+.theme-space-light input:user-invalid:focus {
+  border-color: var(--red);
+  box-shadow: 0 0 0 3px rgba(189, 63, 63, .18);
+}
+
+/* checkboxes & radios inherited the dark theme's bright accent (#00c2a8 on
+   navy). On paper the teal has to be the darker, WCAG-safe one. */
+.theme-space-light input[type="checkbox"],
+.theme-space-light input[type="radio"] {
+  accent-color: var(--teal-dark);
+  min-height: 0;
+  width: 16px;
+  height: 16px;
+}
+.theme-space-light input[type="checkbox"]:focus-visible,
+.theme-space-light input[type="radio"]:focus-visible { outline-offset: 2px; }
+.theme-space-light input[type="range"] { accent-color: var(--teal-dark); min-height: 0; }
+.theme-space-light input[type="color"] { min-height: 0; padding: 2px; background: var(--paper); }
+.theme-space-light input[type="file"] { color: var(--muted); }
+
+/* ── 3 · buttons ────────────────────────────────────────────────────────────
+   prototype .btn { 1px solid var(--line-strong); radius 11px; var(--paper);
+   9px 12px; 13px/650; box-shadow 0 1px 0 rgba(0,0,0,.03) }
+
+   Only TYPE is restated blanket-wide. Fill/border/shadow are deliberately NOT:
+   many view buttons are transparent cells (calendar days, list rows, icon
+   affordances) whose own rules zero the border but not a shadow, so a blanket
+   `box-shadow` painted a ghost box around every one of them. Shape stays with
+   the --ctl-* tokens, and the chrome below is opt-in per variant. */
+.theme-space-light button {
+  font-family: var(--font-head);
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--ink);
+}
+.theme-space-light .btn,
+.theme-space-light button.secondary,
+.theme-space-light button[type="submit"],
+.theme-space-light button[type="button"].primary {
+  box-shadow: var(--shadow-btn);
+}
+
+/* .btn.primary — teal fill, near-black teal ink. #021f1b on #00bfa6 is 8.9:1;
+   the dark theme's ink token would have been a muddy 4.4:1 here. */
+.theme-space-light button.primary,
+.theme-space-light .btn.primary {
+  background: var(--teal);
+  border-color: transparent;
+  color: var(--brand-navy);
+  -webkit-text-fill-color: var(--brand-navy);
+  font-weight: 700;
+}
+.theme-space-light button.primary:hover,
+.theme-space-light .btn.primary:hover {
+  background: var(--teal-dark);
+  border-color: transparent;
+  color: #ffffff;
+  -webkit-text-fill-color: #ffffff;
+}
+.theme-space-light button.primary:disabled {
+  background: var(--teal-soft);
+  color: var(--quiet);
+  -webkit-text-fill-color: var(--quiet);
+  border-color: transparent;
+}
+
+/* .ghost is a bare text button in the dark theme (#9a9a9a, no border) */
+.theme-space-light button.ghost {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  color: var(--muted);
+  font-weight: 600;
+}
+.theme-space-light button.ghost:hover {
+  background: var(--wash-2);
+  border-color: transparent;
+  color: var(--ink);
+}
+.theme-space-light button.danger,
+.theme-space-light button.destructive {
+  background: var(--red-soft);
+  border-color: transparent;
+  color: var(--red-ink);
+  -webkit-text-fill-color: var(--red-ink);
+}
+.theme-space-light button.danger:hover,
+.theme-space-light button.destructive:hover {
+  background: var(--red);
+  border-color: transparent;
+  color: #fff;
+  -webkit-text-fill-color: #fff;
+}
+
+/* segmented: App.css hardcodes a 9px radius and rgba(255,255,255,.05) hover —
+   a white veil is invisible on paper. */
+.theme-space-light .segmented {
+  border-radius: var(--ctl-radius);
+  background: var(--wash-2);
+  border-color: var(--line);
+  padding: 3px;
+}
+.theme-space-light .segmented button {
+  box-shadow: none;
+  border-color: transparent;
+  background: transparent;
+  padding: 5px 12px;
+  font-size: var(--type-micro);
+  font-weight: 650;
+  color: var(--muted);
+}
+.theme-space-light .segmented button:hover { background: rgba(31, 35, 40, .05); color: var(--ink); }
+.theme-space-light .segmented button.active {
+  background: var(--paper);
+  color: var(--ink);
+  box-shadow: var(--shadow-btn);
+}
+
+/* ── 4 · shape & elevation ──────────────────────────────────────────────────
+   Cards in the prototype are 16-18px with a soft, wide shadow; the app's
+   surfaces are 9-12px with none. Applied through the shared surface classes so
+   the view stylesheets inherit it without being touched. */
+.theme-space-light .card,
+.theme-space-light .surface,
+.theme-space-light .view-card {
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+  border-color: var(--line);
+}

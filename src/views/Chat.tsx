@@ -1,12 +1,20 @@
 import { createResource, createSignal, createEffect, onCleanup, For, Show } from "solid-js";
 import { useDeepLink, linkProps, route } from "../router";
 import { currentUser, isWeb } from "../session";
+import { navLayout } from "../nav";
+import { actingProfileId, bumpChannels, setActingProfileId } from "../chatIdentity";
 import { authApi } from "../api/auth";
+import DateTimeField from "../components/DateTimeField";
+import ContextMenu, { type ContextMenuItem } from "../components/ContextMenu";
+import WorkItemDrawer, { type WorkItemKind } from "../components/WorkItemDrawer";
+import { openPath } from "@tauri-apps/plugin-opener";
+import { Icon } from "../components/Icon";
 import "../App.css";
 import "./Chat.css";
 import {
   chatApi,
   newId,
+  threadRootOf,
   type Channel,
   type ChannelContentType,
   type ChannelSummary,
@@ -37,6 +45,7 @@ import { platformApi } from "../api/platform";
 import { applyCommand, COMMAND_FANOUT_LIMIT, mapWithLimit, mergeCommandListings, slashPrefix, type CommandEntry } from "../chatCommands";
 import { canSendDraft, uploadableAttachments } from "../chatAttachments";
 import { insertMention, mentionCandidates as candidatesFor, survivingMentions as survivorsOf, type MentionTarget, type MentionTargetRef } from "../chatMentions";
+import { UI_LOCALE } from "../calendar";
 
 const GROUP_ORDER: { key: ChannelContentType; label: string }[] = [
   { key: "public", label: "Public" },
@@ -53,9 +62,13 @@ const POLL_OPTIONS = [
   { label: "off", ms: 0 },
 ];
 
+/** Two-letter monogram for the message avatar (light shell only). */
+const avatarInitials = (label: string) =>
+  label.trim().split(/\s+/).slice(0, 2).map((word) => word[0]?.toUpperCase() ?? "").join("") || "?";
+
 function when(ts: number | null) {
   if (!ts) return "";
-  return new Date(ts * 1000).toLocaleString(undefined, {
+  return new Date(ts * 1000).toLocaleString(UI_LOCALE, {
     month: "short",
     day: "2-digit",
     hour: "2-digit",
@@ -63,7 +76,15 @@ function when(ts: number | null) {
   });
 }
 
-export default function Chat() {
+/**
+ * `embedded` — the caller already draws a channel list and a channel title, so Chat must
+ * NOT draw its own. It is a real conditional, not CSS: a hidden-but-mounted sidebar still
+ * fetches, still tab-traps, and still shows a second "new conversation" form. The chat-first
+ * layout is embedded by definition (SpaceShell owns the sidebar), which is why the default
+ * also consults `navLayout()` — the plain grouped/flat layouts keep the legacy sidebar.
+ */
+export default function Chat(props: { embedded?: boolean } = {}) {
+  const showLegacySidebar = () => !props.embedded && navLayout() !== "chat-first";
   const [error, setError] = createSignal<string | null>(null);
   const fail = (e: unknown) => setError(String(e));
 
@@ -75,12 +96,14 @@ export default function Chat() {
     : (profiles() ?? [])
   ).filter((profile) => !profile.archived && profile.id !== actingProfileId());
   const recipientsLoading = () => isWeb() ? directory.loading : profiles.loading;
-  const [actingProfileId, setActingProfileId] = createSignal<string | null>(null);
+  // The acting profile lives in src/chatIdentity.ts: in the chat-first layout the picker
+  // is in the shell, so shell and view must read one cell. The seeding rule is unchanged.
   createEffect(() => {
     const authenticated = currentUser()?.profile_id;
     if (isWeb() && authenticated) { setActingProfileId(authenticated); return; }
-    const list = profiles();
-    if (list && list.length && !actingProfileId()) setActingProfileId(list[0].id);
+    // No seeding from profiles()[0] any more: that guessed an identity (it picked the
+    // organisation profile here) and locked the caller out of their own private feed.
+    // chatIdentity falls back to the session profile, which is the real answer.
   });
 
   // polling
@@ -108,10 +131,43 @@ export default function Chat() {
     if (list && list.length) { didAutoSelect = true; if (!activeChannelId() && !route().entityId) setActiveChannelId(list[0].id); }
   });
   const activeChannel = () => channels()?.find((c) => c.id === activeChannelId()) ?? null;
+
+  /** ── A MESSAGE BECOMES WORK ────────────────────────────────────────────────
+   *
+   *  The whole machine for this existed and was reachable from nowhere: a finished
+   *  `WorkItemDrawer`, a `resolve_source_ref` command on both backends, and the
+   *  `source_entity_type/_id` anchor on issues, meetings and documents — imported by
+   *  its own test and by nothing else. A channel card even ADVERTISED the mapping
+   *  (Task / Ticket / Date) without offering it.
+   *
+   *  The trigger belongs on the MESSAGE, because that is where the person is when
+   *  they realise the message is work — not on a side card, and not in a page header.
+   *  One entry, three kinds: the reader decides whether this is a task, a defect or
+   *  a date; the application must not guess that from the words. */
+  const [workMenu, setWorkMenu] = createSignal<{ x: number; y: number; items: ContextMenuItem[] } | null>(null);
+  const [workDraft, setWorkDraft] = createSignal<{ kind: WorkItemKind; messageId: string; excerpt: string } | null>(null);
+  const openWorkMenu = (event: MouseEvent, message: MessageView) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const start = (kind: WorkItemKind) => () =>
+      setWorkDraft({ kind, messageId: message.id, excerpt: (message.text ?? "").trim().slice(0, 120) });
+    setWorkMenu({
+      x: event.clientX,
+      y: event.clientY,
+      items: [
+        { label: "Task", onSelect: start("task") },
+        { label: "Ticket", onSelect: start("ticket") },
+        { label: "Date", onSelect: start("event") },
+      ],
+    });
+  };
   const preferenceKey = () => { const profile_id=actingProfileId(), channel_id=activeChannelId(); return profile_id&&channel_id ? {profile_id,channel_id} : null; };
   const [notificationPreference, { refetch: refetchNotificationPreference }] = createResource(preferenceKey, key => chatApi.channelNotificationPreference(key.profile_id, key.channel_id));
   const updateNotificationPreference = async (patch: Partial<ChannelNotificationPreference>) => { const current=notificationPreference(); if (!current) return; try { await chatApi.saveChannelNotificationPreference({...current,...patch}); await refetchNotificationPreference(); } catch (e) { fail(e); } };
-  useDeepLink("channel", (id) => setActiveChannelId(id), () => setActiveChannelId(null));
+  // A thread is addressed by its OWN channel id, but it is not a peer channel and
+  // cannot be "selected": it opens as a panel over its parent (resolved below).
+  // Selecting it here would blank the pane — which is exactly what such a URL did.
+  useDeepLink("channel", (id) => { if (!threadRootOf(id)) setActiveChannelId(id); }, () => setActiveChannelId(null));
 
   // mark-read whenever the active channel (for the active profile) changes
   createEffect(() => {
@@ -195,11 +251,27 @@ export default function Chat() {
     const id = threadRootId();
     return id ? { id, p: actingProfileId() } : null;
   };
+  // Reopening a thread FROM A URL — the attention worklist links here. The root's own
+  // channel comes from the existing anchor resolver, so no new grammar and no new read.
+  useDeepLink("channel", (id) => {
+    const root = threadRootOf(id);
+    if (!root || threadRootId() === root) return;
+    chatApi.resolveSourceRef("message", root)
+      .then((ref) => { setActiveChannelId(ref.channel_id); setThreadRootId(root); })
+      .catch(fail);
+  });
   // A content thread is a real channel, linked to its root message. The root stays
   // in the parent pane (`skip_first_message`), while this resource owns only replies.
   const [threadChannel] = createResource(threadKey, (k) =>
     chatApi.ensureThreadChannel(k.id, null, k.p),
   );
+  // Reading a thread is reading a channel. Without this the replies stayed "unread"
+  // after you had them open, and the worklist row they produce would never clear.
+  createEffect(() => {
+    const thread = threadChannel();
+    const p = actingProfileId();
+    if (thread && p) chatApi.markChannelRead(thread.id, p).catch(fail);
+  });
   const threadPageKey = () => {
     const k = threadKey(); const thread = threadChannel();
     return k && thread ? { ...k, channelId: thread.id } : null;
@@ -424,7 +496,7 @@ export default function Chat() {
     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
   }
   const scheduledLabel = (row: ScheduledMessage) =>
-    new Date(row.scheduled_at * 1000).toLocaleString();
+    new Date(row.scheduled_at * 1000).toLocaleString(UI_LOCALE);
 
   function refreshScheduled() {
     const ch = activeChannelId();
@@ -717,6 +789,17 @@ export default function Chat() {
     }
   }
 
+  /** Open a file from a message the way the system opens files. A failure is said out
+   *  loud — a click that quietly does nothing is what this replaces. */
+  async function openAttachment(attachment: { id: string; file_name: string }) {
+    try {
+      const path = await chatApi.stageAttachment(attachment.id);
+      await openPath(path);
+    } catch (reason) {
+      fail(`Could not open ${attachment.file_name}: ${String(reason)}`);
+    }
+  }
+
   async function deleteAttachment(messageId: string, id: string) {
     try {
       await chatApi.removeMessageAttachment(messageId, id);
@@ -811,6 +894,9 @@ export default function Chat() {
       setNewChannelName("");
       setDirectRecipientId("");
       refetchChannels();
+      // The shell's sidebar keeps its own read of the list — tell it to re-read, or a
+      // conversation created here exists everywhere except in the list beside it.
+      bumpChannels();
       setActiveChannelId(channel.id);
     } catch (e) {
       fail(e);
@@ -860,6 +946,10 @@ export default function Chat() {
     const card = () => m.content_kind === "absence-card" ? absenceCard(m.text) : null;
     return (
       <div class="message-row">
+        {/* Avatar circle: markup only, `display:none` by default (Chat.css). It becomes
+            visible under `.theme-space-light` — the chat-first shell — so the dark theme
+            renders exactly what it rendered before. */}
+        <span class="message-avatar" aria-hidden="true">{avatarInitials(profileName(m.author_id))}</span>
         <Show
           when={editingId() === m.id}
           fallback={
@@ -875,7 +965,7 @@ export default function Chat() {
                 {(poll) => (
                   <div class="poll-card">
                     <div class="poll-question">
-                      📊 {poll().question}
+                      <Icon name="poll" size={15} /> {poll().question}
                       <Show when={poll().multiple_choice}><span class="hint"> · pick several</span></Show>
                       <Show when={poll().anonymous}><span class="hint"> · anonymous</span></Show>
                       <Show when={!pollIsOpen(poll())}><span class="hint"> · closed</span></Show>
@@ -920,16 +1010,49 @@ export default function Chat() {
                   </Show>
                 </div>
               )}</For></div></Show>
-              <Show when={(m.attachments ?? []).length}><div class="message-attachments"><For each={m.attachments ?? []}>{(attachment) => (
-                <div class="attachment-card">
-                  <Show when={attachment.mime_type.startsWith("image/")} fallback={<Show when={attachment.mime_type.startsWith("video/")} fallback={<Show when={attachment.mime_type.startsWith("audio/")} fallback={<a href={attachment.data_url} download={attachment.file_name}>📎 {attachment.file_name}</a>}><audio controls src={attachment.data_url} /></Show>}><video controls src={attachment.data_url} /></Show>}><img src={attachment.data_url} alt={attachment.file_name} /></Show>
-                  <a href={attachment.data_url} download={attachment.file_name} class="attachment-name">{attachment.file_name}</a>
-                  <Show when={attachment.upload_state !== "completed"}>
-                    <span class={`attachment-state state-${attachment.upload_state}`}>{attachment.upload_state === "failed" ? `⚠ ${attachment.error ?? "upload failed"}` : "⏳ uploading"}</span>
-                  </Show>
-                  <button class="attachment-remove" title="Remove attachment" onClick={() => deleteAttachment(attachment.message_id, attachment.id)}>×</button>
-                </div>
-              )}</For></div></Show>
+              <Show when={(m.attachments ?? []).length}><div class="message-attachments"><For each={m.attachments ?? []}>{(attachment) => {
+                /* ONE FILE, ONE NAME. The card printed the file name TWICE for anything
+                   that is not an image: once inside the paperclip link (the fallback)
+                   and again in a second link below it — which reads as two uploads.
+                   The name is stated once, beside the paperclip; a picture, a video or
+                   a sound shows itself and carries the name under the preview. */
+                const kind = () => attachment.mime_type.startsWith("image/") ? "image"
+                  : attachment.mime_type.startsWith("video/") ? "video"
+                  : attachment.mime_type.startsWith("audio/") ? "audio" : "file";
+                return (
+                  <div class="attachment-card" classList={{ [`is-${kind()}`]: true }}>
+                    <Show when={kind() === "image"}><img src={attachment.data_url} alt={attachment.file_name} /></Show>
+                    <Show when={kind() === "video"}><video controls src={attachment.data_url} /></Show>
+                    <Show when={kind() === "audio"}><audio controls src={attachment.data_url} /></Show>
+                    <div class="attachment-line">
+                      {/* THE DESKTOP HAS NO DOWNLOAD MANAGER. `<a download>` on a data
+                          URL is a download in a browser and NOTHING in WKWebView, which
+                          is why clicking a file in a message did nothing at all. On the
+                          desktop the bytes are written to a real path and handed to the
+                          system's default application; the web build keeps the anchor. */}
+                      <a
+                        class="attachment-link"
+                        href={attachment.data_url}
+                        download={attachment.file_name}
+                        onClick={(event) => {
+                          if (isWeb()) return;
+                          event.preventDefault();
+                          void openAttachment(attachment);
+                        }}
+                      >
+                        <Icon name="paperclip" size={14} />
+                        <span class="attachment-name">{attachment.file_name}</span>
+                      </a>
+                      <Show when={attachment.upload_state !== "completed"}>
+                        <span class={`attachment-state state-${attachment.upload_state}`}>{attachment.upload_state === "failed" ? `Upload failed: ${attachment.error ?? "unknown reason"}` : "Uploading…"}</span>
+                      </Show>
+                      {/* Quiet until wanted: removing somebody's file is not an act to
+                          offer as loudly as opening it. */}
+                      <button class="attachment-remove" title="Remove attachment" aria-label={`Remove ${attachment.file_name}`} onClick={() => deleteAttachment(attachment.message_id, attachment.id)}>×</button>
+                    </div>
+                  </div>
+                );
+              }}</For></div></Show>
             </>
           }
         >
@@ -987,6 +1110,11 @@ export default function Chat() {
               reply in thread
             </button>
           </Show>
+          {/* Lowercase like its neighbours: this row is a set of quiet verbs, not a
+              row of act-buttons. */}
+          <button class="ghost small" onClick={(event) => openWorkMenu(event, m)}>
+            make work
+          </button>
         </div></Show>
 
         <Show when={!inThread && m.reply_count > 0}>
@@ -1006,6 +1134,7 @@ export default function Chat() {
         </div>
       </Show>
 
+      <Show when={showLegacySidebar()}>
       <aside class="chat-sidebar">
         <div class="chat-profile-picker">
           <span class="section-label" style="padding:0">
@@ -1103,6 +1232,7 @@ export default function Chat() {
           </For>
         </div>
       </aside>
+      </Show>
 
       <section class="chat-center">
         <header class="chat-topbar">
@@ -1148,7 +1278,28 @@ export default function Chat() {
           </div>
         </Show>
 
+        {/* Without the legacy sidebar the refresh cadence would be unreachable, so it
+            rides here as a compact control next to the channel's messages. Polling still
+            runs by itself; this only says how often, plus one immediate refresh. */}
+        <Show when={!showLegacySidebar()}>
+          <div class="chat-pane-tools" aria-label="Message refresh">
+            <button class="chat-tool-btn" type="button" title="Refresh now" aria-label="Refresh now" onClick={() => { void refetchMessages(); void refetchChannels(); }}>⟳</button>
+            <For each={POLL_OPTIONS}>
+              {(opt) => (
+                <button class="chat-tool-btn" type="button" classList={{ active: pollMs() === opt.ms }} onClick={() => setPollMs(opt.ms)}>{opt.label}</button>
+              )}
+            </For>
+          </div>
+        </Show>
+
         <div class="message-pane">
+          {/* Honest empty state: with no channel selected there is nothing to say hello in. */}
+          <Show when={activeChannelId() || showLegacySidebar()} fallback={
+            <div class="chat-empty-state" role="status">
+              <h2>No conversation selected</h2>
+              <p>Choose a channel on the left, or create one with the + next to a project.</p>
+            </div>
+          }>
           <Show when={!messages.loading} fallback={<p class="hint">Loading messages…</p>}>
             <Show when={shownMessages().length} fallback={<p class="hint pad">No messages yet — say hello.</p>}>
               <Show when={canLoadOlder() || paging().error}>
@@ -1168,6 +1319,7 @@ export default function Chat() {
               </Show>
               <For each={shownMessages()}>{(m) => renderMessage(m, false)}</For>
             </Show>
+          </Show>
           </Show>
         </div>
 
@@ -1223,11 +1375,14 @@ export default function Chat() {
           </Show>
           <Show when={scheduleOpen()}>
             <div class="schedule-form">
-              <input
-                type="datetime-local"
-                aria-label="Send at"
+              {/* The day is chosen in the product's own month grid; the clock stays
+                  a wheel. The stored value is the same `YYYY-MM-DDTHH:mm` as before,
+                  and an incomplete pair writes nothing, so Schedule stays disabled. */}
+              <DateTimeField
+                label="Send at"
+                timeLabel="Send at time"
                 value={scheduleAt()}
-                onInput={(e) => setScheduleAt(e.currentTarget.value)}
+                onChange={setScheduleAt}
               />
               <button type="button" class="primary" onClick={submitSchedule} disabled={!scheduleAt()}>
                 {scheduleEditId() ? "Reschedule" : "Schedule"}
@@ -1236,6 +1391,13 @@ export default function Chat() {
             </div>
           </Show>
           <div class="composer composer-wrap">
+            {/* Real affordances only: this line states what the composer actually does.
+                Hidden by default; the light shell shows it as the prototype's hint row. */}
+            {/* The hint says what the KEYBOARD does. It used to list "📎 file · 🕒 later
+                · 📊 poll" as well — the same three acts that sit as buttons two
+                centimetres below, in emoji the operating system draws in its own
+                colours. A caption that repeats its own controls is furniture. */}
+            <div class="composer-hint" aria-hidden="true">Enter to send · Shift+Enter for a new line</div>
             <textarea
               placeholder="Message…"
               value={draft()}
@@ -1247,10 +1409,13 @@ export default function Chat() {
                 }
               }}
             />
-            <label class="attachment-button" title="Attach files">📎<input type="file" multiple onChange={(e) => { queueAttachments(e.currentTarget.files, setDraftAttachments); e.currentTarget.value = ""; }} /></label>
+            <label class="attachment-button" title="Attach files" aria-label="Attach files">
+              <Icon name="paperclip" size={17} />
+              <input type="file" multiple onChange={(e) => { queueAttachments(e.currentTarget.files, setDraftAttachments); e.currentTarget.value = ""; }} />
+            </label>
             <button class="primary" onClick={sendMessage} disabled={!draft().trim() && !draftAttachments().length}>Send</button>
-            <button type="button" class="schedule-button" title="Send later" onClick={() => { setScheduleThreadOf(null); setScheduleOpen((v) => !v); }}>🕒</button>
-            <button type="button" class="poll-button" title="Create a poll" onClick={() => setPollOpen((v) => !v)}>📊</button>
+            <button type="button" class="schedule-button" title="Send later" aria-label="Send later" onClick={() => { setScheduleThreadOf(null); setScheduleOpen((v) => !v); }}><Icon name="clock" size={17} /></button>
+            <button type="button" class="poll-button" title="Create a poll" aria-label="Create a poll" onClick={() => setPollOpen((v) => !v)}><Icon name="poll" size={17} /></button>
             <Show when={mentionCandidates(draft()).length}><div class="mention-menu"><For each={mentionCandidates(draft())}>{(profile) => <button type="button" onClick={() => selectMention("draft", profile)}>@{profile.name} <Show when={profile.kind === "team"}><span class="mention-kind">team</span></Show></button>}</For></div></Show>
             <Show when={commandEntries().length}><div class="mention-menu command-menu"><For each={commandEntries()}>{(entry) => <button type="button" onClick={() => selectCommand(entry)}>/{entry.name} <span class="hint">{entry.bot_name}{entry.description ? ` — ${entry.description}` : ""}{entry.source === "registration" ? " (declared)" : ""}</span></button>}</For></div></Show>
             <Show when={draftAttachments().length}><div class="pending-attachments">
@@ -1349,7 +1514,10 @@ export default function Chat() {
                 }
               }}
             />
-            <label class="attachment-button" title="Attach files">📎<input type="file" multiple onChange={(e) => { queueAttachments(e.currentTarget.files, setThreadAttachments); e.currentTarget.value = ""; }} /></label>
+            <label class="attachment-button" title="Attach files" aria-label="Attach files">
+              <Icon name="paperclip" size={17} />
+              <input type="file" multiple onChange={(e) => { queueAttachments(e.currentTarget.files, setThreadAttachments); e.currentTarget.value = ""; }} />
+            </label>
             <button class="primary" onClick={sendThreadReply} disabled={!threadChannel() || (!threadDraft().trim() && !threadAttachments().length)}>Reply</button>
             <button type="button" class="schedule-button" title="Schedule reply" onClick={() => { setScheduleThreadOf(threadRoot()!.id); setScheduleOpen(true); }}>🕒</button>
             <Show when={mentionCandidates(threadDraft()).length}><div class="mention-menu"><For each={mentionCandidates(threadDraft())}>{(profile) => <button type="button" onClick={() => selectMention("thread", profile)}>@{profile.name} <Show when={profile.kind === "team"}><span class="mention-kind">team</span></Show></button>}</For></div></Show>
@@ -1367,6 +1535,25 @@ export default function Chat() {
           </div>
         </Show>
       </aside>
+      </Show>
+
+      <Show when={workMenu()}>
+        {(menu) => <ContextMenu x={menu().x} y={menu().y} items={menu().items} onClose={() => setWorkMenu(null)} />}
+      </Show>
+      {/* The drawer is the SECOND step on purpose: the menu decides WHAT is being
+          made, the drawer fills it in. Nothing is written until the person submits,
+          and the created work carries the message as its source anchor. */}
+      <Show when={workDraft()}>
+        {(draft) => (
+          <WorkItemDrawer
+            kind={draft().kind}
+            source={{ entity_type: "message", entity_id: draft().messageId, channel_id: activeChannelId() ?? undefined, excerpt: draft().excerpt }}
+            projectId={activeChannel()?.project_id ?? undefined}
+            prefillTitle={draft().excerpt}
+            onClose={() => setWorkDraft(null)}
+            onCreated={() => setWorkDraft(null)}
+          />
+        )}
       </Show>
     </div>
   );

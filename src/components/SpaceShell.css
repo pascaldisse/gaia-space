@@ -1,0 +1,444 @@
+/* Communication-first shell — geometry and type scale ported from
+   FINAL_GAIA_SPACE_PROTOTYP.html (.app / .rail / .sidebar / .commandbar).
+   Every rule is nested under .space-chat-shell so the existing layouts are
+   untouched. */
+
+.space-chat-shell {
+  height: 100vh;
+  height: 100dvh;
+  display: grid;
+  grid-template-columns: 68px 304px minmax(0, 1fr);
+  overflow: hidden;
+  background: var(--wash);
+  color: var(--ink);
+}
+
+/* ── rail ─────────────────────────────────────────────────────────────── */
+.space-chat-shell .rail {
+  background: var(--rail-gradient);
+  color: var(--nav-muted);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 10px;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+.space-chat-shell .rail::-webkit-scrollbar { display: none; }
+.space-chat-shell .mark {
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  background: linear-gradient(135deg, #bdf4e9, var(--teal));
+  color: #071815;
+  font-size: 15px;
+  font-weight: 760;
+  letter-spacing: -.03em;
+  margin-bottom: 8px;
+  flex: none;
+}
+.space-chat-shell .rail-item {
+  width: 48px;
+  min-height: 48px;
+  flex: none;
+  border: 0;
+  border-radius: 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  background: transparent;
+  color: var(--nav-muted);
+  text-decoration: none;
+  position: relative;
+}
+.space-chat-shell .rail-item:hover { background: rgba(255, 255, 255, .08); color: #fff; }
+.space-chat-shell .rail-item.active { background: rgba(255, 255, 255, .13); color: #fff; }
+.space-chat-shell .rail-icon { display: grid; place-items: center; line-height: 1; }
+.space-chat-shell .rail-label { font-size: 9.5px; font-weight: 650; }
+.space-chat-shell .rail-badge {
+  position: absolute;
+  top: 4px;
+  right: 2px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  background: var(--teal);
+  color: #021f1b;
+  font-size: 11px;
+  font-weight: 760;
+  border: 2px solid var(--purple-0);
+}
+.space-chat-shell .rail-spacer { flex: 1; }
+.space-chat-shell .round-action {
+  width: 42px;
+  height: 42px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, .14);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, .1);
+  color: #fff;
+}
+.space-chat-shell .profile {
+  width: 38px;
+  height: 38px;
+  flex: none;
+  border: 0;
+  border-radius: 12px;
+  /* the person's own tile on the chrome: a neutral light chip, so it belongs to
+     whichever chrome hue is in force */
+  background: var(--nav-chip-bg);
+  color: var(--purple-0);
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  font-weight: 760;
+  position: relative;
+}
+.space-chat-shell .profile:after {
+  content: "";
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--green);
+  border: 2px solid var(--purple-0);
+  position: absolute;
+  right: -1px;
+  bottom: -1px;
+}
+
+/* ── "Mehr" panel: every registered view that is not on the rail ──────── */
+.space-chat-shell .more-backdrop { position: fixed; inset: 0; z-index: 30; background: rgba(25, 16, 30, .28); }
+.space-chat-shell .more-panel {
+  position: fixed;
+  z-index: 31;
+  left: 76px;
+  bottom: 18px;
+  width: 300px;
+  max-height: 70vh;
+  overflow-y: auto;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+  padding: 12px;
+}
+.space-chat-shell .more-panel h2 {
+  margin: 0 0 10px;
+  font-size: 12px;
+  font-weight: 720;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.space-chat-shell .more-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 34px;
+  padding: 0 9px;
+  border-radius: 9px;
+  color: var(--ink);
+  text-decoration: none;
+  font-size: 14px;
+}
+.space-chat-shell .more-item:hover { background: var(--wash-2); }
+.space-chat-shell .more-item.active { background: var(--teal-soft); color: #006b5e; font-weight: 700; }
+
+/* ── sidebar ──────────────────────────────────────────────────────────── */
+.space-chat-shell .space-sidebar {
+  background: var(--nav-sidebar-gradient);
+  color: var(--nav-text);
+  border-right: 1px solid rgba(0, 0, 0, .2);
+  padding: 18px 16px;
+  overflow-y: auto;
+  min-width: 0;
+}
+.space-chat-shell .workspace-name {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0 2px 16px;
+}
+.space-chat-shell .workspace-name strong { font-size: 21px; font-weight: 730; letter-spacing: -.035em; }
+.space-chat-shell .tiny-actions { display: flex; gap: 8px; }
+.space-chat-shell .tiny-btn {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, .16);
+  background: rgba(255, 255, 255, .08);
+  color: var(--nav-text);
+}
+.space-chat-shell .side-search {
+  height: 40px;
+  width: 100%;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, .22);
+  background: rgba(255, 255, 255, .1);
+  color: var(--nav-muted);
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  gap: 9px;
+  margin-bottom: 16px;
+  font-size: 14px;
+  font-family: inherit;
+}
+.space-chat-shell .side-search::placeholder { color: var(--nav-muted); }
+.space-chat-shell .side-search:focus { outline: none; border-color: var(--teal); }
+.space-chat-shell .side-link,
+.space-chat-shell .channel {
+  width: 100%;
+  border: 0;
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0 9px;
+  border-radius: 9px;
+  color: var(--nav-muted);
+  background: transparent;
+  text-align: left;
+  text-decoration: none;
+  font-size: 14px;
+  letter-spacing: -.01em;
+}
+.space-chat-shell .side-link:hover,
+.space-chat-shell .channel:hover { background: rgba(255, 255, 255, .09); }
+.space-chat-shell .side-link strong,
+.space-chat-shell .channel.unread { color: #fff; font-weight: 680; }
+.space-chat-shell .side-link.active,
+.space-chat-shell .channel.active { background: var(--nav-active-bg); color: var(--nav-active-ink); font-weight: 700; }
+.space-chat-shell .side-link.active strong,
+.space-chat-shell .channel.active strong,
+.space-chat-shell .channel.active .hash { color: var(--nav-active-ink); }
+.space-chat-shell .side-link .count,
+.space-chat-shell .channel .count {
+  margin-left: auto;
+  min-width: 21px;
+  height: 21px;
+  padding: 0 5px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  background: var(--teal);
+  color: #031f1b;
+  font-size: 11px;
+  font-weight: 760;
+}
+/* A count of 0 carries NO tone (statusTone.ts::metricTone): a filter with nothing
+   behind it right now is still a real filter, it just makes no claim. */
+.space-chat-shell .side-link .count.zero {
+  background: transparent;
+  color: rgba(255, 255, 255, .38);
+  font-weight: 600;
+}
+.space-chat-shell .side-icon { display: grid; place-items: center; width: 16px; color: inherit; }
+.space-chat-shell .section {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(255, 255, 255, .1);
+}
+.space-chat-shell .section-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 9px 7px;
+  color: var(--nav-faint);
+  font-size: 11px;
+  font-weight: 720;
+  text-transform: uppercase;
+  letter-spacing: .09em;
+}
+.space-chat-shell .channel .hash { color: var(--nav-faint); font-weight: 680; }
+.space-chat-shell .side-empty { padding: 0 9px; color: var(--nav-muted); font-size: 13px; opacity: .8; }
+
+/* The mode body: the part of the sidebar that follows the rail. Structure only —
+   the sidebar's identity (plum, width, type, search) is defined above and does not
+   change with the mode. */
+.space-chat-shell .side-mode { display: flex; flex-direction: column; min-width: 0; }
+.space-chat-shell .side-mode .side-link .side-icon { flex: none; }
+.space-chat-shell .side-mode > .section:first-child { margin-top: 14px; }
+
+/* ── main column ──────────────────────────────────────────────────────── */
+.space-chat-shell .space-main {
+  display: grid;
+  grid-template-rows: 58px minmax(0, 1fr);
+  min-width: 0;
+  /* A grid ITEM's automatic minimum size is its content, so this column grew as
+     tall as the tallest view and the shell (overflow:hidden) clipped whatever
+     fell past the window — a full-height view could not scroll its own panes,
+     and its cards ran off the bottom edge. With the minimum released,
+     `.space-content` below is the scroller it was written to be. */
+  min-height: 0;
+  background: var(--wash);
+}
+.space-chat-shell .commandbar {
+  height: 58px;
+  display: grid;
+  grid-template-columns: minmax(320px, 720px) auto;
+  gap: 18px;
+  align-items: center;
+  padding: 10px 24px;
+  background: var(--nav-top-gradient);
+  border-bottom: 1px solid rgba(0, 0, 0, .2);
+}
+.space-chat-shell .command-search {
+  height: 38px;
+  width: 100%;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, .22);
+  background: rgba(255, 255, 255, .18);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 13px;
+  color: rgba(255, 255, 255, .9);
+  font-size: 14px;
+  text-align: left;
+  font-family: inherit;
+}
+.space-chat-shell .command-search:hover { border-color: var(--teal); }
+.space-chat-shell .top-actions { justify-self: end; display: flex; gap: 10px; }
+.space-chat-shell .top-actions .btn {
+  border: 1px solid rgba(255, 255, 255, .22);
+  border-radius: 11px;
+  background: rgba(255, 255, 255, .12);
+  color: #fff;
+  padding: 9px 12px;
+  font-size: 13px;
+  font-weight: 650;
+}
+.space-chat-shell .top-actions .btn.primary { border-color: transparent; background: var(--teal); color: #021f1b; }
+
+/* The view itself. Existing views bring their own (dark) surfaces; new
+   chat-first views inherit --wash from here. */
+.space-chat-shell .space-content { min-height: 0; min-width: 0; overflow: auto; display: flex; flex-direction: column; }
+.space-chat-shell .space-content > * { flex: 1 1 auto; min-height: 0; }
+
+/* Narrow windows: the sidebar narrows before it ever disappears. A channel list
+   that silently vanishes leaves no way back to the channels, so it only folds
+   away on genuinely tiny windows. */
+@media (max-width: 1180px) {
+  .space-chat-shell { grid-template-columns: 68px 248px minmax(0, 1fr); }
+  .space-chat-shell.no-sidebar { grid-template-columns: 68px minmax(0, 1fr); }
+}
+@media (max-width: 980px) {
+  .space-chat-shell { grid-template-columns: 68px 210px minmax(0, 1fr); }
+  .space-chat-shell.no-sidebar { grid-template-columns: 68px minmax(0, 1fr); }
+}
+@media (max-width: 720px) {
+  .space-chat-shell { grid-template-columns: 68px minmax(0, 1fr); }
+  .space-chat-shell .space-sidebar { display: none; }
+}
+
+/* ── placeholder views (Home / Development) ───────────────────────────── */
+.space-placeholder { padding: 28px; color: var(--ink); background: var(--wash); }
+.space-placeholder .surface {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 18px;
+  box-shadow: var(--shadow);
+  max-width: 720px;
+}
+.space-placeholder h1 { margin: 0 0 6px; font-size: 27px; line-height: 1.12; letter-spacing: -.045em; font-weight: 720; }
+.space-placeholder .kicker {
+  margin-bottom: 5px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 680;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+}
+.space-placeholder p { color: var(--muted); line-height: 1.52; margin: 0; font-size: 14px; }
+
+/* A rail label must never be cut mid-word ("Entwicklun"); it shrinks instead. */
+/* The label box is the RAIL's inner width (64px), not the 48px pill it sits under:
+   the pill keeps its designed size while the word gets the whole column. One line,
+   never hyphenated — a rail label broken into "De-vel-op-men-t" is not a label. */
+.space-chat-shell .rail-label {
+  width: 64px;
+  max-width: none;
+  margin-inline: -8px;
+  padding-inline: 0;
+  font-size: 8.5px;
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  overflow-wrap: normal;
+  hyphens: manual;
+}
+
+/* The section `+` is a real button now: it opens the "new conversation" drawer that
+   used to be a permanent form in Chat's own sidebar. */
+.space-chat-shell .section-add {
+  background: none; border: 0; padding: 0 2px; cursor: pointer;
+  color: var(--nav-faint); font-size: 14px; font-weight: 700; line-height: 1; opacity: .85;
+}
+.space-chat-shell .section-add:hover { opacity: 1; color: #fff; }
+
+/* "Acting as" — desktop-only chat identity, moved here from Chat's sidebar. */
+.space-chat-shell .side-acting { display: block; margin: 10px 9px 14px; }
+.space-chat-shell .side-acting select {
+  /* The light shell sets `color-scheme: light` on every field so date pickers and
+     native menus match the paper. This field does not sit on paper — it sits on the
+     plum sidebar, and under a light colour-scheme the platform paints a select's
+     VALUE in its own dark ink, ignoring our `color`. Hence dark text on a dark
+     surface. The sidebar is dark chrome, so it says so. */
+  color-scheme: dark;
+  width: 100%; appearance: none; -webkit-appearance: none;
+  min-height: var(--pillctl-h, 36px);
+  border-radius: var(--pillctl-r, 999px);
+  background: rgba(255,255,255,.08); border: 1px solid transparent;
+  color: var(--nav-text); font-size: 13px; padding: 0 30px 0 13px;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8' fill='none'><path d='M1 1.5 6 6.5 11 1.5' stroke='%23ffffff' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+  background-repeat: no-repeat; background-position: right 12px center;
+}
+.space-chat-shell .side-acting select:hover { border-color: rgba(255,255,255,.22); }
+.space-chat-shell .side-acting select:focus-visible { outline: none; border-color: var(--teal, #00bfa6); }
+
+/* Home owns no objects, so it gets no sidebar and the page takes the width back.
+   Structure only — never scoped to a theme, or the dark shells lose the column. */
+.space-chat-shell.no-sidebar { grid-template-columns: 68px minmax(0, 1fr); }
+
+/* A failed delete must be visible somewhere that survives the channel disappearing. */
+.space-chat-shell .space-shell-error {
+  position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%);
+  z-index: 95; margin: 0; padding: 8px 14px;
+  border: 1px solid var(--danger, #c2384a); border-radius: 10px;
+  background: var(--paper, #fff); color: var(--danger, #c2384a); font-size: 0.9rem;
+}
+
+/* A drop target says YES before you let go — the same rule the library's shelves
+   follow, so the gesture reads the same wherever it is used. */
+.space-chat-shell .channel.drop-into,
+.space-chat-shell .side-link.drop-into,
+.space-chat-shell .section-head.drop-into {
+  outline: 2px dashed var(--teal, #00bfa6);
+  outline-offset: -2px;
+  border-radius: 8px;
+}
+/* What just happened, said once and then gone. */
+.space-chat-shell .space-shell-note {
+  position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%);
+  z-index: 95; margin: 0; padding: 8px 14px;
+  border: 1px solid var(--line, #e5ddd3); border-radius: 10px;
+  background: var(--paper, #fff); color: var(--ink, #1f2328); font-size: 0.9rem;
+  box-shadow: 0 10px 30px rgba(31, 35, 40, .16);
+}

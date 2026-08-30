@@ -1,3 +1,4 @@
+import { UI_LOCALE } from "../calendar";
 import { For, Show, createResource, createSignal } from "solid-js";
 import { editSavedServer } from "../components/ServerConnect";
 import { Icon } from "../components/Icon";
@@ -7,9 +8,12 @@ import { calendarFeedsApi, calendarsApi } from "../api/calendar-feeds";
 import { permanentTokensApi, twoFactorApi } from "../api/auth";
 import { platformApi } from "../api/platform";
 import { humanError, profileId } from "../session";
+import PageHeader from "../components/PageHeader";
+import { PALETTES, palette, setPalette } from "../theme";
+import { PillSelect } from "../components/controls";
 import "./Settings.css";
 
-const when = (seconds: number | null) => seconds ? new Date(seconds * 1000).toLocaleString() : "never";
+const when = (seconds: number | null) => seconds ? new Date(seconds * 1000).toLocaleString(UI_LOCALE) : "never";
 
 /** Read-only external calendars (Settings → Connected calendars): a pasted
  *  secret iCal address, synced server-side, shown in Calendar as its own
@@ -65,7 +69,7 @@ const [calendarId, setCalendarId] = createSignal("");
     <form class="feed-connect" onSubmit={connect}>
       <input placeholder="Label, e.g. My Gmail" aria-label="Calendar label" value={label()} onInput={e => setLabel(e.currentTarget.value)} />
       <input placeholder="https://calendar.google.com/calendar/ical/…/basic.ics" aria-label="Calendar address" value={url()} onInput={e => setUrl(e.currentTarget.value)} />
-      <select aria-label="Calendar destination" value={calendarId()} onChange={e => setCalendarId(e.currentTarget.value)}><option value="">Unassigned</option><For each={calendars() ?? []}>{calendar => <option value={calendar.id}>{calendar.name}</option>}</For></select>
+      <PillSelect label="Calendar destination" value={calendarId()} onChange={setCalendarId}><option value="">Unassigned</option><For each={calendars() ?? []}>{calendar => <option value={calendar.id}>{calendar.name}</option>}</For></PillSelect>
       <button type="submit" class="primary" disabled={busy()}>Connect</button>
     </form>
   </div>;
@@ -99,20 +103,42 @@ return <Show when={organization() && settings()}><section class="settings-card">
 export default function Settings() {
   const allViews = () => NAV_GROUPS.flatMap(group => group.views);
   return <section class="personal-view settings-view">
-    <header>
-      <div><h1>Settings</h1><p>Navigation and layout preferences for your account.</p></div>
-    </header>
+    <PageHeader icon="settings" title="Settings" subline="Preferences for your account" />
 
     <div class="settings-card">
       <h2>Navigation layout</h2>
       <label class="settings-option">
+        <input type="radio" name="nav-layout" checked={navLayout() === "chat-first"} onChange={() => setNavLayout("chat-first")} />
+        <span><strong>Chat-first</strong> — rail + channel sidebar, communication-first shell (default)</span>
+      </label>
+      <label class="settings-option">
         <input type="radio" name="nav-layout" checked={navLayout() === "grouped"} onChange={() => setNavLayout("grouped")} />
-        <span><strong>Grouped</strong> — eight destinations, detail views as sub-tabs (default)</span>
+        <span><strong>Grouped</strong> — eight destinations, detail views as sub-tabs</span>
       </label>
       <label class="settings-option">
         <input type="radio" name="nav-layout" checked={navLayout() === "flat"} onChange={() => setNavLayout("flat")} />
         <span><strong>Flat</strong> — every view as its own top-level entry</span>
       </label>
+    </div>
+
+    {/* COLOUR SCHEME. Three palettes, one token contract — see src/theme.ts.
+        Each option shows the actual paper, canvas and accent it will produce, so
+        the choice is made by looking, not by reading a word. */}
+    <div class="settings-card">
+      <h2>Colour scheme</h2>
+      <p class="settings-hint">Applies to the whole application at once. Teal, amber and red keep their meaning in every scheme.</p>
+      <div class="palette-choices">
+        <For each={PALETTES}>{option => (
+          <label class="palette-choice" classList={{ selected: palette() === option.id }}>
+            <input type="radio" name="palette" checked={palette() === option.id} onChange={() => setPalette(option.id)} />
+            <span class={`palette-swatch swatch-${option.id}`} aria-hidden="true">
+              <span class="palette-swatch-rail" />
+              <span class="palette-swatch-card"><span class="palette-swatch-accent" /></span>
+            </span>
+            <span class="palette-choice-text"><strong>{option.label}</strong><em class="settings-sub">{option.hint}</em></span>
+          </label>
+        )}</For>
+      </div>
     </div>
 
     <div class="settings-card">
@@ -142,9 +168,10 @@ export default function Settings() {
 
     <div class="settings-card">
       <h2>Start view</h2>
-      <select value={defaultView()} onChange={event => setDefaultView(event.currentTarget.value)}>
+      {/* The card heading already says "Start view"; the pill carries the value. */}
+      <PillSelect label="Start view" value={defaultView()} onChange={setDefaultView}>
         <For each={allViews()}>{view => <option value={view}>{view}</option>}</For>
-      </select>
+      </PillSelect>
     </div>
   </section>;
 }

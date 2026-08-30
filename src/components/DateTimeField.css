@@ -1,0 +1,23 @@
+/* Two halves of one statement: they sit on one line and share the control height,
+   so the pair reads as a single field rather than as two unrelated boxes. Self-scoped
+   with local fallbacks, like DateField — it is used in drawers, cards and views. */
+.date-time-field { display: inline-flex; align-items: center; gap: 6px; min-width: 0; flex-wrap: wrap; }
+
+.date-time-clock {
+  /* THE BUTTON RULE (spaceTheme.css): one height, one type size, everywhere. */
+  min-height: var(--btn-height, 37px);
+  padding: 0 var(--btn-pad-x, 12px);
+  border: 1px solid var(--ctl-border, var(--line, #e5ddd3));
+  border-radius: var(--pillctl-r, 999px);
+  background: var(--ctl-bg, var(--paper, #fff));
+  color: var(--ink, var(--text-strong, #1f2328));
+  font-family: var(--font-head, ui-sans-serif, -apple-system, "Segoe UI", Roboto, sans-serif);
+  font-size: var(--btn-font-size, 13px);
+  font-weight: var(--btn-font-weight, 650);
+  line-height: 1;
+  width: auto;
+  flex: 0 0 auto;
+}
+.date-time-clock:hover { border-color: var(--accent, var(--teal, #00bfa6)); }
+.date-time-clock:focus-visible { outline: 2px solid var(--accent, var(--teal, #00bfa6)); outline-offset: 2px; }
+.date-time-clock:disabled { opacity: 0.55; cursor: not-allowed; }

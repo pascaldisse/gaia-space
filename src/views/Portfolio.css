@@ -1,14 +1,6 @@
 .pf-view { height: 100%; overflow: auto; padding: var(--view-pad-y) var(--view-pad-x) var(--view-pad-bottom); max-width: var(--view-canvas); }
 
 /* ── portfolio summary strip ── real project/issue counts, fills the top band ── */
-.pf-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin: 0 0 20px; }
-.pf-metric { display: grid; gap: 4px; padding: 14px 16px; border: 1px solid var(--surface-border); border-radius: 13px; background: var(--surface); text-align: left; }
-.pf-metric-num { font-family: var(--font-head); font-size: 24px; font-weight: 700; line-height: 1; color: var(--text-strong); }
-.pf-metric-num.sm { font-size: 16px; }
-.pf-metric-lbl { font-size: 12px; color: #9297a3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pf-metric-link { cursor: pointer; transition: border-color .14s ease, background .14s ease; }
-.pf-metric-link:hover { border-color: var(--accent); background: var(--surface-hover); }
-.pf-metric-link .pf-metric-num.sm { color: var(--accent-text, var(--accent)); }
 /* Header identity now comes from the shared WorkspaceHeader component. */
 .pf-new { flex: none; }
 .pf-muted { color: var(--text-dim); }

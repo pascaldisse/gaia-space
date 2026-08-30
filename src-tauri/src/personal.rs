@@ -40,6 +40,10 @@ pub struct Todo {
     /// How the body is meant to be read: `text` (verbatim) or `markdown`.
     #[serde(default = "default_content_kind")]
     pub content_kind: String,
+    /// What KIND of work this is, out of [`TODO_CATEGORIES`]. None = uncategorised,
+    /// which is the NORMAL case: most tasks are just tasks.
+    #[serde(default)]
+    pub category: Option<String>,
 }
 #[derive(Debug, Deserialize)]
 pub struct TodoInput {
@@ -58,9 +62,34 @@ pub struct TodoInput {
     pub assignee_ids: Vec<String>,
     #[serde(default = "default_content_kind")]
     pub content_kind: String,
+    /// See [`Todo::category`]. Absent in a payload = uncategorised.
+    #[serde(default)]
+    pub category: Option<String>,
 }
 fn default_content_kind() -> String {
     "text".into()
+}
+/// The ONE list of task categories, named ONCE. A category says what kind of work a task
+/// is; it is deliberately a CLOSED, short list rather than a free text field, because a
+/// free field immediately yields five spellings of the same word ("Review", "review",
+/// "reviewing", …) and then nothing can be grouped or counted. The frontend mirror lives
+/// in `src/api/personal.ts` (`TODO_CATEGORIES`) and must stay identical.
+pub const TODO_CATEGORIES: [&str; 5] = ["create", "improve", "review", "decide", "admin"];
+/// Blank category normalizes to NULL — no empty-string variant ever reaches storage — and
+/// anything outside [`TODO_CATEGORIES`] is REFUSED instead of silently dropped: a client
+/// sending a category the server does not know is a bug that must be visible.
+fn normalized_category(category: Option<String>) -> Result<Option<String>> {
+    let Some(value) = category else {
+        return Ok(None);
+    };
+    let trimmed = value.trim().to_ascii_lowercase();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    if !TODO_CATEGORIES.contains(&trimmed.as_str()) {
+        return Err(format!("Unknown to-do category: {trimmed}"));
+    }
+    Ok(Some(trimmed))
 }
 /// Only two bodies exist; anything else is a client bug, not a new format.
 fn normalized_content_kind(kind: &str) -> Result<String> {
@@ -83,6 +112,7 @@ fn read_todo(row: &rusqlite::Row<'_>) -> rusqlite::Result<Todo> {
         notes: row.get(8)?,
         assignee_ids: Vec::new(),
         content_kind: row.get(9)?,
+        category: row.get(10)?,
     })
 }
 /// Blank notes normalize to NULL: no empty-string variant ever reaches storage.
@@ -148,13 +178,13 @@ fn assignee_is_active(c: &Connection, profile_id: &str) -> Result<bool> {
 fn normalized_project_id(project_id: Option<String>) -> Option<String> {
     project_id.and_then(|id| (!id.trim().is_empty()).then(|| id.trim().to_string()))
 }
-fn project_member_on(c: &Connection, project_id: &str, profile_id: &str) -> Result<bool> {
+pub(crate) fn project_member_on(
+    c: &Connection,
+    project_id: &str,
+    profile_id: &str,
+) -> Result<bool> {
     err(c.query_row("SELECT EXISTS(SELECT 1 FROM projects p WHERE p.id=?1 AND (p.created_by=?2 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?2)))", params![project_id, profile_id], |row| row.get(0)))
 }
-/// One visibility definition for both a project's task list and Team Tasks. Project
-/// leads are informational only and deliberately do not appear in this predicate.
-const PROJECT_TODO_VISIBILITY: &str = "(t.profile_id=:profile_id OR EXISTS(SELECT 1 FROM projects p WHERE p.id=t.project_id AND (p.created_by=:profile_id OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=:profile_id))) OR EXISTS(SELECT 1 FROM todo_assignees a WHERE a.todo_id=t.id AND a.profile_id=:profile_id))";
-const TODO_COLUMNS: &str = "t.id,t.profile_id,t.content,t.due_date,t.project_id,t.done,t.source_entity_type,t.source_entity_id,t.notes,t.content_kind";
 pub fn project_member_by(project_id: &str, profile_id: &str) -> Result<bool> {
     project_member_on(&db::conn()?, project_id, profile_id)
 }
@@ -268,7 +298,7 @@ pub fn remove_project_member(project_id: String, member_id: String) -> Result<Ve
     project_member_ids(project_id)
 }
 fn todo_on(c: &Connection, id: &str) -> Result<Option<Todo>> {
-    let todo = err(c.query_row("SELECT id,profile_id,content,due_date,project_id,done,source_entity_type,source_entity_id,notes,content_kind FROM todos WHERE id=?1", [id], read_todo).optional())?;
+    let todo = err(c.query_row("SELECT id,profile_id,content,due_date,project_id,done,source_entity_type,source_entity_id,notes,content_kind,category FROM todos WHERE id=?1", [id], read_todo).optional())?;
     match todo {
         Some(mut todo) => {
             todo.assignee_ids = assignees_on(c, id)?;
@@ -280,7 +310,7 @@ fn todo_on(c: &Connection, id: &str) -> Result<Option<Todo>> {
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_todos(profile_id: String, include_done: Option<bool>) -> Result<Vec<Todo>> {
     let c = db::conn()?;
-    let mut statement = err(c.prepare("SELECT t.id,t.profile_id,t.content,t.due_date,t.project_id,t.done,t.source_entity_type,t.source_entity_id,t.notes,t.content_kind FROM todos t WHERE (?2=1 OR t.done=0) AND (t.profile_id=?1 OR (t.project_id IS NOT NULL AND (EXISTS(SELECT 1 FROM projects p WHERE p.id=t.project_id AND (p.created_by=?1 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?1))) OR EXISTS(SELECT 1 FROM todo_assignees a WHERE a.todo_id=t.id AND a.profile_id=?1)))) ORDER BY t.done,t.due_date IS NULL,t.due_date,t.created_at"))?;
+    let mut statement = err(c.prepare("SELECT t.id,t.profile_id,t.content,t.due_date,t.project_id,t.done,t.source_entity_type,t.source_entity_id,t.notes,t.content_kind,t.category FROM todos t WHERE (?2=1 OR t.done=0) AND (t.profile_id=?1 OR (t.project_id IS NOT NULL AND (EXISTS(SELECT 1 FROM projects p WHERE p.id=t.project_id AND (p.created_by=?1 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?1))) OR EXISTS(SELECT 1 FROM todo_assignees a WHERE a.todo_id=t.id AND a.profile_id=?1)))) ORDER BY t.done,t.due_date IS NULL,t.due_date,t.created_at"))?;
     let mut todos = err(statement.query_map(
         params![profile_id, include_done.unwrap_or(false)],
         read_todo,
@@ -309,10 +339,75 @@ fn create_todo_on(c: &mut Connection, input: TodoInput) -> Result<Todo> {
     let project_id = normalized_project_id(input.project_id);
     let tx = err(c.transaction())?;
     let content_kind = normalized_content_kind(&input.content_kind)?;
-    err(tx.execute("INSERT INTO todos(id,profile_id,content,due_date,project_id,done,source_entity_type,source_entity_id,notes,content_kind) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)", params![id, input.profile_id, input.content.trim(), input.due_date, project_id, input.done, input.source_entity_type, input.source_entity_id, normalized_notes(input.notes), content_kind]))?;
+    let category = normalized_category(input.category)?;
+    err(tx.execute("INSERT INTO todos(id,profile_id,content,due_date,project_id,done,source_entity_type,source_entity_id,notes,content_kind,category) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)", params![id, input.profile_id, input.content.trim(), input.due_date, project_id, input.done, input.source_entity_type, input.source_entity_id, normalized_notes(input.notes), content_kind, category]))?;
     replace_assignees(&tx, &id, project_id.as_deref(), &input.assignee_ids)?;
     err(tx.commit())?;
-    todo_on(c, &id)?.ok_or_else(|| "Created todo was not found".into())
+    let todo = todo_on(c, &id)?.ok_or_else(|| "Created todo was not found".to_string())?;
+    // After the row is durable, never inside the transaction: a feed problem must
+    // not undo a person's task (same law as issues::issue_event).
+    if let Err(error) = emit_todo_activity_on(c, &todo, crate::events::TODO_CREATED) {
+        eprintln!("todo.created fan-out failed: {error}");
+    }
+    Ok(todo)
+}
+
+/// Display name of a profile, for the organisation feed's actor line. A missing
+/// profile yields no name rather than an id masquerading as one.
+fn display_name_on(c: &Connection, profile_id: &str) -> Result<Option<String>> {
+    err(c
+        .query_row(
+            "SELECT display_name FROM profiles WHERE id=?1",
+            [profile_id],
+            |row| row.get::<_, String>(0),
+        )
+        .optional())
+}
+
+/// ORGANISATION NEWS, not work: "somebody created/completed a task". It goes to
+/// the people who share the task — its project members and its assignees — and
+/// never to the person who acted. A private, unassigned to-do has no audience
+/// and therefore emits nothing at all.
+fn emit_todo_activity_on(c: &Connection, todo: &Todo, event_type: &str) -> Result<()> {
+    let mut recipients: Vec<String> = Vec::new();
+    if let Some(project_id) = todo.project_id.as_deref() {
+        let mut statement = err(c.prepare("SELECT created_by FROM projects WHERE id=?1 AND created_by IS NOT NULL UNION SELECT profile_id FROM project_members WHERE project_id=?1"))?;
+        let rows = err(statement.query_map([project_id], |row| row.get::<_, String>(0)))?;
+        recipients = rows
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(|error| error.to_string())?;
+    }
+    recipients.extend(todo.assignee_ids.iter().cloned());
+    recipients.retain(|id| id != &todo.profile_id);
+    recipients.sort();
+    recipients.dedup();
+    if recipients.is_empty() {
+        return Ok(());
+    }
+    let actor = display_name_on(c, &todo.profile_id)?;
+    let context = match todo.project_id.as_deref() {
+        Some(project_id) => err(c
+            .query_row("SELECT name FROM projects WHERE id=?1", [project_id], |row| {
+                row.get::<_, String>(0)
+            })
+            .optional())?,
+        None => None,
+    };
+    let body = actor.map(|name| crate::events::actor_body(&name, context.as_deref()));
+    fan_out_notification_on(
+        c,
+        NotificationFanout {
+            recipients,
+            event_type,
+            title: todo.content.trim(),
+            body: body.as_deref(),
+            entity_type: "todo",
+            entity_id: &todo.id,
+            target_type: todo.project_id.as_deref().map(|_| "project"),
+            target_id: todo.project_id.as_deref(),
+        },
+    )?;
+    Ok(())
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn update_todo(todo: Todo) -> Result<Todo> {
@@ -327,7 +422,8 @@ fn update_todo_on(c: &mut Connection, todo: Todo) -> Result<Todo> {
     let project_id = normalized_project_id(todo.project_id.clone());
     let tx = err(c.transaction())?;
     let content_kind = normalized_content_kind(&todo.content_kind)?;
-    let updated = err(tx.execute("UPDATE todos SET profile_id=?2,content=?3,due_date=?4,project_id=?5,done=?6,source_entity_type=?7,source_entity_id=?8,notes=?9,content_kind=?10,updated_at=unixepoch() WHERE id=?1", params![todo.id, todo.profile_id, todo.content.trim(), todo.due_date, project_id, todo.done, todo.source_entity_type, todo.source_entity_id, normalized_notes(todo.notes.clone()), content_kind]))?;
+    let category = normalized_category(todo.category.clone())?;
+    let updated = err(tx.execute("UPDATE todos SET profile_id=?2,content=?3,due_date=?4,project_id=?5,done=?6,source_entity_type=?7,source_entity_id=?8,notes=?9,content_kind=?10,category=?11,updated_at=unixepoch() WHERE id=?1", params![todo.id, todo.profile_id, todo.content.trim(), todo.due_date, project_id, todo.done, todo.source_entity_type, todo.source_entity_id, normalized_notes(todo.notes.clone()), content_kind, category]))?;
     if updated == 0 {
         return Err("Todo not found".into());
     }
@@ -367,22 +463,105 @@ pub fn list_project_todos(
     include_done: Option<bool>,
 ) -> Result<Vec<Todo>> {
     let c = db::conn()?;
-    visible_project_todos_on(&c, Some(&project_id), &profile_id, include_done.unwrap_or(false))
+    list_project_todos_on(&c, &project_id, &profile_id, include_done.unwrap_or(false))
 }
-
-/// Every project todo visible to the caller, for the cross-project Team Tasks view.
-/// `PROJECT_TODO_VISIBILITY` is shared with `list_project_todos` so the reads cannot drift.
+/// The ONE project-todo visibility rule, written once. `{p}` is the placeholder for the
+/// bound parameter holding the reading profile, so per-project and cross-project reads
+/// share the identical predicate and can never drift apart.
+///
+/// A member (or the project owner) sees EVERY member's todos in that project — the
+/// membership branch does not mention the row's owner. Someone outside the project sees
+/// only rows they own or are assigned to. `projects.lead_id` appears nowhere: the lead is
+/// informational and grants no extra reach.
+const PROJECT_TODO_VISIBILITY: &str = "(t.profile_id={p} OR EXISTS(SELECT 1 FROM projects p WHERE p.id=t.project_id AND (p.created_by={p} OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id={p}))) OR EXISTS(SELECT 1 FROM todo_assignees a WHERE a.todo_id=t.id AND a.profile_id={p}))";
+const TODO_COLUMNS: &str = "t.id,t.profile_id,t.content,t.due_date,t.project_id,t.done,t.source_entity_type,t.source_entity_id,t.notes,t.content_kind,t.category";
+const TODO_ORDER: &str = "ORDER BY t.done,t.due_date IS NULL,t.due_date,t.created_at";
+fn project_todo_visibility(profile_param: &str) -> String {
+    PROJECT_TODO_VISIBILITY.replace("{p}", profile_param)
+}
+/// Todos of ONE project, as seen by `profile_id`. See [`PROJECT_TODO_VISIBILITY`].
+pub(crate) fn list_project_todos_on(
+    c: &Connection,
+    project_id: &str,
+    profile_id: &str,
+    include_done: bool,
+) -> Result<Vec<Todo>> {
+    let sql = format!(
+        "SELECT {TODO_COLUMNS} FROM todos t WHERE t.project_id=?1 AND (?3=1 OR t.done=0) AND {} {TODO_ORDER}",
+        project_todo_visibility("?2")
+    );
+    let mut statement = err(c.prepare(&sql))?;
+    let mut todos =
+        err(statement.query_map(params![project_id, profile_id, include_done], read_todo))?
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(|error| error.to_string())?;
+    drop(statement);
+    for todo in &mut todos {
+        todo.assignee_ids = assignees_on(c, &todo.id)?;
+    }
+    Ok(todos)
+}
+/// Cross-project counterpart of `list_project_todos`: OTHER people's running work, in
+/// every project this profile can see, in one list. Project-less personal todos are
+/// excluded — this is the team surface, not "my tasks".
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_team_todos(profile_id: String, include_done: Option<bool>) -> Result<Vec<Todo>> {
     let c = db::conn()?;
-    visible_project_todos_on(&c, None, &profile_id, include_done.unwrap_or(false))
+    list_team_todos_on(&c, &profile_id, include_done.unwrap_or(false))
+}
+pub(crate) fn list_team_todos_on(
+    c: &Connection,
+    profile_id: &str,
+    include_done: bool,
+) -> Result<Vec<Todo>> {
+    let sql = format!(
+        "SELECT {TODO_COLUMNS} FROM todos t WHERE t.project_id IS NOT NULL AND (?2=1 OR t.done=0) AND {} {TODO_ORDER}",
+        project_todo_visibility("?1")
+    );
+    let mut statement = err(c.prepare(&sql))?;
+    let mut todos = err(statement.query_map(params![profile_id, include_done], read_todo))?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())?;
+    drop(statement);
+    // Same per-row assignee fill as `list_project_todos`: consistency over cleverness.
+    for todo in &mut todos {
+        todo.assignee_ids = assignees_on(c, &todo.id)?;
+    }
+    Ok(todos)
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn delete_todo(id: String) -> Result<()> {
+pub fn delete_todo(id: String, actor_id: String) -> Result<()> {
     let mut c = db::conn()?;
-    delete_todo_on(&mut c, id)
+    delete_todo_on(&mut c, id, &actor_id)
 }
-fn delete_todo_on(c: &mut Connection, id: String) -> Result<()> {
+/// Who may destroy a task: the person who wrote it, the owner of the project it hangs
+/// in, or an admin — and nobody else. Being *assigned* a shared task is a claim on
+/// your attention, not ownership of the row: an assignee completes or unassigns, but a
+/// task somebody else created never disappears out from under them.
+fn delete_todo_on(c: &mut Connection, id: String, actor_id: &str) -> Result<()> {
+    let row: Option<(String, Option<String>)> = err(c
+        .query_row(
+            "SELECT profile_id,project_id FROM todos WHERE id=?1",
+            [&id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional())?;
+    let (creator, project_id) = row.ok_or_else(|| "Todo not found".to_string())?;
+    if creator != actor_id {
+        let project_owned = match project_id.as_deref() {
+            Some(project) => err(c.query_row(
+                "SELECT EXISTS(SELECT 1 FROM projects WHERE id=?1 AND created_by=?2)",
+                params![project, actor_id],
+                |r| r.get::<_, bool>(0),
+            ))?,
+            None => false,
+        };
+        if !project_owned && !crate::platform::is_admin_on(c, actor_id)? {
+            return Err(
+                "only the author, the project owner or an admin can delete this todo".into(),
+            );
+        }
+    }
     let tx = err(c.transaction())?;
     err(tx.execute("DELETE FROM todo_assignees WHERE todo_id=?1", [&id]))?;
     if err(tx.execute("DELETE FROM todos WHERE id=?1", [id]))? == 0 {
@@ -396,6 +575,14 @@ fn delete_todo_on(c: &mut Connection, id: String) -> Result<()> {
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn set_todo_completion(id: String, done: bool) -> Result<Todo> {
     let mut c = db::conn()?;
+    set_todo_completion_on(&mut c, &id, done)
+}
+fn set_todo_completion_on(c: &mut Connection, id: &str, done: bool) -> Result<Todo> {
+    // The 0 → 1 EDGE is the news, not the state: ticking a task that is already
+    // done must not announce it a second time.
+    let was_done: Option<bool> = err(c
+        .query_row("SELECT done FROM todos WHERE id=?1", [id], |row| row.get(0))
+        .optional())?;
     let tx = err(c.transaction())?;
     if err(tx.execute(
         "UPDATE todos SET done=?2,updated_at=unixepoch() WHERE id=?1",
@@ -405,7 +592,13 @@ pub fn set_todo_completion(id: String, done: bool) -> Result<Todo> {
         return Err("Todo not found".into());
     }
     err(tx.commit())?;
-    todo_on(&c, &id)?.ok_or_else(|| "Todo not found".into())
+    let todo = todo_on(c, id)?.ok_or_else(|| "Todo not found".to_string())?;
+    if done && was_done == Some(false) {
+        if let Err(error) = emit_todo_activity_on(c, &todo, crate::events::TODO_COMPLETED) {
+            eprintln!("todo.completed fan-out failed: {error}");
+        }
+    }
+    Ok(todo)
 }
 
 /// Move a to-do's due date forward. An overdue task rolls over to today first, so
@@ -469,6 +662,10 @@ pub fn convert_todo_to_issue(
         due_date: todo.due_date.clone(),
         priority: None,
         archived: Some(false),
+        // The conversion inherits the to-do's origin: a task raised in a channel that
+        // becomes a ticket was still raised by that message.
+        source_entity_type: todo.source_entity_type.clone(),
+        source_entity_id: todo.source_entity_id.clone(),
     })?;
     let c = db::conn()?;
     err(c.execute(
@@ -1919,15 +2116,9 @@ mod tests {
         assert!(save_calendar_options_on(&c, empty).is_err());
     }
 
-    fn list_project_todos_on(c: &Connection, project_id: &str, profile_id: &str, include_done: bool) -> Vec<Todo> {
-        visible_project_todos_on(c, Some(project_id), profile_id, include_done).unwrap()
-    }
-    fn list_team_todos_on(c: &Connection, profile_id: &str, include_done: bool) -> Vec<Todo> {
-        visible_project_todos_on(c, None, profile_id, include_done).unwrap()
-    }
     // Mirror of list_todos SQL against a raw Connection for unit testing without an AppHandle.
     fn list_todos_on(c: &Connection, profile_id: &str, include_done: bool) -> Vec<Todo> {
-        let mut statement = c.prepare("SELECT t.id,t.profile_id,t.content,t.due_date,t.project_id,t.done,t.source_entity_type,t.source_entity_id,t.notes,t.content_kind FROM todos t WHERE (?2=1 OR t.done=0) AND (t.profile_id=?1 OR (t.project_id IS NOT NULL AND (EXISTS(SELECT 1 FROM projects p WHERE p.id=t.project_id AND (p.created_by=?1 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?1))) OR EXISTS(SELECT 1 FROM todo_assignees a WHERE a.todo_id=t.id AND a.profile_id=?1)))) ORDER BY t.done,t.due_date IS NULL,t.due_date,t.created_at").unwrap();
+        let mut statement = c.prepare("SELECT t.id,t.profile_id,t.content,t.due_date,t.project_id,t.done,t.source_entity_type,t.source_entity_id,t.notes,t.content_kind,t.category FROM todos t WHERE (?2=1 OR t.done=0) AND (t.profile_id=?1 OR (t.project_id IS NOT NULL AND (EXISTS(SELECT 1 FROM projects p WHERE p.id=t.project_id AND (p.created_by=?1 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?1))) OR EXISTS(SELECT 1 FROM todo_assignees a WHERE a.todo_id=t.id AND a.profile_id=?1)))) ORDER BY t.done,t.due_date IS NULL,t.due_date,t.created_at").unwrap();
         let mut todos: Vec<Todo> = statement
             .query_map(params![profile_id, include_done], read_todo)
             .unwrap()
@@ -1952,24 +2143,116 @@ mod tests {
             source_entity_id: None,
             assignee_ids: assignees.iter().map(|x| x.to_string()).collect(),
             content_kind: default_content_kind(),
+            category: None,
         }
     }
+    /// Project work is a SHARED surface, and naming a lead changes nothing about it.
+    /// A plain member who is not the lead still reads every member's project todos and
+    /// may create a todo assigned to somebody else. If this test ever fails, some gate
+    /// started reading `projects.lead_id` — that is the bug, not this assertion.
+    /// The cross-project team surface. It answers "what is everyone running?" over every
+    /// project the reader belongs to — and stops exactly at the projects they do not.
+    #[test]
+    fn team_todos_span_projects_the_reader_belongs_to_and_no_others() {
+        let mut c = conn();
+        // Second project: 'p' is NOT on it, 'q' owns it.
+        c.execute("INSERT INTO projects(id,name,key,created_by,created_at) VALUES('other','Other','OTH','q',1)", []).unwrap();
+        c.execute(
+            "INSERT INTO project_members(project_id,profile_id) VALUES('other','r')",
+            [],
+        )
+        .unwrap();
+
+        // 'r' owns one todo in each project; 'q' owns a done one; 'p' keeps a personal todo.
+        create_todo_on(&mut c, todo_input("shared", "r", &[])).unwrap();
+        let mut in_other = todo_input("elsewhere", "r", &[]);
+        in_other.project_id = Some("other".into());
+        create_todo_on(&mut c, in_other).unwrap();
+        let mut finished = todo_input("finished", "q", &[]);
+        finished.done = true;
+        create_todo_on(&mut c, finished).unwrap();
+        let mut personal = todo_input("personal", "p", &[]);
+        personal.project_id = None;
+        create_todo_on(&mut c, personal).unwrap();
+
+        let ids = |profile: &str, include_done: bool| -> Vec<String> {
+            list_team_todos_on(&c, profile, include_done)
+                .unwrap()
+                .into_iter()
+                .map(|t| t.id)
+                .collect()
+        };
+        // 'p' is a member of `project` only: it sees another member's todo there, never
+        // the other project's work, and never its own project-less personal todo.
+        assert_eq!(ids("p", false), vec!["shared".to_string()]);
+        // 'r' belongs to both projects and sees both.
+        assert_eq!(
+            ids("r", false),
+            vec!["shared".to_string(), "elsewhere".to_string()]
+        );
+        // include_done is off by default and shows completed work when asked.
+        assert!(!ids("p", false).contains(&"finished".to_string()));
+        assert!(ids("p", true).contains(&"finished".to_string()));
+        // Someone in no project at all sees nothing.
+        c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('outsider','out','Outsider',1)", []).unwrap();
+        assert!(ids("outsider", true).is_empty());
+
+        // Refactor safety: both reads run the SAME predicate, so for a single project
+        // they must agree exactly — the day they diverge, this fails.
+        for profile in ["p", "q", "r", "outsider"] {
+            let per_project: Vec<String> = list_project_todos_on(&c, "project", profile, true)
+                .unwrap()
+                .into_iter()
+                .map(|t| t.id)
+                .collect();
+            let team: Vec<String> = list_team_todos_on(&c, profile, true)
+                .unwrap()
+                .into_iter()
+                .filter(|t| t.project_id.as_deref() == Some("project"))
+                .map(|t| t.id)
+                .collect();
+            assert_eq!(per_project, team, "predicates drifted for {profile}");
+        }
+    }
+
     #[test]
     fn every_member_reads_all_project_todos_and_may_assign_others_regardless_of_lead() {
         let mut c = conn();
-        c.execute("INSERT INTO todos(id,profile_id,content,project_id,done) VALUES('owner','p','Owner task','project',0),('member','r','Member task','project',0),('done','p','Done task','project',1)", []).unwrap();
-        let per_project = list_project_todos_on(&c, "project", "q", false);
-        let team = list_team_todos_on(&c, "q", false);
-        assert_eq!(per_project.iter().map(|todo| todo.id.as_str()).collect::<Vec<_>>(), team.iter().map(|todo| todo.id.as_str()).collect::<Vec<_>>(), "project and aggregate reads share one visibility rule");
-        let before = create_todo_on(&mut c, todo_input("before-lead", "q", &["r"])).unwrap();
-        assert_eq!(before.assignee_ids, vec!["r".to_string()]);
+        // 'p' owns the project; 'q' and 'r' are members. Make 'p' the lead.
         crate::platform::set_project_lead_on(&c, "project", Some("p")).unwrap();
-        let after = create_todo_on(&mut c, todo_input("after-lead", "q", &["r"])).unwrap();
-        assert_eq!(after.assignee_ids, vec!["r".to_string()]);
-        let visible = list_team_todos_on(&c, "q", false);
-        for id in ["owner", "member", "before-lead", "after-lead"] {
-            assert!(visible.iter().any(|todo| todo.id == id), "non-lead member retains full task visibility after lead assignment");
+        c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('outsider','out','Outsider',1)", []).unwrap();
+
+        create_todo_on(&mut c, todo_input("owner-task", "p", &["p"])).unwrap();
+        // A non-lead member creates work FOR SOMEBODY ELSE: allowed, no lead involved.
+        let delegated = create_todo_on(&mut c, todo_input("delegated", "q", &["r"])).unwrap();
+        assert_eq!(delegated.assignee_ids, vec!["r".to_string()]);
+
+        // Every member sees every member's project todos — lead, owner, or neither.
+        for member in ["p", "q", "r"] {
+            let ids: Vec<String> = list_project_todos_on(&c, "project", member, false)
+                .unwrap()
+                .into_iter()
+                .map(|t| t.id)
+                .collect();
+            assert_eq!(
+                ids,
+                vec!["owner-task".to_string(), "delegated".to_string()],
+                "{member} must see all project work"
+            );
         }
+        // Someone outside the project sees none of it.
+        assert!(list_project_todos_on(&c, "project", "outsider", false)
+            .unwrap()
+            .is_empty());
+
+        // Clearing the lead changes nobody's reach either.
+        crate::platform::set_project_lead_on(&c, "project", None).unwrap();
+        assert_eq!(
+            list_project_todos_on(&c, "project", "r", false)
+                .unwrap()
+                .len(),
+            2
+        );
     }
 
     #[test]
@@ -2022,7 +2305,7 @@ mod tests {
             .unwrap(),
             2
         );
-        delete_todo_on(&mut c, "t1".into()).unwrap();
+        delete_todo_on(&mut c, "t1".into(), "p").unwrap();
         assert_eq!(
             c.query_row::<i64, _, _>("SELECT count(*) FROM todo_assignees", [], |r| r.get(0))
                 .unwrap(),
@@ -2083,6 +2366,146 @@ mod tests {
             .contains("assignment requires a project todo"));
         assert!(!list_todos_on(&c, "q", true).iter().any(|t| t.id == "t1"));
     }
+    /// A category is OPTIONAL and comes out of a CLOSED list. The four facts that matter:
+    /// a known value survives the round trip, an unknown one is REFUSED (never silently
+    /// dropped, or the screen would lie about what was saved), no category stays no
+    /// category, and a blank string becomes NULL so "" never reaches storage.
+    #[test]
+    fn a_todo_category_is_optional_closed_and_never_silently_swallowed() {
+        let mut c = conn();
+        let mut input = todo_input("t-cat", "p", &[]);
+        input.category = Some("review".into());
+        let created = create_todo_on(&mut c, input).unwrap();
+        assert_eq!(created.category.as_deref(), Some("review"));
+        // Read paths agree: single fetch and list both carry it.
+        assert_eq!(
+            todo_on(&c, "t-cat").unwrap().unwrap().category.as_deref(),
+            Some("review")
+        );
+        assert_eq!(
+            list_todos_on(&c, "p", true)
+                .iter()
+                .find(|t| t.id == "t-cat")
+                .and_then(|t| t.category.clone())
+                .as_deref(),
+            Some("review")
+        );
+        // Unknown value: an error, not a shrug.
+        let mut invalid = created.clone();
+        invalid.category = Some("urgent".into());
+        assert!(update_todo_on(&mut c, invalid)
+            .unwrap_err()
+            .contains("Unknown to-do category"));
+        assert_eq!(
+            todo_on(&c, "t-cat").unwrap().unwrap().category.as_deref(),
+            Some("review"),
+            "a refused write changes nothing"
+        );
+        // Blank normalizes to NULL, never to "".
+        let mut blanked = created.clone();
+        blanked.category = Some("   ".into());
+        assert_eq!(update_todo_on(&mut c, blanked).unwrap().category, None);
+        let stored: Option<String> = c
+            .query_row("SELECT category FROM todos WHERE id='t-cat'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(stored, None, "no empty string in storage");
+        // No category at all is the normal case and stays that way.
+        let plain = create_todo_on(&mut c, todo_input("t-plain", "p", &[])).unwrap();
+        assert_eq!(plain.category, None);
+        let mut invalid_create = todo_input("t-bad", "p", &[]);
+        invalid_create.category = Some("Review!".into());
+        assert!(create_todo_on(&mut c, invalid_create).is_err());
+    }
+
+    /// ORGANISATION NEWS, not work. The feed was half-blind without these two
+    /// events: a task appearing and a task finishing are the commonest facts in
+    /// a workspace and nothing emitted them.
+    #[test]
+    fn todo_lifecycle_announces_itself_to_the_people_who_share_the_task() {
+        let mut c = conn();
+        let todo = create_todo_on(
+            &mut c,
+            TodoInput {
+                id: Some("t-shared".into()),
+                profile_id: "p".into(),
+                content: "Ship the feed".into(),
+                due_date: None,
+                project_id: Some("project".into()),
+                done: false,
+                source_entity_type: None,
+                source_entity_id: None,
+                notes: None,
+                assignee_ids: vec!["q".into()],
+                content_kind: "text".into(),
+                category: None,
+            },
+        )
+        .unwrap();
+        fn recipients(c: &Connection, event: &str) -> Vec<String> {
+            let mut statement = c
+                .prepare("SELECT recipient_id FROM notifications WHERE event_type=?1 ORDER BY recipient_id")
+                .unwrap();
+            let rows = statement
+                .query_map([event], |row| row.get::<_, String>(0))
+                .unwrap()
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .unwrap();
+            rows
+        }
+        // The project's people hear it; the person who acted never notifies herself.
+        assert_eq!(recipients(&c, "todo.created"), vec!["q".to_string(), "r".to_string()]);
+        // The actor is stated, by the documented convention, never guessed.
+        let body: Option<String> = c
+            .query_row(
+                "SELECT body FROM notifications WHERE event_type='todo.created' LIMIT 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(body.as_deref(), Some("by Person · Project"));
+
+        // Completion is the 0 → 1 EDGE: announced once, not on every re-tick.
+        set_todo_completion_on(&mut c, &todo.id, true).unwrap();
+        set_todo_completion_on(&mut c, &todo.id, true).unwrap();
+        assert_eq!(recipients(&c, "todo.completed"), vec!["q".to_string(), "r".to_string()]);
+    }
+
+    /// A private to-do has no audience, so it makes no noise: news needs someone
+    /// for whom it is news.
+    #[test]
+    fn a_private_todo_announces_nothing() {
+        let mut c = conn();
+        let todo = create_todo_on(
+            &mut c,
+            TodoInput {
+                id: Some("t-private".into()),
+                profile_id: "p".into(),
+                content: "Think".into(),
+                due_date: None,
+                project_id: None,
+                done: false,
+                source_entity_type: None,
+                source_entity_id: None,
+                notes: None,
+                assignee_ids: vec![],
+                content_kind: "text".into(),
+                category: None,
+            },
+        )
+        .unwrap();
+        set_todo_completion_on(&mut c, &todo.id, true).unwrap();
+        let count: i64 = c
+            .query_row(
+                "SELECT count(*) FROM notifications WHERE event_type LIKE 'todo.%'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 0);
+    }
+
     #[test]
     fn todo_anchor_roundtrips() {
         let c = conn();
@@ -2600,6 +3023,46 @@ mod tests {
             "one-off meetings are unchanged: {items:?}"
         );
     }
+    /// Deletion is an owner's act. The author may destroy their own task and the owner
+    /// of the project it hangs in may clear it out, but the person it was ASSIGNED to
+    /// only carries it — a shared task never disappears under its author's hands.
+    #[test]
+    fn only_the_author_the_project_owner_or_an_admin_deletes_a_todo() {
+        let mut c = conn();
+        c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('boss','boss','Boss',1)", []).unwrap();
+        c.execute("INSERT INTO users(id,username,password_hash,display_name,profile_id,role,active,created_at) VALUES('u1','boss','x','Boss','boss','admin',1,1)", []).unwrap();
+        create_todo_on(&mut c, todo_input("shared", "q", &["r"])).unwrap();
+
+        // The assignee is refused, and the refusal leaves the task and its junction rows.
+        let refused = delete_todo_on(&mut c, "shared".into(), "r").unwrap_err();
+        assert!(refused.contains("author, the project owner or an admin"), "{refused}");
+        assert!(todo_on(&c, "shared").unwrap().is_some());
+        assert_eq!(
+            c.query_row::<i64, _, _>(
+                "SELECT count(*) FROM todo_assignees WHERE todo_id='shared'",
+                [],
+                |r| r.get(0)
+            )
+            .unwrap(),
+            1,
+            "a refused delete must not touch a single row"
+        );
+        // An unrelated profile is refused for the same reason.
+        assert!(delete_todo_on(&mut c, "shared".into(), "boss-impostor").is_err());
+        // The project owner ('p' created the project) may clear it out.
+        delete_todo_on(&mut c, "shared".into(), "p").unwrap();
+        assert!(todo_on(&c, "shared").unwrap().is_none());
+
+        // The author of a task deletes their own; an admin keeps the break-glass path.
+        create_todo_on(&mut c, todo_input("mine", "q", &[])).unwrap();
+        delete_todo_on(&mut c, "mine".into(), "q").unwrap();
+        create_todo_on(&mut c, todo_input("theirs", "q", &[])).unwrap();
+        delete_todo_on(&mut c, "theirs".into(), "boss").unwrap();
+        assert_eq!(
+            delete_todo_on(&mut c, "ghost".into(), "p").unwrap_err(),
+            "Todo not found"
+        );
+    }
 }
 
 /// Ranked content-search payload. Kept distinct from `GotoResult`: Goto is quick
@@ -2865,4 +3328,5 @@ mod dashboard_preference_tests {
             "Vacation"
         );
     }
+
 }
