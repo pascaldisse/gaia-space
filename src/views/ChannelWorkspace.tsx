@@ -307,15 +307,13 @@ export default function ChannelWorkspace(): JSX.Element {
                 <div class="cw-stat"><span>Replies needed</span><strong>{repliesNeeded()}</strong></div>
               </section>
 
-              <section class="cw-card">
-                <h2>Create from message</h2>
-                {/* SEAM: explanatory in stage 2. `onCreateWorkItem` is wired to the
-                    WorkItemDrawer (parallel lane) without touching this markup — the drawer
-                    opens from a message's action row, these rows only teach the mapping. */}
-                <div class="cw-stat"><span>Regular work</span><span class="cw-tag teal">Task</span></div>
-                <div class="cw-stat"><span>Bug or feature</span><span class="cw-tag">Ticket</span></div>
-                <div class="cw-stat"><span>Date</span><span class="cw-tag amber">Calendar</span></div>
-              </section>
+              {/* REMOVED: a "Create from message" card that taught a mapping
+                  (Task / Ticket / Calendar) for a function the product does not have.
+                  Its comment claimed the WorkItemDrawer was wired to it; the drawer is
+                  imported by nothing but its own test. A card that advertises an absent
+                  feature is worse than an empty column, because the reader spends time
+                  looking for the affordance. When the drawer lands, the act belongs on
+                  the MESSAGE's action row, not in a side card. */}
 
               <section class="cw-card">
                 <h2>Team</h2>

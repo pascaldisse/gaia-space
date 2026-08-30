@@ -16,7 +16,7 @@ import { platformApi } from "../api/platform";
 import { currentUser, isWeb, profileId, profiles, reloadProfiles, projects, reloadProjects, workspaceId, workspaces } from "../session";
 import { attentionCount, attentionFilterCount, asActivityFilter, setAttentionProfile, type ActivityFilter } from "../attention";
 import { isViewAvailable, linkEntity, linkProps, navigate, route, type Route } from "../router";
-import { railModeOfRoute, railModeOfView, viewLabel, type RailMode } from "../nav";
+import { NAV_GROUPS, hiddenGroups, railModeOfRoute, railModeOfView, viewLabel, type RailMode } from "../nav";
 
 /**
  * Communication-first shell (GAIA Space redesign, stage 1).
@@ -402,9 +402,24 @@ export default function SpaceShell(props: {
       .sort((a, b) => (a.name ?? "").localeCompare(b.name ?? ""));
 
   /** "More" is everything else, still built from the LIVE registry — minus whatever a
-   *  rail mode already owns, so nothing is offered twice and nothing is lost. */
+   *  rail mode already owns, so nothing is offered twice and nothing is lost.
+   *
+   *  AND minus what the person hid. `Settings -> Visible destinations` writes
+   *  `hiddenGroups`, which until now only the older grouped/flat layouts read: in the
+   *  shipped chat-first shell all eight checkboxes did nothing at all. A preference
+   *  that cannot be observed is worse than a missing one. As Settings promises, a
+   *  hidden destination stays reachable by URL and from Go to — only this list drops it. */
+  const hiddenViewNames = () => {
+    const hidden = new Set(hiddenGroups());
+    return new Set(NAV_GROUPS.filter((group) => hidden.has(group.id)).flatMap((group) => group.views));
+  };
   const moreViews = () =>
-    props.views.filter((view) => railModeOfView(view.name) === "more" && matches(viewLabel(view.name)));
+    props.views.filter(
+      (view) =>
+        railModeOfView(view.name) === "more" &&
+        !hiddenViewNames().has(view.name) &&
+        matches(viewLabel(view.name)),
+    );
 
   /** Where a rail mode lands. Chats opens the newest conversation, not a naked sidebar;
    *  with no channels at all it falls back to Chat's own (honest) empty surface. */
@@ -526,7 +541,12 @@ export default function SpaceShell(props: {
           <span class="rail-label">More</span>
         </button>
         <div class="rail-spacer" />
-        <button class="round-action" aria-label="Create new" title="Create new" onClick={props.onOpenSearch}>
+        {/* A PLUS MUST CREATE. This button said "Create new", drew a plus, and opened
+            the search — the one thing a plus never means. It now opens the same
+            composer the sidebar's section `+` and the global `New message` open,
+            organisation-scoped. Search keeps its own two addresses (the command bar
+            and the sidebar's magnifier), both of which say "search". */}
+        <button class="round-action" aria-label="New message" title="New message" onClick={() => setNewChannelFor("")}>
           <Icon name="plus" size={20} />
         </button>
         <a class="profile" title={meLabel()} aria-label={meLabel()} {...linkProps({ view: "Settings" })}>

@@ -132,6 +132,8 @@ export default function Meetings() {
      to create). Offering "create" to someone whose filter simply hid the thing is
      the failure EmptyState exists to prevent. */
   const narrowed = () => !!query().trim() || !showHistory();
+  /** The empty state owns the primary while the list is empty and unfiltered. */
+  const showsEmptyPrimary = () => !meetings.loading && !visibleMeetings().length && !(liveMeetings().length && narrowed());
   const openComposer = () => { setError(""); setNotice(""); setComposing(true); };
   const clearFilters = () => { setQuery(""); setShowHistory(true); };
   const setFormField = <K extends keyof MeetingForm>(field: K, value: MeetingForm[K]) => setForm({ ...form(), [field]: value });
@@ -292,9 +294,18 @@ export default function Meetings() {
       </>}
     />
     {/* Both acts rank themselves in the one row: New meeting makes something, Open
-       calendar is the quieter way out to the day view. */}
+       calendar is the quieter way out to the day view.
+       ONE ACTION, ONE PLACE: while the empty state below is already offering
+       "New meeting", the row does not draw it a second time — the same guard eleven
+       other surfaces carry (see `showsEmptyPrimary` in Todo.tsx). */}
+    {/* ONE ACT, ONE HANDLE: the empty state's primary below carries the same
+       `meeting-new` class, because it IS the same act — only drawn where the eye
+       already is. Anything addressing "the New meeting button" keeps working
+       wherever the guard puts it. */}
     <nav class="page-actionbar" aria-label="Meeting actions">
-      <button type="button" class="primary meeting-new" onClick={openComposer}>New meeting</button>
+      <Show when={!showsEmptyPrimary()}>
+        <button type="button" class="primary meeting-new" onClick={openComposer}>New meeting</button>
+      </Show>
       <GhostPill class="meeting-calendar-link" {...linkProps({ view: "Calendar" })}>Open calendar</GhostPill>
     </nav>
     <Show when={error()}><p class="meeting-error" role="alert">{error()}</p></Show>
@@ -335,7 +346,7 @@ export default function Meetings() {
             fallback={<EmptyState
               title="No meetings yet"
               hint="Schedule one to manage its attendance, room and recurrence here."
-              actions={<button type="button" class="primary" onClick={openComposer}>New meeting</button>}
+              actions={<button type="button" class="primary meeting-new" onClick={openComposer}>New meeting</button>}
             />}
           >
             <EmptyState
