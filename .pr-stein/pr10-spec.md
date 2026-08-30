@@ -72,11 +72,11 @@ This table **is** the completeness obligation: 09b touches exactly these entitie
 | `channels` `:1284` | **soft** (`archived`; `chat.rs:352` list has no archived filter today ∴ 09b adds the filter with the flag) | **no owner column** ∴ authorization is **membership/role**, not `created_by`: `channel_members` `:1285` + project role | `archive_channel_authorized(id, &actor)` (actor must be channel member with admin role; signature carries actor, never payload) | CASCADE: `channel_notification_preferences :1064`, `private_feeds :1072`, `channel_subscriptions :1189`, `document_discussions :1200`, `message_drafts :1669`, `channel_typing :1678`, `scheduled_messages :1693`, `message_polls :1723`, `thread_channels :1776-1777`. `無指定` (would block a hard delete): `channel_members :1285`, `messages :1286`, `read_state :1288`, `reviews :1289`, `review_discussions :1291`, `meetings :1299`. SET NULL: `locations.channel_id :1175`. ∴ **hard delete is forbidden here**; soft only | n/a (no owner column) — instead: actor with no membership row is denied | ellipsis + consequence sentence naming message retention | 4: non-member denied · member-non-admin denied · archived channel still holds its messages · absent from channel list |
 | `todos` `:1249` | **hard** | `profile_id` **NOT NULL** ∴ no legacy-NULL class exists for todos | `delete_todo_owned(id, &owner)` replacing `delete_todo(id)` (`personal.rs:381`, no ownership check today) | `todo_assignees.todo_id` CASCADE `:1311` (duplicate DDL `:1320`) — sole child; after delete assignee rows = 0 | n/a — column is NOT NULL; a migration-era row without a profile is impossible, asserted once | two-step `DeleteButton` + consequence sentence | 4: non-owner denied · owner deletes · `todo_assignees` count 0 · `PRAGMA foreign_key_check` empty |
 | `documents` `:1295` | **soft** (`archived`; `documents.rs:177/323` currently unfiltered ∴ 09b adds the filter) | `created_by` NULL-able | `archive_document_owned(id, &owner)` / `rename_document_owned(id, &owner, title)`; grant-based access stays under `DocumentAccessWrite` (atom 09) | CASCADE: `document_permissions :1297`, `document_favorites :1124`, `document_discussions :1199`, `document_files :1910`. `無指定`: `doc_versions.document_id :1296`, `blog_posts.draft_id :1476` ∴ both block a hard delete; **history container ∴ soft** | archive **denied**, surfaced as unowned | ellipsis + consequence sentence (versions retained) | 4: non-owner denied · NULL-owner denied · soft row present but unlisted · `doc_versions` rows intact after archive |
-| `document_folders` `:1294` | **hard**, only when empty | **no owner column** ∴ authorization = `document_folder_permissions.folder_id` (CASCADE `:1386`, duplicate DDL `:1392`) grant of admin level, in the signature | `delete_folder_authorized(id, &actor)`; refuses unless the folder has zero child folders and zero documents | CASCADE: `document_folder_permissions :1386`, `kb_book_owners :1785`. `無指定`: self-parent `document_folders.parent_id :1294`, `documents.folder_id :1295` ∴ SQLite **blocks** a non-empty delete; the domain fn must therefore pre-check and return a named error, never rely on the FK error text | n/a (no owner column) — actor without an admin grant denied | ellipsis + consequence sentence; non-empty case is an explicit error surface, never a silent no-op | 5: non-grantee denied · non-empty folder refused with named error · empty folder deleted · permission rows 0 after delete · `foreign_key_check` empty |
+| `document_folders` `:1294` | **hard**, only when empty | **no owner column** ∴ authorization follows measured `FOLDER_WRITE_SCOPE` (`documents.rs:916`, called by `document_folder_writable_by :941`): my-docs actor owns `container_id`; project **read** may admit members but project **write** admits only project creator **or server-derived `GlobalAdmin`**; kb actor owns book **or** holds a profile/team `document_folder_permissions` grant with `access_level='editor'` keyed to `f.container_id` (the KB book), never an arbitrary descendant folder (the only grant values are `viewer|editor`, `db.rs:1386,1392`) | `delete_folder_authorized(id, &actor, is_global_admin)`; `actor` and server-derived `is_global_admin` enter the domain signature, never client-stamped. Refuses unless FOLDER_WRITE_SCOPE admits actor and folder has zero child folders/documents | CASCADE: `document_folder_permissions :1386`, `kb_book_owners :1785`. `無指定`: self-parent `document_folders.parent_id :1294`, `documents.folder_id :1295` ∴ SQLite **blocks** a non-empty delete; the domain fn must therefore pre-check and return a named error, never rely on the FK error text | n/a (no owner column) — viewer/no-scope actor denied; no nonexistent “admin grant” exists | ellipsis + consequence sentence; non-empty case is an explicit error surface, never a silent no-op | 14: my-docs owner allowed · my-docs non-owner denied · project owner allowed · project server-derived GlobalAdmin allowed · project non-owner/non-admin denied · kb book-owner allowed · kb profile-editor allowed · kb team-editor allowed · kb profile-viewer denied · kb team-viewer denied · non-empty folder named-error · empty folder deleted · permission rows 0 · `foreign_key_check` empty |
 | `issues` `:1271` | **soft** (`archived` — already the only entity with a real filter: `issues.rs:460`, default `i.archived=0`, `include_archived` opt-out `:431-434,:468-480`) | `created_by` NULL-able | `archive_issue_owned(id, &owner)`; the existing default-filter behaviour is preserved, not re-invented | CASCADE: `issue_assignees :1324`, `issue_tracker_links :1018`, `issue_comments :1030`, `issue_activities :1039`, `issue_attachments :1051`. `無指定`: `issue_board_positions :1277`, `issue_tags :1279`, `checklists :1280`, `time_tracking_entries :1282`, `issue_links :1283` ∴ hard delete blocked; **soft** | archive **denied**, surfaced as unowned | ellipsis + consequence sentence | 3: non-owner denied · NULL-owner denied · archived issue absent from default list yet returned with `include_archived` |
 | `doc_versions` `:1296` | **no direct delete** — governed only as a child of `documents` | `created_by` NULL-able | none introduced; explicitly frozen with this reason | it is itself a leaf: no table references `doc_versions` (真) | n/a — no delete path exists | n/a | 1: no `delete_doc_version*` symbol exists after 09b (static assertion) |
 
-Total 09b deletion tests = **25** (4+4+4+4+5+3+1). A row whose test count is not met is not accepted. Note: `rename_*` functions do **not** exist anywhere on head (真) ∴ every rename in this contract is new surface, subject to the same `*_owned`/`*_authorized` rule as delete.
+Total 09b deletion tests = **34** (4+4+4+4+14+3+1). A row whose test count is not met is not accepted. Note: `rename_*` functions do **not** exist anywhere on head (真) ∴ every rename in this contract is new surface, subject to the same `*_owned`/`*_authorized` rule as delete.
 
 Falsifiers (each independent of the cascade code): non-owner delete denied; NULL-owner row hits its tested defined outcome; after a parent delete, child row count is 0 **and** `PRAGMA foreign_key_check` is empty; soft-delete entities assert the row still exists **and** is absent from every list query.
 
@@ -101,111 +101,9 @@ Falsifiers (each independent of the cascade code): non-owner delete denied; NULL
 | 12a `feat(convergence-chat-tasks)` | 04-11,09b | chat, composer, task list/drawer views/CSS | chat+task flows compose 06a/06b/06c primitives; measured DOM/computed-style assertion per surface (no "looks right") |
 | 12b `feat(convergence-knowledge-calendar-meetings)` | 04-11,09b,12a | knowledge, calendar, meeting views/CSS | same, for those three surfaces; forbidden-geometry scan green |
 | 12c `feat(convergence-settings)` | 04-11,09b,12a | settings views/CSS | proper controls only, no raw JSON/file editor; max-measure is a token, width asserted at ≥2 viewport widths |
-| 13 `test(pr10-independent-falsification)` | 01-12c | only tests/evidence ledger | exact gates + adverse/live matrix; no feature code; **plus the mechanical scope-traceability gate**: parse `4b6529d:.pr-stein/live-ui.md` §1-§12 (including §3a and §3b), extract every named UI surface, and assert programmatically against the surface→atom table below that (i) every surface has **exactly one** owning atom, (ii) no surface is unowned, (iii) no surface is claimed by two atoms, (iv) the parsed surface count equals the asserted row count. Eyeballing does not discharge this; a split that drops a surface must fail this gate |
-
-## Scope traceability — `live-ui.md` surface → owning atom (mechanical, gated by atom 13)
-
-Source: `4b6529d:.pr-stein/live-ui.md` §1-§12 including §3a and §3b (真, every §-heading and every named surface read). Asserted row count = **97**; per-atom distribution 12a 15 · 05 12 · 06b 11 · 12b 9 · 11 8 · 10 7 · 06a 7 · 12c 5 · 09 5 · 08 5 · 09b 4 · 07 4 · 04 3 · 06c 2 (sums to 97 by an independent path). Every surface has **exactly one** owning atom; ownership means that atom lands the surface or fails its own proof. Atom 13 parses this table plus `live-ui.md` and fails on any missing, unowned, or doubly-owned surface and on any count mismatch — the prose intent ledger cannot detect those.
-
-| # | § | surface | owning atom |
-|---|---|---|---|
-| 1 | 1 | icon rail | 05 |
-| 2 | 1 | channel sidebar | 05 |
-| 3 | 1 | command bar | 05 |
-| 4 | 1 | rail More drawer | 05 |
-| 5 | 1 | rail create `+` / help button | 05 |
-| 6 | 1 | rail unread/attention badge | 11 |
-| 7 | 1 | sidebar section head `+` (New channel in scope) | 05 |
-| 8 | 1 | conversation search field | 05 |
-| 9 | 1 | org switcher | 05 |
-| 10 | 1 | nav/canvas palette axes | 04 |
-| 11 | 1 | semantic colour roles teal/amber/red | 04 |
-| 12 | 2 | Home view | 11 |
-| 13 | 2 | PageHeader (kicker/icon tile/title/subtitle) | 06b |
-| 14 | 2 | header metric pills | 11 |
-| 15 | 2 | `Your month` section head | 11 |
-| 16 | 2 | month grid | 06a |
-| 17 | 2 | day panel | 11 |
-| 18 | 2 | month stepper | 06a |
-| 19 | 2 | Home day-panel empty state | 06b |
-| 20 | 3 | chat channel view | 12a |
-| 21 | 3 | channel topbar | 12a |
-| 22 | 3 | pinned/mentions filters | 12a |
-| 23 | 3 | Notifications control | 11 |
-| 24 | 3 | refresh cadence row | 12a |
-| 25 | 3 | chat message list | 12a |
-| 26 | 3 | message row | 12a |
-| 27 | 3 | composer | 12a |
-| 28 | 3 | composer hint line | 12a |
-| 29 | 3 | composer tool cluster | 12a |
-| 30 | 3 | message hover action row | 08 |
-| 31 | 3 | reaction chips | 12a |
-| 32 | 3a | `make work` menu (Task/Ticket/Date) | 08 |
-| 33 | 3a | task tile context menu | 06c |
-| 34 | 3b | WorkItemDrawer | 08 |
-| 35 | 3b | drawer Title/Description fields | 08 |
-| 36 | 3b | Owner field | 07 |
-| 37 | 3b | Contributors field + inline empty state | 07 |
-| 38 | 3b | `Due` date trigger | 06a |
-| 39 | 3b | `Source` quoted block | 08 |
-| 40 | 3b | drawer footer Cancel / Create task | 06b |
-| 41 | 4 | DateField portal popup | 06a |
-| 42 | 4 | picker month head | 06a |
-| 43 | 4 | `Today` button | 06a |
-| 44 | 4 | dark-palette portal inheritance case | 06a |
-| 45 | 5 | To-Do view | 12a |
-| 46 | 5 | To-Do header metrics | 11 |
-| 47 | 5 | To-Do action bar (New task / Show done) | 12a |
-| 48 | 5 | `Open work` section head + drag hint | 12a |
-| 49 | 5 | deadline band heading + count chip | 12a |
-| 50 | 5 | task tile | 12a |
-| 51 | 5 | TaskRowEdit inline editor | 07 |
-| 52 | 5 | TaskRowEdit footer | 09b |
-| 53 | 5 | task menu (Open/Postpone/Delete task...) | 06c |
-| 54 | 5 | drag-to-file task to sidebar project | 07 |
-| 55 | 6 | ConfirmDialog | 06b |
-| 56 | 6 | PromptDialog | 06b |
-| 57 | 6 | DeleteButton (two-step) | 09b |
-| 58 | 6 | destructive ellipsis wording | 09b |
-| 59 | 7 | Knowledge library view | 12b |
-| 60 | 7 | knowledge action bar | 09 |
-| 61 | 7 | SHELVES folder cards | 09 |
-| 62 | 7 | DOCUMENTS cards | 09 |
-| 63 | 7 | document card menu (Open/Archive/Delete...) | 09b |
-| 64 | 7 | drag-to-file document to shelf | 09 |
-| 65 | 7 | download / upload path | 09 |
-| 66 | 8 | Calendar view | 12b |
-| 67 | 8 | calendar action bar | 12b |
-| 68 | 8 | view toggle Month/Week/Day/Schedule | 12b |
-| 69 | 8 | month grid cell `+` affordance | 12b |
-| 70 | 8 | event chip | 12b |
-| 71 | 8 | selected-day side column | 12b |
-| 72 | 9 | Meetings list pane | 12b |
-| 73 | 9 | meetings filter row + quiet search | 12b |
-| 74 | 9 | meeting row | 10 |
-| 75 | 9 | Meetings filtered-out empty state | 06b |
-| 76 | 9 | Meetings detail empty state | 06b |
-| 77 | 9 | meeting detail action row | 10 |
-| 78 | 9 | meeting form fields incl. MEETING LINK | 10 |
-| 79 | 9 | `Room booking` group + Reserve | 10 |
-| 80 | 9 | `Participants` group + Invite | 10 |
-| 81 | 9 | `Availability` group + Refresh | 10 |
-| 82 | 9 | LIVEKIT MEETING block + Join call | 10 |
-| 83 | 10 | Settings view | 12c |
-| 84 | 10 | NAVIGATION LAYOUT group | 05 |
-| 85 | 10 | COLOUR SCHEME group + preview swatches | 04 |
-| 86 | 10 | VISIBLE DESTINATIONS group | 11 |
-| 87 | 10 | ORGANIZATION group | 12c |
-| 88 | 10 | MY CALENDARS group + empty state | 12c |
-| 89 | 10 | CONNECTED CALENDARS group + Connect | 12c |
-| 90 | 10 | SECURITY / Two-factor group | 12c |
-| 91 | 11 | grouped layout | 05 |
-| 92 | 11 | flat layout | 05 |
-| 93 | 11 | layout switch losslessness | 05 |
-| 94 | 12 | EmptyState pattern | 06b |
-| 95 | 12 | blogs empty | 06b |
-| 96 | 12 | absences empty | 06b |
-| 97 | 12 | locations empty | 06b |
+| 13 `test(pr10-independent-falsification)` | 01-12c | only tests/evidence ledger + `.pr-stein/pr10-surfaces.json` | exact gates + adverse/live matrix; no feature code; **plus mechanical scope-traceability**: validate manifest JSON schema; independently resolve `git rev-parse <source.commit>:<source.path>` and equal its blob to `source.blob`; require exact 101 records, unique `id` and `(section,surface)`, allowed section/atom IDs, nonempty owner, and the declared distribution checksum. The manifest is the sole 101-record authority. One-time independent manual completeness reconciliation against `4b6529d:.pr-stein/live-ui.md` is recorded in the manifest because that prose has no deterministic 101-surface extraction grammar; atom 13 must never claim it auto-extracts prose. |
+## Scope traceability — canonical manifest, mechanically gated by atom 13
+`.pr-stein/pr10-surfaces.json` is the sole canonical 101-record surface→atom authority (`id`, `section`, `surface`, `ownerAtom`). It pins source commit `4b6529d49710026c9f58328789161356c8381363`, blob `bf7414cf6a1b7a5a5487b2856f307dbdf0cf5453`, and source path `.pr-stein/live-ui.md`. A completed one-time independent manual reconciliation of all 101 curated records against that source is recorded there; it is deliberately not presented as automated prose extraction or a source-exhaustiveness proof. Atom 13 validates the manifest constraints stated above, including the distribution checksum, so later edits cannot silently drift. Summary: 101 records; sections §1–§12 including §3a/§3b; owner atoms `04,05,06a,06b,06c,07,08,09,09b,10,11,12a,12b,12c`.
 
 ## Gates and actual live matrix
 
