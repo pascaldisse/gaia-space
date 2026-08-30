@@ -1,6 +1,6 @@
 import { createResource, createSignal, createEffect, onCleanup, For, Show } from "solid-js";
 import { useDeepLink, linkProps, route } from "../router";
-import { currentUser, isWeb } from "../session";
+import { currentUser, isWeb, projects, reloadProjects } from "../session";
 import { navLayout } from "../nav";
 import { actingProfileId, bumpChannels, setActingProfileId } from "../chatIdentity";
 import { authApi } from "../api/auth";
@@ -310,6 +310,16 @@ export default function Chat(props: { embedded?: boolean } = {}) {
   );
   const memberIds = () => new Set((members() ?? []).map((m) => m.profile_id));
   const [showMembers, setShowMembers] = createSignal(false);
+  /** A project-bound channel does not own its membership: the project's people ARE the
+   *  channel's people (backend `EFFECTIVE_MEMBERS_SQL`). So this panel must not offer
+   *  add/remove/join/leave there — the acts would be refused — and says where they live. */
+  const inheritsMembers = () => !!activeChannel()?.project_id;
+  const memberProject = () => {
+    const owner = activeChannel()?.project_id;
+    if (!owner) return undefined;
+    if (!projects()) void reloadProjects().catch(() => undefined);
+    return projects()?.find((p) => p.id === owner);
+  };
 
   // polling loop — refreshes whatever is currently on screen
   createEffect(() => {
@@ -1438,7 +1448,7 @@ export default function Chat(props: { embedded?: boolean } = {}) {
         <Show when={showMembers()}>
           <div class="members-panel">
             <div class="section-label" style="padding:0 0 0.4em">
-              Members
+              Members ({members()?.length ?? 0})
             </div>
             <ul>
               <For each={members()}>
@@ -1447,33 +1457,49 @@ export default function Chat(props: { embedded?: boolean } = {}) {
                     <span>
                       {profileName(m.profile_id)} {m.administrator ? "★" : ""}
                     </span>
-                    <button class="ghost small" onClick={() => removeMember(m.profile_id)}>
-                      ×
-                    </button>
+                    <Show when={!inheritsMembers()}>
+                      <button class="ghost small" onClick={() => removeMember(m.profile_id)}>
+                        ×
+                      </button>
+                    </Show>
                   </li>
                 )}
               </For>
             </ul>
-            <select onChange={(e) => e.currentTarget.value && addMember(e.currentTarget.value)}>
-              <option value="">+ add member…</option>
-              <For each={profiles()?.filter((p) => !memberIds().has(p.id))}>
-                {(p) => <option value={p.id}>{p.display_name}</option>}
-              </For>
-            </select>
-            <div class="row-actions">
-              <Show
-                when={actingProfileId() && memberIds().has(actingProfileId()!)}
-                fallback={
-                  <button class="ghost small" onClick={joinActive}>
-                    Join
+            {/* INHERITED, and it says so — with the one link that can actually change it. */}
+            <Show when={inheritsMembers()} fallback={<>
+              <select onChange={(e) => e.currentTarget.value && addMember(e.currentTarget.value)}>
+                <option value="">+ add member…</option>
+                <For each={profiles()?.filter((p) => !memberIds().has(p.id))}>
+                  {(p) => <option value={p.id}>{p.display_name}</option>}
+                </For>
+              </select>
+              <div class="row-actions">
+                <Show
+                  when={actingProfileId() && memberIds().has(actingProfileId()!)}
+                  fallback={
+                    <button class="ghost small" onClick={joinActive}>
+                      Join
+                    </button>
+                  }
+                >
+                  <button class="ghost small" onClick={leaveActive}>
+                    Leave
                   </button>
-                }
+                </Show>
+              </div>
+            </>}>
+              <p class="hint members-inherited">
+                Everyone in {memberProject()?.name ?? "this project"} is in this channel.
+                Membership is managed with the project.
+              </p>
+              <a
+                class="row-link members-manage"
+                {...linkProps({ view: "Project Settings", projectId: activeChannel()!.project_id! })}
               >
-                <button class="ghost small" onClick={leaveActive}>
-                  Leave
-                </button>
-              </Show>
-            </div>
+                Manage project members →
+              </a>
+            </Show>
           </div>
         </Show>
 

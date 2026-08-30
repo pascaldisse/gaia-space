@@ -59,6 +59,9 @@
   white-space: nowrap;
 }
 .cw-pill strong { color: var(--ink); font-weight: 700; }
+/* The members chip of a project channel is a LINK to where membership is decided. */
+.cw-pill-link { text-decoration: none; cursor: pointer; }
+.cw-pill-link:hover { border-color: var(--ink); color: var(--ink); }
 
 .cw-error { margin: 8px 0 0; color: var(--danger, #c2384a); font-size: 0.9rem; }
 

@@ -220,8 +220,26 @@ export default function ChannelWorkspace(): JSX.Element {
             </Show>
           </div>
           <div class="cw-metrics">
+            {/* THE COUNT AND THE TEAM RAIL ARE NOW THE SAME PEOPLE. `list_channel_members`
+                returns the effective membership — a project channel inherits the project's
+                people — so the header can no longer say "1 members" over a rail of four.
+                And the number is an ACT: it leads to the place membership is decided,
+                which for a project channel is the project's settings, never here. */}
             <Show when={memberCount() > 0}>
-              <span class="cw-pill"><strong>{memberCount()}</strong> members</span>
+              <Show
+                when={project()}
+                fallback={<span class="cw-pill"><strong>{memberCount()}</strong> members</span>}
+              >
+                {(owner) => (
+                  <a
+                    class="cw-pill cw-pill-link"
+                    title={`Members come from ${owner().name}. Manage them in the project's settings.`}
+                    {...linkProps({ view: "Project Settings", projectId: owner().id })}
+                  >
+                    <strong>{memberCount()}</strong> members · from {owner().name}
+                  </a>
+                )}
+              </Show>
             </Show>
             {/* Waiting on me -> amber, but ONLY when there is something to wait for:
                 `metricTone` refuses a tone to zero, so this chip can never become a
@@ -319,9 +337,12 @@ export default function ChannelWorkspace(): JSX.Element {
                 <h2>Team</h2>
                 {/* NOTHING YET. The action is real: Organization is where people
                     are added, and it is the only place this can be fixed. */}
+                {/* The act that changes this list is project membership, so the link goes
+                    to the project's own settings — the same destination the header pill
+                    uses. One place, named twice, never two different places. */}
                 <Show when={(memberIds() ?? []).length} fallback={<EmptyState
                   title="Nobody is in this project yet"
-                  actions={<GhostPill {...linkProps({ view: "Members" })}>Add people</GhostPill>}
+                  actions={<GhostPill {...linkProps({ view: "Project Settings", projectId: value().id })}>Add people</GhostPill>}
                 />}>
                   <For each={memberIds()}>
                     {(id) => (

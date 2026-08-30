@@ -374,6 +374,10 @@
   margin-bottom: 0.4em;
 }
 
+/* Inherited membership: the explanation plus the one link that can change it. */
+.members-panel .members-inherited { margin: 0 0 0.4em; font-size: 0.85em; line-height: 1.35; }
+.members-panel .members-manage { display: inline-block; font-size: 0.85em; }
+
 .composer-wrap { flex-wrap: wrap; position: relative; }
 /* Sits directly above the composer so it reads as "about to arrive", not as history. */
 .scheduled-panel { display: flex; flex-direction: column; gap: .2em; padding: 4px 12px; }

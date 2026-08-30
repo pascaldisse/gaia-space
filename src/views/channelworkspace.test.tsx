@@ -29,7 +29,14 @@ const reply = (cmd: string, args: Record<string, unknown>) => {
   if (cmd === "get_channel") return channels[String(args.id)] ?? null;
   if (cmd === "list_projects") return projects;
   if (cmd === "list_profiles") return profiles;
-  if (cmd === "list_channel_members") return [{ channel_id: String(args.channelId), profile_id: "me", administrator: true }];
+  // The backend returns the EFFECTIVE membership: a project channel inherits the
+  // project's people, so this answer matches list_project_member_ids below.
+  if (cmd === "list_channel_members") {
+    const id = String(args.channelId);
+    return id === "c-project"
+      ? [{ channel_id: id, profile_id: "me", administrator: true }, { channel_id: id, profile_id: "other", administrator: false }]
+      : [{ channel_id: id, profile_id: "me", administrator: true }];
+  }
   if (cmd === "list_mentions_for_profile") return [];
   if (cmd === "list_project_member_ids") return ["me", "other"];
   if (cmd === "project_dashboard_aggregate") return { project_id: "p1", open_issues: 2, open_todos: 5, member_count: 70, deadline: "2030-01-01" };
@@ -92,5 +99,22 @@ describe("channel workspace", () => {
     // Project members, with the informational lead role, come from the project — not the channel.
     expect(host.textContent).toContain("Other Person · Member");
     expect(host.textContent).toContain("Me · Responsible");
+  });
+
+  test("members chip counts the project's people and links to where they are managed", async () => {
+    // THE BUG: the header said "1 members" (the channel_members row) while the Team
+    // rail listed the project's four. One channel cannot have two memberships.
+    const host = await mount("c-project");
+    const chip = host.querySelector<HTMLAnchorElement>(".cw-metrics .cw-pill-link");
+    expect(chip?.textContent).toContain("2");
+    expect(chip?.textContent).toContain("from Atlas");
+    // The count is an act: it leads to the only place membership can be changed.
+    expect(chip?.getAttribute("href")).toBe("/projects/p1/settings");
+  });
+
+  test("a channel without a project keeps a plain, unlinked members chip", async () => {
+    const host = await mount("c-loose");
+    expect(host.querySelector(".cw-metrics .cw-pill-link")).toBeNull();
+    expect(host.querySelector(".cw-metrics .cw-pill")?.textContent).toContain("1");
   });
 });

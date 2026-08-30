@@ -463,9 +463,67 @@ fn get_channel_impl(c: &Connection, id: &str) -> Result<Option<Channel>> {
     .optional()
     .map_err(|e| e.to_string())
 }
+/// ── ONE MEMBERSHIP, NOT TWO (project-bound channels) ────────────────────────────
+///
+/// A channel that belongs to a project has NO membership of its own to speak of: the
+/// people of the project are the people of the conversation. Before this, the header
+/// counted `channel_members` ("1 members") while the team rail counted the project
+/// (four faces) — two truths about the same room, and no control anywhere to reconcile
+/// them.
+///
+/// The rule, applied in ONE place so that count, list and access can never disagree:
+///     effective members = channel_members ∪ project members (owner included)
+/// `administrator` is the strongest right the person holds: a channel admin row, or
+/// being the project's owner.
+const EFFECTIVE_MEMBERS_SQL: &str = "SELECT profile_id, MAX(administrator) FROM (\
+     SELECT profile_id, administrator FROM channel_members WHERE channel_id=?1 \
+     UNION ALL SELECT p.created_by, 1 FROM channels ch JOIN projects p ON p.id=ch.project_id \
+       WHERE ch.id=?1 AND p.created_by IS NOT NULL \
+     UNION ALL SELECT pm.profile_id, 0 FROM channels ch \
+       JOIN project_members pm ON pm.project_id=ch.project_id WHERE ch.id=?1\
+   ) GROUP BY profile_id ORDER BY profile_id";
+
+/// The project a channel belongs to, if any. `None` for a free channel — the one case
+/// where the channel's own membership is the whole truth and is directly editable.
+pub(crate) fn channel_project_id_on(c: &Connection, channel_id: &str) -> Result<Option<String>> {
+    c.query_row(
+        "SELECT project_id FROM channels WHERE id=?1",
+        [channel_id],
+        |r| r.get::<_, Option<String>>(0),
+    )
+    .optional()
+    .map(|found| found.flatten())
+    .map_err(|e| e.to_string())
+}
+
+/// True when the profile reaches the channel through its project rather than through a
+/// `channel_members` row.
+fn inherits_membership_on(c: &Connection, channel_id: &str, profile_id: &str) -> Result<bool> {
+    c.query_row(
+        "SELECT EXISTS(SELECT 1 FROM channels ch JOIN projects p ON p.id=ch.project_id \
+         WHERE ch.id=?1 AND (p.created_by=?2 OR EXISTS(SELECT 1 FROM project_members pm \
+         WHERE pm.project_id=p.id AND pm.profile_id=?2)))",
+        rusqlite::params![channel_id, profile_id],
+        |r| r.get::<_, bool>(0),
+    )
+    .map_err(|e| e.to_string())
+}
+
+/// Membership of a project channel is edited on the PROJECT. Refusing here — rather
+/// than writing a row that changes nothing, because the project keeps granting access —
+/// is what stops the two lists drifting apart again.
+fn guard_inherited_membership(c: &Connection, channel_id: &str) -> Result<()> {
+    match channel_project_id_on(c, channel_id)? {
+        Some(_) => Err("This channel belongs to a project: its members are the project's \
+                        members. Add or remove people in the project's settings."
+            .to_string()),
+        None => Ok(()),
+    }
+}
+
 fn member_count_impl(c: &Connection, channel_id: &str) -> Result<i64> {
     c.query_row(
-        "SELECT COUNT(*) FROM channel_members WHERE channel_id=?1",
+        &format!("SELECT COUNT(*) FROM ({EFFECTIVE_MEMBERS_SQL})"),
         [channel_id],
         |r| r.get(0),
     )
@@ -524,7 +582,9 @@ pub(crate) fn channel_allows_profile(
             |r| r.get(0),
         )
         .map_err(|e| e.to_string())?;
-    Ok(count > 0)
+    // Inherited membership is real membership: a person of the project can read the
+    // project's conversations without a `channel_members` row being written for them.
+    Ok(count > 0 || inherits_membership_on(c, channel_id, profile_id)?)
 }
 fn channel_allows_actor(
     c: &Connection,
@@ -908,15 +968,13 @@ fn remove_channel_member_impl(c: &Connection, channel_id: &str, profile_id: &str
     Ok(())
 }
 fn list_channel_members_impl(c: &Connection, channel_id: &str) -> Result<Vec<ChannelMember>> {
-    let mut s = c
-        .prepare("SELECT channel_id,profile_id,administrator FROM channel_members WHERE channel_id=?1 ORDER BY profile_id")
-        .map_err(|e| e.to_string())?;
+    let mut s = c.prepare(EFFECTIVE_MEMBERS_SQL).map_err(|e| e.to_string())?;
     let rows = s
         .query_map([channel_id], |r| {
             Ok(ChannelMember {
-                channel_id: r.get(0)?,
-                profile_id: r.get(1)?,
-                administrator: r.get(2)?,
+                channel_id: channel_id.to_string(),
+                profile_id: r.get(0)?,
+                administrator: r.get(1)?,
             })
         })
         .map_err(|e| e.to_string())?
@@ -2795,11 +2853,15 @@ pub fn delete_channel(id: String, actor_id: String) -> Result<()> {
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn join_channel(channel_id: String, profile_id: String) -> Result<()> {
-    add_channel_member_impl(&db::conn()?, &channel_id, &profile_id, false)
+    let c = db::conn()?;
+    guard_inherited_membership(&c, &channel_id)?;
+    add_channel_member_impl(&c, &channel_id, &profile_id, false)
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn leave_channel(channel_id: String, profile_id: String) -> Result<()> {
-    remove_channel_member_impl(&db::conn()?, &channel_id, &profile_id)
+    let c = db::conn()?;
+    guard_inherited_membership(&c, &channel_id)?;
+    remove_channel_member_impl(&c, &channel_id, &profile_id)
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn add_channel_member(
@@ -2807,11 +2869,15 @@ pub fn add_channel_member(
     profile_id: String,
     administrator: bool,
 ) -> Result<()> {
-    add_channel_member_impl(&db::conn()?, &channel_id, &profile_id, administrator)
+    let c = db::conn()?;
+    guard_inherited_membership(&c, &channel_id)?;
+    add_channel_member_impl(&c, &channel_id, &profile_id, administrator)
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn remove_channel_member(channel_id: String, profile_id: String) -> Result<()> {
-    remove_channel_member_impl(&db::conn()?, &channel_id, &profile_id)
+    let c = db::conn()?;
+    guard_inherited_membership(&c, &channel_id)?;
+    remove_channel_member_impl(&c, &channel_id, &profile_id)
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_channel_members(channel_id: String) -> Result<Vec<ChannelMember>> {
@@ -5440,6 +5506,89 @@ mod tests {
             summary.unread_count, 0,
             "read-state clears the unread badge"
         );
+        drop(c);
+        drop(path);
+    }
+
+    /// THE BUG THIS ENCODES: the channel header counted `channel_members` ("1 members")
+    /// while the project's team rail listed four people. Membership of a project channel
+    /// is the PROJECT's membership — count, list and read access all read it now.
+    #[test]
+    fn a_project_channel_inherits_the_projects_people() {
+        let (c, path) = conn();
+        for (id, username) in [("owner", "owner-user"), ("teammate", "team-user"), ("stranger", "stranger-user")] {
+            c.execute(
+                "INSERT INTO profiles(id,username,display_name,created_at) VALUES(?1,?2,?2,unixepoch())",
+                rusqlite::params![id, username],
+            ).unwrap();
+        }
+        c.execute_batch(
+            "INSERT INTO projects(id,name,key,created_by,created_at) VALUES('pr','Atlas','ATL','owner',1);\
+             INSERT INTO project_members(project_id,profile_id) VALUES('pr','teammate');",
+        )
+        .unwrap();
+        create_channel_impl(
+            &c,
+            &Channel {
+                id: "c-exist".into(),
+                content_type: "private".into(),
+                name: Some("EXIST".into()),
+                description: None,
+                project_id: Some("pr".into()),
+                archived: false,
+                read_only: false,
+            },
+            &["default-org".into()],
+        )
+        .unwrap();
+
+        let members = list_channel_members_impl(&c, "c-exist").unwrap();
+        let ids: Vec<_> = members.iter().map(|m| m.profile_id.as_str()).collect();
+        assert_eq!(ids, vec!["default-org", "owner", "teammate"], "project people are channel people");
+        assert_eq!(member_count_impl(&c, "c-exist").unwrap(), 3, "the header counts the same list");
+        assert!(members.iter().any(|m| m.profile_id == "owner" && m.administrator),
+                "the project's owner is an administrator of its conversations");
+
+        // Access follows the same single source of truth — no row was ever written for them.
+        assert!(channel_allows_profile(&c, "c-exist", "teammate").unwrap());
+        assert!(!channel_allows_profile(&c, "c-exist", "stranger").unwrap());
+
+        // A free channel keeps its own, directly editable membership.
+        seed_channel(&c, "c-loose");
+        assert_eq!(member_count_impl(&c, "c-loose").unwrap(), 1);
+        drop(c);
+        drop(path);
+    }
+
+    /// The refusal is the other half of the policy: a write that cannot change anything
+    /// (the project keeps granting access) must not pretend to have happened.
+    #[test]
+    fn membership_of_a_project_channel_is_edited_on_the_project() {
+        let (c, path) = conn();
+        c.execute_batch(
+            "INSERT INTO profiles(id,username,display_name,created_at) VALUES('owner','o','O',unixepoch());\
+             INSERT INTO projects(id,name,key,created_by,created_at) VALUES('pr','Atlas','ATL','owner',1);",
+        )
+        .unwrap();
+        create_channel_impl(
+            &c,
+            &Channel {
+                id: "c-bound".into(),
+                content_type: "public".into(),
+                name: Some("bound".into()),
+                description: None,
+                project_id: Some("pr".into()),
+                archived: false,
+                read_only: false,
+            },
+            &[],
+        )
+        .unwrap();
+        seed_channel(&c, "c-free");
+
+        let refused = guard_inherited_membership(&c, "c-bound").unwrap_err();
+        assert!(refused.contains("project"), "the refusal says where members are managed: {refused}");
+        assert!(guard_inherited_membership(&c, "c-free").is_ok(), "a free channel manages its own");
         drop(c);
         drop(path);
     }
