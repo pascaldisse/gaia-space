@@ -72,9 +72,11 @@ const family = (rgb) => {
   if (h >= 250 && h < 300) return "purple";
   return "red"; // 300-360 / 0-30
 };
-const INK = { neutral: "var(--muted)", teal: "var(--teal-ink)", green: "#1c6b44", amber: "var(--amber-ink)", blue: "#3a49a0", purple: "#5a3a8a", red: "var(--red-ink)" };
-const SOFT = { neutral: "var(--wash)", teal: "var(--teal-soft)", green: "var(--green-soft)", amber: "var(--amber-soft)", blue: "#e7eaf9", purple: "#f2e9fa", red: "var(--red-soft)" };
-const LINE = { neutral: "var(--line)", teal: "var(--teal)", green: "var(--green)", amber: "var(--amber)", blue: "var(--blue)", purple: "#b79ad2", red: "var(--red)" };
+/* TOKENS ONLY. A literal written here cannot follow a palette (theme.ts), so the
+   generated sheet would pin Dusk back to light greens and purples. */
+const INK = { neutral: "var(--muted)", teal: "var(--teal-ink)", green: "var(--status-success-ink)", amber: "var(--amber-ink)", blue: "var(--cal-external-ink)", purple: "var(--mention-ink)", red: "var(--red-ink)" };
+const SOFT = { neutral: "var(--wash)", teal: "var(--teal-soft)", green: "var(--green-soft)", amber: "var(--amber-soft)", blue: "var(--cal-external-bg)", purple: "var(--mention-soft)", red: "var(--red-soft)" };
+const LINE = { neutral: "var(--line)", teal: "var(--teal)", green: "var(--green)", amber: "var(--amber)", blue: "var(--blue)", purple: "var(--mention-line)", red: "var(--red)" };
 
 const INK_PROPS = /^(color|fill|stroke|caret-color|text-decoration-color|-webkit-text-fill-color)$/;
 const BORDER_PROPS = /^(border|border-(top|right|bottom|left)|border-color|border-(top|right|bottom|left)-color|outline|outline-color|border-inline.*|border-block.*)$/;
@@ -100,7 +102,7 @@ function convert(prop, raw, sel = "") {
     if (alpha <= 0.14 && fam === "neutral") return "rgba(31,35,40,0.05)"; // white veil -> ink veil
     if (fam !== "neutral") return SOFT[fam];
     // A hover/active state must move AWAY from the resting paper, never to it.
-    if (/:hover|:focus|\.active|\.selected|\[aria-selected/.test(sel)) return "#f6f2ec";
+    if (/:hover|:focus|\.active|\.selected|\[aria-selected/.test(sel)) return "var(--surface-hover)";
     return L < 0.12 ? "var(--paper)" : "var(--wash)";
   }
   return null;

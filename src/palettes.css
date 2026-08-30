@@ -1,0 +1,92 @@
+/* ── PALETTES ───────────────────────────────────────────────────────────────
+   Colour only, never structure. Each block re-points the BASE tokens that
+   `spaceTheme.css` derives its ~200 downstream tokens from; nothing here names
+   a component, so no view can fall out of a palette by being written later.
+
+   Selector shape: `.palette-x .theme-space-light` — <html> carries the palette
+   (see theme.ts), the shell and every portalled layer carry the theme scope, so
+   pill menus and dialogs are covered by the same rule. 0-2-0 beats the plain
+   `.theme-space-light` block it overrides.
+
+   THE COLOUR LAW SURVIVES EVERY PALETTE: teal = action/open, amber = due
+   soon/waiting, red = critical/blocked. A palette may change what those hues
+   sit ON — never what they mean, and never which of the three is used. */
+
+/* ── SAND — the light scheme, warmer and one shade deeper ──────────────────── */
+.palette-sand .theme-space-light {
+  --paper: #fffdf7;
+  --wash: #f3ece0;
+  --wash-2: #e8dfd0;
+  --line: #ded2c1;
+  --line-strong: #c8b8a3;
+  --ctl-bg: #fbf6ec;
+  --ctl-bg-hover: #f0e7d8;
+  --ctl-bg-raised-hover: #f0e7d8;
+  --surface-hover: #f0e7d8;
+}
+
+/* ── DUSK — dark canvas, light text ─────────────────────────────────────────
+   Paper is still "the card" and wash is still "the canvas behind it"; only their
+   luminance swaps. Because every surface reads those two, cards stay legible as
+   cards instead of dissolving into the background the way a blanket invert does. */
+.palette-dusk .theme-space-light {
+  --ink: #f1eee8;
+  --muted: #a8a29a;
+  --quiet: #837e76;
+  --paper: #1d1c1b;
+  --wash: #141414;
+  --wash-2: #292725;
+  --line: #35322e;
+  --line-strong: #4b4742;
+
+  /* Action/open. The fill keeps the hue; the INK on a dark fill must be light
+     or the three status pills go unreadable — that is the one thing a dark
+     palette has to re-derive rather than reuse. */
+  --teal-soft: #10312d;
+  --teal-ink: #5fdcc6;
+  --amber-soft: #33280f;
+  --amber-ink: #e8bd71;
+  --red-soft: #351d1c;
+  --red-ink: #f0938a;
+  --green-soft: #16301f;
+  --green: #4cb782;
+  --blue: #8899e8;
+
+  --shadow: 0 18px 44px rgba(0, 0, 0, .55);
+  --shadow-card-sm: 0 12px 30px rgba(0, 0, 0, .40);
+  --shadow-side: 0 8px 22px rgba(0, 0, 0, .35);
+  --shadow-btn: 0 1px 0 rgba(0, 0, 0, .30);
+
+  /* controls: a hair lighter than paper, the way they are a hair darker in light */
+  --ctl-bg: #242221;
+  --ctl-bg-hover: #2e2b29;
+  --ctl-bg-raised-hover: #2e2b29;
+  --surface-hover: #2a2725;
+
+  --avatar-person-ring: rgba(255, 255, 255, .14);
+  --status-success-ink: #79d3a1;
+  --status-risk-medium: #d4b25c;
+
+  /* Typed calendar items sit on dark now: the same hues need more presence to
+     read at all, so the alphas rise instead of the colours changing. */
+  --cal-task-bg: rgba(217, 155, 36, .20);
+  --cal-task-chip-bg: rgba(217, 155, 36, .30);
+  --cal-deadline-bg: rgba(189, 63, 63, .20);
+  --cal-deadline-chip-bg: rgba(189, 63, 63, .30);
+  --cal-external-bg: rgba(136, 153, 232, .18);
+  --cal-external-chip-bg: rgba(136, 153, 232, .28);
+  --cal-external-ink: #9fb0ff;
+
+  --mention-soft: #2b1c33;
+  --mention-ink: #cfaee8;
+  --mention-line: #6f4f8c;
+
+  --dk-icon-bg: rgba(0, 191, 166, .16);
+  --dk-icon-border: rgba(0, 191, 166, .38);
+}
+
+/* The rail is the one surface that was ALREADY dark in every palette (deep
+   purple), so it does not invert — it only loses its glow against a dark page. */
+.palette-dusk .theme-space-light {
+  --rail-gradient: linear-gradient(180deg, #2c0430 0%, #390435 56%, #260425 100%);
+}

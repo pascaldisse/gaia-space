@@ -14,3 +14,38 @@
 .feed-actions{display:flex;gap:8px;flex-shrink:0}
 .feed-connect{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 .feed-connect input{flex:1 1 220px;min-width:180px}
+
+/* ── COLOUR SCHEME CHOICES ──────────────────────────────────────────────────
+   A palette is a look, so the option shows the look: canvas, a card on it, and
+   the accent that lives on the card. The swatches paint their own literals ON
+   PURPOSE — they must show a scheme you are NOT currently in, so they cannot
+   read the live tokens. This is the one place in the app where that is true. */
+.palette-choices { display: grid; gap: var(--dk-space-sm, 8px); }
+.palette-choice {
+  display: grid; grid-template-columns: auto auto 1fr; align-items: center;
+  gap: var(--dk-space-lg, 14px);
+  padding: 10px 12px;
+  border: var(--dk-hairline, 1px) solid var(--surface-border, var(--line));
+  border-radius: var(--dk-radius-xl, 12px);
+  background: var(--surface, var(--paper));
+  cursor: pointer;
+}
+.palette-choice:hover { background: var(--surface-hover); }
+.palette-choice.selected { border-color: var(--accent); box-shadow: var(--ctl-focus-ring); }
+.palette-choice-text { display: grid; gap: .1rem; min-width: 0; }
+.palette-swatch {
+  display: grid; place-items: center;
+  width: 52px; height: 36px; border-radius: 9px;
+  border: 1px solid rgba(0, 0, 0, .12);
+}
+.palette-swatch-card {
+  display: grid; place-items: center;
+  width: 34px; height: 20px; border-radius: 5px;
+}
+.palette-swatch-accent { width: 14px; height: 4px; border-radius: 2px; background: #00bfa6; }
+.palette-swatch.palette-paper { background: #faf8f4; }
+.palette-swatch.palette-paper .palette-swatch-card { background: #fff; border: 1px solid #e5ddd3; }
+.palette-swatch.palette-sand { background: #f3ece0; }
+.palette-swatch.palette-sand .palette-swatch-card { background: #fffdf7; border: 1px solid #ded2c1; }
+.palette-swatch.palette-dusk { background: #141414; }
+.palette-swatch.palette-dusk .palette-swatch-card { background: #1d1c1b; border: 1px solid #35322e; }

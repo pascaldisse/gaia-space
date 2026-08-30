@@ -9,6 +9,7 @@ import { permanentTokensApi, twoFactorApi } from "../api/auth";
 import { platformApi } from "../api/platform";
 import { humanError, profileId } from "../session";
 import PageHeader from "../components/PageHeader";
+import { PALETTES, palette, setPalette } from "../theme";
 import { PillSelect } from "../components/controls";
 import "./Settings.css";
 
@@ -118,6 +119,25 @@ export default function Settings() {
         <input type="radio" name="nav-layout" checked={navLayout() === "flat"} onChange={() => setNavLayout("flat")} />
         <span><strong>Flat</strong> — every view as its own top-level entry</span>
       </label>
+    </div>
+
+    {/* COLOUR SCHEME. Three palettes, one token contract — see src/theme.ts.
+        Each option shows the actual paper, canvas and accent it will produce, so
+        the choice is made by looking, not by reading a word. */}
+    <div class="settings-card">
+      <h2>Colour scheme</h2>
+      <p class="settings-hint">Applies to the whole application at once. Teal, amber and red keep their meaning in every scheme.</p>
+      <div class="palette-choices">
+        <For each={PALETTES}>{option => (
+          <label class="palette-choice" classList={{ selected: palette() === option.id }}>
+            <input type="radio" name="palette" checked={palette() === option.id} onChange={() => setPalette(option.id)} />
+            <span class={`palette-swatch palette-${option.id}`} aria-hidden="true">
+              <span class="palette-swatch-card"><span class="palette-swatch-accent" /></span>
+            </span>
+            <span class="palette-choice-text"><strong>{option.label}</strong><em class="settings-sub">{option.hint}</em></span>
+          </label>
+        )}</For>
+      </div>
     </div>
 
     <div class="settings-card">

@@ -102,6 +102,12 @@
   --attn-amber: var(--amber);
   --attn-amber-text: var(--amber-ink);
   --deadline-blue: var(--blue);
+
+  /* a mention is neither a status nor an act — it is the rail's own purple,
+     the one hue that says "this is about YOU personally" */
+  --mention-soft: #f2e9fa;
+  --mention-ink: #5a3a8a;
+  --mention-line: #b79ad2;
   --status-risk-overdue: var(--red);
   --status-risk-high: var(--amber);
   --status-risk-medium: #caa64a;

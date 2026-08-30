@@ -9,6 +9,10 @@ import "./spaceLightOverrides.css";
 // Typography / control shape / spacing restatement (stage 5a). Imported AFTER
 // the generated colour layer: where both touch a control it must win.
 import "./spaceLightType.css";
+// Palettes LAST: colour-only re-points of the base tokens the three sheets above
+// build on (src/theme.ts). Selector `.palette-x .theme-space-light` outranks them.
+import "./palettes.css";
+import { initPalette } from "./theme";
 import Dashboard from "./views/Dashboard";
 import Home from "./views/Home";
 import Development from "./views/Development";
@@ -84,6 +88,8 @@ const projectFramed=()=>!!route().projectId;
 const projectFrame=(body:()=>JSX.Element)=><Show when={projectFramed()} fallback={body()}><ProjectWorkspace>{body()}</ProjectWorkspace></Show>;
 
 export default function App() {
+  /* The stored colour scheme goes onto <html> before the first view renders. */
+  initPalette();
   const active=()=>activeView()||defaultView();
   const [gotoOpen,setGotoOpen]=createSignal(false);
 const [fullTextOpen,setFullTextOpen]=createSignal(false);
