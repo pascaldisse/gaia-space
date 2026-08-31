@@ -62,6 +62,22 @@ afterEach(() => {
   globalThis.fetch = realFetch; setProfileId("");
 });
 
+/** The fetch stub, with a chosen command made to fail. */
+const serveWith = (failing?: string, people = [{ id: "pa", username: "pat", display_name: "Pat", archived: false }]) => {
+  globalThis.fetch = (async (url: string, init: RequestInit) => {
+    const cmd = String(url).split("api/cmd/")[1];
+    calls.push({ cmd, args: init.body ? JSON.parse(String(init.body)) : {} });
+    if (cmd === failing)
+      return new Response(JSON.stringify({ ok: false, error: "channel refused" }), {
+        status: 400, headers: { "content-type": "application/json" },
+      });
+    const value = cmd === "list_profiles"
+      ? people
+      : cmd === "attach_meeting_channel" ? "channel-1" : [];
+    return new Response(JSON.stringify({ ok: true, value }), { headers: { "content-type": "application/json" } });
+  }) as typeof fetch;
+};
+
 const mount = () => {
   const host = document.createElement("div");
   document.body.appendChild(host);
@@ -100,5 +116,31 @@ describe("a meeting is created on a page that is not a secure context", () => {
     await settle();
     await book(host);
     expect(calls.some((call) => call.cmd === "create_meeting")).toBe(true);
+  });
+});
+
+/** ISSUE #5, THE SECOND HALF. `attach_meeting_channel` runs AFTER the meeting is
+ *  stored. When one outer catch owned the whole sequence, its refusal closed the
+ *  composer over nothing: the form kept the draft, no notice was said and the list was
+ *  never refetched — a booked meeting reported as a failed create. */
+describe("a second act on a stored meeting is not a failed create", () => {
+  test("a refused attach_meeting_channel keeps the create, says so, and still reloads the list", async () => {
+    serveWith("attach_meeting_channel");
+    const host = mount();
+    await settle();
+    await book(host);
+
+    expect(calls.some((call) => call.cmd === "create_meeting")).toBe(true);
+    expect(calls.some((call) => call.cmd === "attach_meeting_channel")).toBe(true);
+    // The meeting exists, so the surface says so — and the drawer is gone.
+    expect(host.querySelector(".meeting-notice")?.textContent ?? "").toContain("created");
+    expect(host.querySelector("form[aria-label='New meeting']")).toBeNull();
+    // The refusal is still reported, as itself.
+    expect(host.querySelector(".meeting-error")?.textContent ?? "").toContain("channel refused");
+    // The list is read again AFTER the create, so the new meeting can appear.
+    const created = calls.findIndex((call) => call.cmd === "create_meeting");
+    const reloaded = calls.map((call, index) => ({ ...call, index }))
+      .filter((call) => call.cmd === "list_meetings" && call.index > created);
+    expect(reloaded.length).toBeGreaterThan(0);
   });
 });
