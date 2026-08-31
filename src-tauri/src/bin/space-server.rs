@@ -10509,26 +10509,26 @@ mod tests {
         assert_eq!(status, StatusCode::OK, "{value}");
     }
 
+    #[tokio::test]
+    async fn issue_attachment_write_allows_project_members_and_refuses_outsiders() {
+        let _serial = test_lock();
+        setup();
+        let c = db::conn().unwrap();
+        c.execute_batch("INSERT INTO projects(id,name,key,created_by,created_at) VALUES('attachment-project','Attachments','ATTACH','pa',1); INSERT INTO project_members(project_id,profile_id) VALUES('attachment-project','pb'); INSERT INTO issues(id,project_id,number,title,archived) VALUES('attachment-issue','attachment-project',1,'Evidence',0);").unwrap();
+        let attachment = json!({"id":"attachment-evidence","file_name":"proof.txt","mime_type":"text/plain","byte_length":2,"data_url":"data:text/plain,ok"});
+        let (status, value) = call(cookie("tb"), "add_issue_attachment", json!({"issue_id":"attachment-issue","attachment":attachment})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        assert_eq!(value["value"]["issue_id"], "attachment-issue");
+        let (status, _) = call(cookie("td"), "add_issue_attachment", json!({"issue_id":"attachment-issue","attachment":{"id":"attachment-forbidden","file_name":"secret.txt","mime_type":"text/plain","byte_length":2,"data_url":"data:text/plain,no"}})).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        let (status, value) = call(cookie("tb"), "delete_issue_attachment", json!({"id":"attachment-evidence"})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+    }
+
     /// An issue is worked by PEOPLE: several at once, sub-issues included, and only
     /// people who belong to the project. Outsiders can neither read nor assign.
     #[tokio::test]
-    async fn issue_attachment_write_allows_project_members_and_refuses_outsiders() {
-    let _serial = test_lock();
-    setup();
-    let c = db::conn().unwrap();
-    c.execute_batch("INSERT INTO projects(id,name,key,created_by,created_at) VALUES('attachment-project','Attachments','ATTACH','pa',1); INSERT INTO project_members(project_id,profile_id) VALUES('attachment-project','pb'); INSERT INTO issues(id,project_id,number,title,archived) VALUES('attachment-issue','attachment-project',1,'Evidence',0);").unwrap();
-    let attachment = json!({"id":"attachment-evidence","file_name":"proof.txt","mime_type":"text/plain","byte_length":2,"data_url":"data:text/plain,ok"});
-    let (status, value) = call(cookie("tb"), "add_issue_attachment", json!({"issue_id":"attachment-issue","attachment":attachment})).await;
-    assert_eq!(status, StatusCode::OK, "{value}");
-    assert_eq!(value["value"]["issue_id"], "attachment-issue");
-    let (status, _) = call(cookie("td"), "add_issue_attachment", json!({"issue_id":"attachment-issue","attachment":{"id":"attachment-forbidden","file_name":"secret.txt","mime_type":"text/plain","byte_length":2,"data_url":"data:text/plain,no"}})).await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
-    let (status, value) = call(cookie("tb"), "delete_issue_attachment", json!({"id":"attachment-evidence"})).await;
-    assert_eq!(status, StatusCode::OK, "{value}");
-}
-
-#[tokio::test]
-async fn issue_assignment_takes_several_project_members_and_refuses_outsiders() {
+    async fn issue_assignment_takes_several_project_members_and_refuses_outsiders() {
         let _serial = test_lock();
         setup();
         let c = db::conn().unwrap();
