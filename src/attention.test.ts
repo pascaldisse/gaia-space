@@ -1,11 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import {
+  applyChannelRead,
   buildNeedsYou,
   buildOrganisation,
   countNeedsYou,
   emptySources,
   isOrganisationEvent,
   readActor,
+  unreadChannelTotal,
   type AttentionSources,
 } from "./attention";
 import type { ChannelSummary, MentionView, UnreadThread } from "./api/chat";
@@ -220,5 +222,76 @@ describe("the actor convention", () => {
       ],
     });
     expect(event).toMatchObject({ actor: "GAIA Organization", verb: "completed a task", object: "Prepare the review", detail: "Demo Project" });
+  });
+});
+
+/** ── READING A CHANNEL CLEARS BOTH BADGES ──────────────────────────────────
+ *  The defect: opening a channel wrote the read marker but only the caller's own
+ *  list re-read it, so the row badge and the aggregate Chats badge both stayed
+ *  at 1. These tests are the aggregate side, pure: one snapshot in, both numbers
+ *  out. */
+describe("reading a channel clears the badges it fed", () => {
+  test("unread=1 → markRead → the aggregate Chats badge is 0", () => {
+    const before = sources({ channels: [channel({ id: "c-open", unread_count: 1 })] });
+    expect(unreadChannelTotal(before.channels)).toBe(1);
+    const after = applyChannelRead(before, "c-open");
+    expect(unreadChannelTotal(after.channels)).toBe(0);
+  });
+
+  test("the channel's own row badge drops to 0, and only that row's", () => {
+    const before = sources({
+      channels: [channel({ id: "c-open", unread_count: 1 }), channel({ id: "c-other", unread_count: 4 })],
+    });
+    const after = applyChannelRead(before, "c-open");
+    expect(after.channels.find((c) => c.id === "c-open")!.unread_count).toBe(0);
+    expect(after.channels.find((c) => c.id === "c-other")!.unread_count).toBe(4);
+    expect(unreadChannelTotal(after.channels)).toBe(4);
+  });
+
+  test("an entity channel read stops needing you", () => {
+    const before = sources({
+      channels: [channel({ id: "entity:absence:a1", content_type: "entity-bound", name: "Time off", unread_count: 1 })],
+    });
+    expect(countNeedsYou(before)).toBe(1);
+    expect(countNeedsYou(applyChannelRead(before, "entity:absence:a1"))).toBe(0);
+  });
+
+  test("reading the channel reads the mentions inside it", () => {
+    const mention = { id: "m1", channel_id: "c-open", channel_name: "design", notification_id: "n1", read: false, text: "hey @me", created_at: 900 } as MentionView;
+    const before = sources({ mentions: [mention], channels: [channel({ id: "c-open", unread_count: 1 })] });
+    expect(countNeedsYou(before)).toBe(1);
+    expect(countNeedsYou(applyChannelRead(before, "c-open"))).toBe(0);
+  });
+
+  test("reading a thread channel clears its worklist row", () => {
+    const thread = { channel_id: "thread:m1", parent_channel_id: "c1", parent_channel_name: "design", root_message_id: "m1", root_excerpt: "q", unread_count: 1, last_reply_at: 5, last_reply_author: "Ada" } as UnreadThread;
+    const before = sources({ threads: [thread] });
+    expect(countNeedsYou(before)).toBe(1);
+    expect(countNeedsYou(applyChannelRead(before, "thread:m1"))).toBe(0);
+  });
+
+  test("the snapshot is not mutated in place — surfaces re-read, never observe a tear", () => {
+    const before = sources({ channels: [channel({ id: "c-open", unread_count: 1 })] });
+    applyChannelRead(before, "c-open");
+    expect(before.channels[0].unread_count).toBe(1);
+  });
+
+  test("work that is not unread text survives being in a read channel", () => {
+    const before = sources({
+      channels: [channel({ id: "c-open", content_type: "dm", unread_count: 1 })],
+      todos: [todo({ id: "t9", profile_id: "someone-else", assignee_ids: [ME] })],
+    });
+    expect(countNeedsYou(before)).toBe(2);
+    expect(countNeedsYou(applyChannelRead(before, "c-open"))).toBe(1);
+  });
+
+  test("an unknown or empty channel id changes nothing", () => {
+    const before = sources({ channels: [channel({ id: "c-open", unread_count: 1 })] });
+    expect(unreadChannelTotal(applyChannelRead(before, "c-missing").channels)).toBe(1);
+    expect(applyChannelRead(before, "")).toBe(before);
+  });
+
+  test("an archived channel never feeds the aggregate badge", () => {
+    expect(unreadChannelTotal([channel({ id: "c-old", unread_count: 3, archived: true })])).toBe(0);
   });
 });
