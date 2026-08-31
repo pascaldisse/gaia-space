@@ -86,6 +86,15 @@ export const dmLabel = (
   return DIRECT_FALLBACK_LABEL;
 };
 
+/** The chat header uses the sidebar's personal DM label, never the stored two-name title. */
+export const chatHeaderLabel = (
+  channel: PartitionableChannel,
+  selfId: string | null | undefined,
+  options: { members?: MemberLookup; nameOf?: NameLookup } = {},
+): string => isDirectMessage(channel, options.members)
+  ? dmLabel(channel, selfId, options)
+  : channel.name ?? channel.content_type;
+
 /**
  * Split a list into the two sections the sidebar draws. Order is preserved inside each
  * section \u2014 sorting is the caller's business, not the partition's.
