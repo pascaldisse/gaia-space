@@ -9995,6 +9995,64 @@ mod tests {
         assert_eq!(value["value"]["deadline"], json!("2030-07-07"));
     }
 
+    /// ISSUE #5 REPRO — the whole act a person performs in the composer, in order and
+    /// over the real command route: create with the EXACT payload `Meetings.tsx` /
+    /// `Calendar.tsx` build, then attach the discussion, then invite the people the
+    /// drawer collected, then read the list back. "Create meeting doesn't work" is a
+    /// report about this sequence, not about `create_meeting` alone.
+    #[tokio::test]
+    async fn the_composer_sequence_creates_a_meeting_a_person_can_then_see() {
+        let _serial = test_lock();
+        setup();
+        let payload = json!({"meeting":{
+            "id":"issue-5-meeting",
+            "title":"Weekly product review",
+            "description":null,
+            "starts_at":1893456000_i64,
+            "ends_at":1893459600_i64,
+            "rrule":null,
+            "location":null,
+            "organizer_id":"pa",
+            "channel_id":null,
+            "visibility":"participants",
+            "modification_preference":"organizer-only",
+            "meeting_url":null,
+            "archived":false,
+            "video_provider":null,
+            "video_room_id":null,
+            "join_url":null,
+            "video_status":"scheduled",
+            "video_started_at":null,
+            "video_ended_at":null,
+            "video_ended_by":null,
+            "source_entity_type":null,
+            "source_entity_id":null
+        }});
+        let (status, value) = call(cookie("ta"), "create_meeting", payload).await;
+        assert_eq!(status, StatusCode::OK, "create_meeting: {value}");
+
+        let (status, value) =
+            call(cookie("ta"), "attach_meeting_channel", json!({"id":"issue-5-meeting"})).await;
+        assert_eq!(status, StatusCode::OK, "attach_meeting_channel: {value}");
+
+        let (status, value) = call(
+            cookie("ta"),
+            "invite_meeting_participant",
+            json!({"meetingId":"issue-5-meeting","profileId":"pb"}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "invite_meeting_participant: {value}");
+
+        let (status, value) = call(cookie("ta"), "list_meetings", json!({})).await;
+        assert_eq!(status, StatusCode::OK, "list_meetings: {value}");
+        let listed = value["value"]
+            .as_array()
+            .expect("list_meetings returns an array")
+            .iter()
+            .any(|meeting| meeting["id"] == json!("issue-5-meeting"));
+        assert!(listed, "the created meeting must be listed back: {value}");
+    }
+
     #[tokio::test]
     async fn meeting_and_document_identity_writes_rebind_the_session_profile() {
         let _serial = test_lock();
