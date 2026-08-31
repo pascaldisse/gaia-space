@@ -37,7 +37,7 @@ export type ChannelMember = {
   administrator: boolean;
 };
 
-export type Reaction = { emoji: string; count: number; mine: boolean };
+export type Reaction = { emoji: string; count: number; mine: boolean; reactors?: string[] };
 
 // A poll option carries its tally and whether *I* picked it — never who else did.
 export type PollOptionResult = {

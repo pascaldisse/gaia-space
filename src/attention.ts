@@ -261,7 +261,7 @@ export function buildNeedsYou(sources: AttentionSources): AttentionItem[] {
       action: isDm ? "Reply" : "Open",
       tone: isDm ? "amber" : "teal",
       route: channelRoute(channel.id),
-      resolve: () => chatApi.markChannelRead(channel.id, me),
+      resolve: () => markChannelRead(channel.id, me),
     });
   }
 
@@ -281,7 +281,7 @@ export function buildNeedsYou(sources: AttentionSources): AttentionItem[] {
       // The thread channel's OWN route: Chat decodes it back to the parent plus the
       // open thread panel, so the click lands on the replies, not merely near them.
       route: channelRoute(thread.channel_id),
-      resolve: () => chatApi.markChannelRead(thread.channel_id, me),
+      resolve: () => markChannelRead(thread.channel_id, me),
     });
   }
 
@@ -364,6 +364,44 @@ export function buildNeedsYou(sources: AttentionSources): AttentionItem[] {
 /** The count, and the ONLY count. The rail badge, Home and the Inbox header all
  *  read this, so they cannot disagree again. */
 export const countNeedsYou = (sources: AttentionSources): number => buildNeedsYou(sources).length;
+
+/** ── READING A CHANNEL, APPLIED TO THE SNAPSHOT ─────────────────────────────
+ *
+ *  THE DEFECT: opening a channel called `mark_channel_read` and refetched ONLY
+ *  the caller's own channel list. Every other surface — the rail's Chats badge
+ *  (its own resource), the channel row, Home — kept the stale snapshot, so the
+ *  badge stayed at 1 until a full reload. The write was fine; the READERS were
+ *  stale.
+ *
+ *  So the fact "this channel is read now" is applied to THE snapshot, purely and
+ *  in one place, and every surface that reads `attentionSources()` becomes
+ *  correct in the same tick. The server refetch that follows confirms it; it is
+ *  no longer what makes the badge move.
+ *
+ *  Reading a channel clears, for that channel id:
+ *    - its unread_count (the Chats badge and the channel row's own badge)
+ *    - the unread thread rows that ARE that channel
+ *    - mentions of me inside it (they are read once I have read the channel)
+ *  It does NOT touch todos/issues/reviews: those are work, not unread text. */
+export function applyChannelRead(sources: AttentionSources, channelId: string): AttentionSources {
+  if (!channelId) return sources;
+  return {
+    ...sources,
+    channels: sources.channels.map((channel) =>
+      channel.id === channelId && channel.unread_count > 0 ? { ...channel, unread_count: 0 } : channel,
+    ),
+    threads: sources.threads.filter((thread) => thread.channel_id !== channelId),
+    mentions: sources.mentions.map((mention) =>
+      mention.channel_id === channelId && !mention.read ? { ...mention, read: true } : mention,
+    ),
+  };
+}
+
+/** The unread CONVERSATION total — the rail's "Chats" badge. It lived inline in
+ *  SpaceShell, which is why it could disagree with everything else; it is the
+ *  same sum, computed once, from the same snapshot. */
+export const unreadChannelTotal = (channels: ChannelSummary[]): number =>
+  channels.reduce((sum, channel) => sum + (channel.archived ? 0 : Math.max(0, channel.unread_count || 0)), 0);
 
 const ROUTE_BY_ENTITY: Record<string, string> = {
   project: "Projects",
@@ -522,10 +560,10 @@ export async function loadAttention(profileId: string): Promise<AttentionSources
 const store = createRoot(() => {
   const [override, setOverride] = createSignal<string | null>(null);
   const profile = () => override() ?? profileId();
-  const [sources, { refetch }] = createResource(profile, loadAttention, {
+  const [sources, { refetch, mutate }] = createResource(profile, loadAttention, {
     initialValue: emptySources(""),
   });
-  return { profile, setOverride, sources, refetch };
+  return { profile, setOverride, sources, refetch, mutate };
 });
 
 /** Pin the identity attention reads (tests, or a surface acting as someone). */
@@ -546,6 +584,20 @@ export const attentionCount = (): number => needsYou().length;
 export const refreshAttention = async () => {
   await store.refetch();
 };
+/** Mark a channel read: write it, apply it to the shared snapshot at once (so
+ *  every badge drops in the same tick), then confirm against the backend.
+ *  THE one entry point — a surface must never call `chatApi.markChannelRead`
+ *  directly, or it goes back to updating only itself. */
+export const markChannelRead = async (channelId: string, profileId: string): Promise<void> => {
+  if (!channelId || !profileId) return;
+  store.mutate((current) => applyChannelRead(current ?? emptySources(profileId), channelId));
+  try {
+    await chatApi.markChannelRead(channelId, profileId);
+  } finally {
+    await refreshAttention();
+  }
+};
+
 /** Resolve one worklist item where it stands, then re-read. */
 export const resolveAttentionItem = async (item: AttentionItem) => {
   if (!item.resolve) return;

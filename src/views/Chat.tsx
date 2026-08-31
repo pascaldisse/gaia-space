@@ -3,6 +3,7 @@ import { useDeepLink, linkProps, route } from "../router";
 import { currentUser, isWeb } from "../session";
 import { navLayout } from "../nav";
 import { actingProfileId, bumpChannels, setActingProfileId } from "../chatIdentity";
+import { markChannelRead } from "../attention";
 import { authApi } from "../api/auth";
 import DateTimeField from "../components/DateTimeField";
 import ContextMenu, { type ContextMenuItem } from "../components/ContextMenu";
@@ -38,14 +39,18 @@ import {
   resetPaging,
   visibleMessages,
 } from "../messagePaging";
+import { reactionChipTitle, reactionChips } from "./chatReactions";
 import { ballotAfterClick, optionShare, pollDraftError, pollIsOpen, POLL_MIN_OPTIONS } from "../poll";
 import { applicationsApi } from "../api/applications";
 import { personalApi } from "../api/personal";
 import { platformApi } from "../api/platform";
 import { applyCommand, COMMAND_FANOUT_LIMIT, mapWithLimit, mergeCommandListings, slashPrefix, type CommandEntry } from "../chatCommands";
 import { canSendDraft, uploadableAttachments } from "../chatAttachments";
+import { captureScroll, isNearBottom, restorePrependedScroll, scrollTargetFor, shouldAutoScroll, type ScrollAnchor, type ScrollMetrics } from "../chatScroll";
+import { COMPOSER_MAX_ROWS, COMPOSER_MIN_ROWS, composerRows } from "../chatComposer";
 import { insertMention, mentionCandidates as candidatesFor, survivingMentions as survivorsOf, type MentionTarget, type MentionTargetRef } from "../chatMentions";
 import { UI_LOCALE } from "../calendar";
+import { isGrouped } from "../messageGrouping";
 
 const GROUP_ORDER: { key: ChannelContentType; label: string }[] = [
   { key: "public", label: "Public" },
@@ -173,7 +178,13 @@ export default function Chat(props: { embedded?: boolean } = {}) {
   createEffect(() => {
     const ch = activeChannelId();
     const p = actingProfileId();
-    if (ch && p) chatApi.markChannelRead(ch, p).then(refetchChannels).catch(fail);
+    // Through attention, never chatApi directly: the shared snapshot every OTHER
+    // surface's badge reads is what was stale. `bumpChannels` re-reads the shell's
+    // own channel list, so the row's badge and the rail's Chats total clear too.
+    if (ch && p)
+      markChannelRead(ch, p)
+        .then(() => { bumpChannels(); refetchChannels(); })
+        .catch(fail);
   });
 
   // messages in the active channel (root pane, thread replies excluded)
@@ -201,6 +212,63 @@ export default function Chat(props: { embedded?: boolean } = {}) {
     setPaging((state) => resetPaging(state));
   });
   const shownMessages = () => visibleMessages(paging(), messages());
+  // The root pane is the live conversation. Thread/search/history views deliberately use
+  // their own panes, so this policy never overrides an explicit reader position there.
+  let messagePane: HTMLDivElement | undefined;
+  let messagePaneWasNearBottom = true;
+  let openedMessagePaneKey: string | null = null;
+  let messagePaneFrame: number | undefined;
+  let pendingHistoryAnchor: { key: string; anchor: ScrollAnchor } | null = null;
+  const messagePaneKey = () => {
+    const key = messageKey();
+    return key ? `${key.ch}\u0000${key.p ?? ""}` : null;
+  };
+  const messagePaneMetrics = (): ScrollMetrics | null => {
+    if (!messagePane) return null;
+    return {
+      scrollTop: messagePane.scrollTop,
+      scrollHeight: messagePane.scrollHeight,
+      clientHeight: messagePane.clientHeight,
+    };
+  };
+  const scrollMessagePane = (opening: boolean) => {
+    const metrics = messagePaneMetrics();
+    if (!metrics || !shouldAutoScroll({ opening, wasNearBottom: messagePaneWasNearBottom })) return;
+    messagePane!.scrollTop = scrollTargetFor(metrics);
+    messagePaneWasNearBottom = true;
+  };
+  const scheduleMessagePaneScroll = (opening: boolean) => {
+    if (messagePaneFrame !== undefined) cancelAnimationFrame(messagePaneFrame);
+    messagePaneFrame = requestAnimationFrame(() => {
+      messagePaneFrame = undefined;
+      scrollMessagePane(opening);
+    });
+  };
+  const restoreHistoryPosition = (key: string) => {
+    const pending = pendingHistoryAnchor;
+    if (!pending || pending.key !== key) return;
+    pendingHistoryAnchor = null;
+    requestAnimationFrame(() => {
+      if (messagePaneKey() !== key) return;
+      const metrics = messagePaneMetrics();
+      if (metrics) messagePane!.scrollTop = restorePrependedScroll(pending.anchor, metrics);
+    });
+  };
+  createEffect(() => {
+    const key = messagePaneKey();
+    shownMessages();
+    if (!key || messages.loading) return;
+    const opening = openedMessagePaneKey !== key;
+    if (opening) openedMessagePaneKey = key;
+    scheduleMessagePaneScroll(opening);
+  });
+  createEffect(() => {
+    if (!messagePane || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => scheduleMessagePaneScroll(false));
+    observer.observe(messagePane);
+    onCleanup(() => observer.disconnect());
+  });
+  onCleanup(() => { if (messagePaneFrame !== undefined) cancelAnimationFrame(messagePaneFrame); });
   // Before any older page is pulled, the continuation point is the live page's own
   // cursor — one order, one cursor space, no second source of truth.
   const olderCursor = () => paging().cursor ?? messagePage()?.next_cursor ?? null;
@@ -210,6 +278,12 @@ export default function Chat(props: { embedded?: boolean } = {}) {
     if (!key) return;
     const cursor = olderCursor();
     if (!cursor) return;
+    const paneKey = messagePaneKey();
+    const metrics = messagePaneMetrics();
+    if (paneKey && metrics) {
+      pendingHistoryAnchor = { key: paneKey, anchor: captureScroll(metrics) };
+      messagePaneWasNearBottom = false;
+    }
     const started = beginLoad(paging());
     if (!started.started) return;
     setPaging(started.state);
@@ -221,6 +295,7 @@ export default function Chat(props: { embedded?: boolean } = {}) {
         actingProfileId: key.p,
       });
       setPaging((state) => applyPage(state, started.ticket, pageResult));
+      if (paneKey) restoreHistoryPosition(paneKey);
     } catch (e) {
       setPaging((state) => failLoad(state, started.ticket, e));
     }
@@ -270,7 +345,7 @@ export default function Chat(props: { embedded?: boolean } = {}) {
   createEffect(() => {
     const thread = threadChannel();
     const p = actingProfileId();
-    if (thread && p) chatApi.markChannelRead(thread.id, p).catch(fail);
+    if (thread && p) markChannelRead(thread.id, p).then(bumpChannels).catch(fail);
   });
   const threadPageKey = () => {
     const k = threadKey(); const thread = threadChannel();
@@ -941,11 +1016,12 @@ export default function Chat(props: { embedded?: boolean } = {}) {
   function absenceCard(text: string) {
     try { const card = JSON.parse(text) as { profile_id:string; date_from:string; date_to:string; availability:string; action:string }; return card; } catch { return null; }
   }
-  function renderMessage(m: MessageView, inThread: boolean) {
+  function renderMessage(m: MessageView, inThread: boolean, previous?: () => MessageView | undefined) {
     const mine = () => m.author_id === actingProfileId();
     const card = () => m.content_kind === "absence-card" ? absenceCard(m.text) : null;
+    const grouped = () => isGrouped(previous?.(), m);
     return (
-      <div class="message-row">
+      <div class="message-row" classList={{ grouped: grouped() }}>
         {/* Avatar circle: markup only, `display:none` by default (Chat.css). It becomes
             visible under `.theme-space-light` — the chat-first shell — so the dark theme
             renders exactly what it rendered before. */}
@@ -1070,27 +1146,33 @@ export default function Chat(props: { embedded?: boolean } = {}) {
           </div>
         </Show>
 
-        <Show when={!activeChannel()?.read_only}><div class="reaction-row">
-          <For each={m.reactions}>
+        {/* Reactions already on the message are content: they render always, even in a
+            read-only channel and with no hover. Only the "add" palette is an
+            affordance, so only it is gated on write rights and on hover (CSS). */}
+        <Show when={reactionChips(m).length || !activeChannel()?.read_only}><div class="reaction-row">
+          <For each={reactionChips(m)}>
             {(r) => (
               <span
                 class="reaction-chip"
                 classList={{ mine: r.mine }}
+                title={reactionChipTitle(r)}
                 onClick={() => toggleReaction(m, r.emoji, inThread)}
               >
                 {r.emoji} {r.count}
               </span>
             )}
           </For>
-          <span class="reaction-add">
-            <For each={QUICK_EMOJI}>
-              {(e) => (
-                <span class="reaction-chip ghost" onClick={() => toggleReaction(m, e, inThread)}>
-                  {e}
-                </span>
-              )}
-            </For>
-          </span>
+          <Show when={!activeChannel()?.read_only}>
+            <span class="reaction-add">
+              <For each={QUICK_EMOJI}>
+                {(e) => (
+                  <span class="reaction-chip ghost" onClick={() => toggleReaction(m, e, inThread)}>
+                    {e}
+                  </span>
+                )}
+              </For>
+            </span>
+          </Show>
         </div></Show>
 
         <Show when={!activeChannel()?.read_only}><div class="message-actions">
@@ -1292,7 +1374,11 @@ export default function Chat(props: { embedded?: boolean } = {}) {
           </div>
         </Show>
 
-        <div class="message-pane">
+        <div
+          class="message-pane"
+          ref={(element) => { messagePane = element; }}
+          onScroll={() => { const metrics = messagePaneMetrics(); if (metrics) messagePaneWasNearBottom = isNearBottom(metrics); }}
+        >
           {/* Honest empty state: with no channel selected there is nothing to say hello in. */}
           <Show when={activeChannelId() || showLegacySidebar()} fallback={
             <div class="chat-empty-state" role="status">
@@ -1317,7 +1403,7 @@ export default function Chat(props: { embedded?: boolean } = {}) {
                   </button>
                 </div>
               </Show>
-              <For each={shownMessages()}>{(m) => renderMessage(m, false)}</For>
+              <For each={shownMessages()}>{(m, index) => renderMessage(m, false, () => shownMessages()[index() - 1])}</For>
             </Show>
           </Show>
           </Show>
@@ -1401,6 +1487,7 @@ export default function Chat(props: { embedded?: boolean } = {}) {
             <textarea
               placeholder="Message…"
               value={draft()}
+              rows={composerRows(draft(), COMPOSER_MIN_ROWS, COMPOSER_MAX_ROWS)}
               onInput={(e) => onDraftInput(e.currentTarget.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
@@ -1499,13 +1586,14 @@ export default function Chat(props: { embedded?: boolean } = {}) {
               </div>
             </Show>
             <Show when={!threadPage.loading} fallback={<p class="hint">Loading thread…</p>}>
-              <For each={shownThreadReplies()}>{(m) => renderMessage(m, true)}</For>
+              <For each={shownThreadReplies()}>{(m, index) => renderMessage(m, true, () => shownThreadReplies()[index() - 1])}</For>
             </Show>
           </div>
           <div class="composer composer-wrap">
             <textarea
               placeholder="Reply in thread…"
               value={threadDraft()}
+              rows={composerRows(threadDraft(), COMPOSER_MIN_ROWS, COMPOSER_MAX_ROWS)}
               onInput={(e) => setThreadDraft(e.currentTarget.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {

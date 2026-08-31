@@ -43,3 +43,8 @@ const [channelsVersion, setChannelsVersion] = createSignal(0);
 const bumpChannels = () => setChannelsVersion((value) => value + 1);
 
 export { actingProfileId, actingOverride, setActingProfileId, channelsVersion, bumpChannels };
+
+/* Who a conversation is WITH lives in a pure module (no session, no Solid) so tests can
+ * own it; it is re-exported here because this is where callers already look for chat
+ * identity. */
+export { partitionChannels, dmLabel, isDirectMessage } from "./chatPartition";

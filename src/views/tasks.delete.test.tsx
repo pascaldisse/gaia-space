@@ -34,7 +34,7 @@ const task = (over: Record<string, unknown>) => ({
 });
 /** My tasks shows BOTH: what I made, and what other people put on me. */
 const myTodos = [
-  task({ id: "t-mine", content: "Mine alone" }),
+  task({ id: "t-mine", content: "Mine alone", assignee_ids: ["me"] }),
   task({ id: "t-theirs", profile_id: "other", content: "Theirs on me", project_id: "p1", assignee_ids: ["me"] }),
 ];
 /** Team tasks is made of project work: shared by definition. */
