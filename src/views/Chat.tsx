@@ -44,6 +44,7 @@ import { personalApi } from "../api/personal";
 import { platformApi } from "../api/platform";
 import { applyCommand, COMMAND_FANOUT_LIMIT, mapWithLimit, mergeCommandListings, slashPrefix, type CommandEntry } from "../chatCommands";
 import { canSendDraft, uploadableAttachments } from "../chatAttachments";
+import { captureScroll, isNearBottom, restorePrependedScroll, scrollTargetFor, shouldAutoScroll, type ScrollAnchor, type ScrollMetrics } from "../chatScroll";
 import { insertMention, mentionCandidates as candidatesFor, survivingMentions as survivorsOf, type MentionTarget, type MentionTargetRef } from "../chatMentions";
 import { UI_LOCALE } from "../calendar";
 
@@ -201,6 +202,63 @@ export default function Chat(props: { embedded?: boolean } = {}) {
     setPaging((state) => resetPaging(state));
   });
   const shownMessages = () => visibleMessages(paging(), messages());
+  // The root pane is the live conversation. Thread/search/history views deliberately use
+  // their own panes, so this policy never overrides an explicit reader position there.
+  let messagePane: HTMLDivElement | undefined;
+  let messagePaneWasNearBottom = true;
+  let openedMessagePaneKey: string | null = null;
+  let messagePaneFrame: number | undefined;
+  let pendingHistoryAnchor: { key: string; anchor: ScrollAnchor } | null = null;
+  const messagePaneKey = () => {
+    const key = messageKey();
+    return key ? `${key.ch}\u0000${key.p ?? ""}` : null;
+  };
+  const messagePaneMetrics = (): ScrollMetrics | null => {
+    if (!messagePane) return null;
+    return {
+      scrollTop: messagePane.scrollTop,
+      scrollHeight: messagePane.scrollHeight,
+      clientHeight: messagePane.clientHeight,
+    };
+  };
+  const scrollMessagePane = (opening: boolean) => {
+    const metrics = messagePaneMetrics();
+    if (!metrics || !shouldAutoScroll({ opening, wasNearBottom: messagePaneWasNearBottom })) return;
+    messagePane!.scrollTop = scrollTargetFor(metrics);
+    messagePaneWasNearBottom = true;
+  };
+  const scheduleMessagePaneScroll = (opening: boolean) => {
+    if (messagePaneFrame !== undefined) cancelAnimationFrame(messagePaneFrame);
+    messagePaneFrame = requestAnimationFrame(() => {
+      messagePaneFrame = undefined;
+      scrollMessagePane(opening);
+    });
+  };
+  const restoreHistoryPosition = (key: string) => {
+    const pending = pendingHistoryAnchor;
+    if (!pending || pending.key !== key) return;
+    pendingHistoryAnchor = null;
+    requestAnimationFrame(() => {
+      if (messagePaneKey() !== key) return;
+      const metrics = messagePaneMetrics();
+      if (metrics) messagePane!.scrollTop = restorePrependedScroll(pending.anchor, metrics);
+    });
+  };
+  createEffect(() => {
+    const key = messagePaneKey();
+    shownMessages();
+    if (!key || messages.loading) return;
+    const opening = openedMessagePaneKey !== key;
+    if (opening) openedMessagePaneKey = key;
+    scheduleMessagePaneScroll(opening);
+  });
+  createEffect(() => {
+    if (!messagePane || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => scheduleMessagePaneScroll(false));
+    observer.observe(messagePane);
+    onCleanup(() => observer.disconnect());
+  });
+  onCleanup(() => { if (messagePaneFrame !== undefined) cancelAnimationFrame(messagePaneFrame); });
   // Before any older page is pulled, the continuation point is the live page's own
   // cursor — one order, one cursor space, no second source of truth.
   const olderCursor = () => paging().cursor ?? messagePage()?.next_cursor ?? null;
@@ -210,6 +268,12 @@ export default function Chat(props: { embedded?: boolean } = {}) {
     if (!key) return;
     const cursor = olderCursor();
     if (!cursor) return;
+    const paneKey = messagePaneKey();
+    const metrics = messagePaneMetrics();
+    if (paneKey && metrics) {
+      pendingHistoryAnchor = { key: paneKey, anchor: captureScroll(metrics) };
+      messagePaneWasNearBottom = false;
+    }
     const started = beginLoad(paging());
     if (!started.started) return;
     setPaging(started.state);
@@ -221,6 +285,7 @@ export default function Chat(props: { embedded?: boolean } = {}) {
         actingProfileId: key.p,
       });
       setPaging((state) => applyPage(state, started.ticket, pageResult));
+      if (paneKey) restoreHistoryPosition(paneKey);
     } catch (e) {
       setPaging((state) => failLoad(state, started.ticket, e));
     }
@@ -1292,7 +1357,11 @@ export default function Chat(props: { embedded?: boolean } = {}) {
           </div>
         </Show>
 
-        <div class="message-pane">
+        <div
+          class="message-pane"
+          ref={(element) => { messagePane = element; }}
+          onScroll={() => { const metrics = messagePaneMetrics(); if (metrics) messagePaneWasNearBottom = isNearBottom(metrics); }}
+        >
           {/* Honest empty state: with no channel selected there is nothing to say hello in. */}
           <Show when={activeChannelId() || showLegacySidebar()} fallback={
             <div class="chat-empty-state" role="status">
