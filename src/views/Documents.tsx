@@ -792,7 +792,8 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
   const [downloading, setDownloading] = createSignal(false);
   async function downloadFile(doc: Document) {
     if (doc.doc_type !== "file") return;
-    const name = filePreview()?.filename ?? doc.title;
+    const state = filePreview();
+    const name = (state?.status === "ok" ? state.preview.filename : null) ?? doc.title;
     if (isWeb()) {
       const link = window.document.createElement("a");
       link.href = documentsApi.fileDownloadUrl(doc.id);
@@ -860,9 +861,42 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
     return folder ? `${place} / ${folder}` : place;
   };
 
+  // A preview is a convenience, never a gate: it can be slow, truncated, or missing
+  // bytes on disk, and in every one of those cases the reader still gets a reason and
+  // the file itself. So the fetch carries its own deadline and its failure is a VALUE,
+  // not a thrown resource error — a thrown one leaves the pane spinning forever.
+  type FilePreviewState =
+    | { status: "ok"; preview: DocumentFilePreview }
+    | { status: "error"; message: string };
+  const filePreviewTimeoutMs = () => {
+    const injected = (window as unknown as { __GAIA_FILE_PREVIEW_TIMEOUT_MS?: number }).__GAIA_FILE_PREVIEW_TIMEOUT_MS;
+    if (typeof injected === "number" && injected > 0) return injected;
+    const configured = Number(import.meta.env.VITE_FILE_PREVIEW_TIMEOUT_MS);
+    return Number.isFinite(configured) && configured > 0 ? configured : 15000;
+  };
+  const withDeadline = async <T,>(work: Promise<T>, ms: number): Promise<T> => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        work,
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error("the preview took too long to load")), ms);
+        }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  };
   const [filePreview] = createResource(
     () => (selectedDocument()?.doc_type === "file" ? selectedDocumentId() : null),
-    (id) => (id ? documentsApi.readDocumentFile(id) : Promise.resolve(null)),
+    async (id): Promise<FilePreviewState | null> => {
+      if (!id) return null;
+      try {
+        return { status: "ok", preview: await withDeadline(documentsApi.readDocumentFile(id), filePreviewTimeoutMs()) };
+      } catch (error) {
+        return { status: "error", message: (error as Error)?.message ?? String(error) };
+      }
+    },
   );
   const previewDataUrl = (p: DocumentFilePreview) =>
     p.data_base64 ? `data:${p.mime};base64,${p.data_base64}` : "";
@@ -932,6 +966,25 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
           >
             <div class="office-body" innerHTML={rendered() ?? ""} />
           </Show>
+        </Show>
+      </div>
+    );
+  }
+
+  /** No preview: say why, then hand over the bytes anyway — the stored file has its own
+   *  URL, so "we could not render it" never has to mean "you cannot have it". */
+  function FilePreviewUnavailable(props: { message: string }) {
+    const doc = () => selectedDocument();
+    const name = () => doc()?.title ?? "file";
+    return (
+      <div class="file-preview file-preview-error">
+        <p class="error-bar" role="alert">Preview unavailable: {props.message}</p>
+        <Show when={isWeb()}>
+          <p>
+            <a class="file-download" href={fileHref(selectedDocumentId() ?? "")} download={name()}>
+              ↓ Download {name()}
+            </a>
+          </p>
         </Show>
       </div>
     );
@@ -1868,8 +1921,15 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
                   </div>
                 }>
                   <div class="editor-panes">
-                    <Show when={filePreview()} fallback={<p class="hint pad">{filePreview.loading ? "Loading file…" : "Uploaded file unavailable."}</p>}>
-                      {(preview) => <FilePreview preview={preview()} />}
+                    <Show when={filePreview()} fallback={<p class="hint pad" role="status">Loading file…</p>}>
+                      {(state) => (
+                        <Show
+                          when={state().status === "ok" ? (state() as { status: "ok"; preview: DocumentFilePreview }).preview : null}
+                          fallback={<FilePreviewUnavailable message={(state() as { status: "error"; message: string }).message} />}
+                        >
+                          {(preview) => <FilePreview preview={preview()} />}
+                        </Show>
+                      )}
                     </Show>
                   </div>
                 </Show>
