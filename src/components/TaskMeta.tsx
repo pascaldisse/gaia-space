@@ -69,7 +69,7 @@ export function MetaControl(props: {
 }
 
 export type MetaProject = { id: string; name: string; key?: string };
-export type MetaPerson = { id: string; label: string; sub?: string };
+export type MetaPerson = { id: string; label: string; sub?: string; avatarUrl?: string | null };
 
 /** Project chooser — one project or none (a personal task). */
 export function ProjectControl(props: { value: string; projects: MetaProject[]; onChange: (id: string) => void }) {
@@ -222,7 +222,7 @@ export function AssigneeControl(props: {
               <li role="option" aria-selected={on()}
                 classList={{ "tm-opt": true, selected: on() }}
                 onMouseDown={event => { event.preventDefault(); props.onToggle(person.id); }}>
-                <Avatar class="tm-opt-badge" variant="person" name={person.label} />
+                <Avatar class="tm-opt-badge" variant="person" name={person.label} avatarUrl={person.avatarUrl} />
                 <span class="tm-opt-text"><span class="tm-opt-name">{person.label}</span><Show when={person.sub}>{sub => <span class="tm-opt-sub">{sub()}</span>}</Show></span>
                 <span class="tm-checkbox" classList={{ on: on() }} aria-hidden="true"><Show when={on()}><Icon name="check" size={12} /></Show></span>
               </li>

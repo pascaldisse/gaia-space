@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 138;
+pub const SCHEMA_VERSION: i64 = 139;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -1037,6 +1037,12 @@ pub fn migrate(conn: &Connection) -> Result<()> {
         tx.execute_batch(
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_documents_source_anchor ON documents(source_entity_type,source_entity_id) WHERE source_entity_type IS NOT NULL AND source_entity_id IS NOT NULL;",
         )?;
+    }
+    // V139: profiles already use `avatar_url` in new databases. Older databases gain
+    // the same nullable attachment reference, not a parallel blob store; NULL keeps
+    // the initials fallback. `add_column_if_missing` makes replay safe.
+    if version < 139 && table_exists(&tx, "profiles")? {
+        add_column_if_missing(&tx, "profiles", "avatar_url", "TEXT")?;
     }
     // V133: external meeting URLs and durable document provenance. Both source fields
     // remain nullable for legacy rows; the partial index makes duplicate anchored filing
@@ -2465,7 +2471,7 @@ mod tests {
             version, SCHEMA_VERSION,
             "schema version is monotonic and lands on head"
         );
-        assert_eq!(SCHEMA_VERSION, 138);
+        assert_eq!(SCHEMA_VERSION, 139);
         let notes: Option<String> = conn
             .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
                 r.get(0)
@@ -2505,8 +2511,8 @@ mod tests {
             println!("MIGRATION PROOF {label}: user_version={version}");
             version
         };
-        assert_eq!(head("after climb from 100"), 138);
-        assert_eq!(SCHEMA_VERSION, 138);
+        assert_eq!(head("after climb from 100"), 139);
+        assert_eq!(SCHEMA_VERSION, 139);
         // Every rung the merge touched exists exactly once, and by name.
         for (table, column) in [
             ("projects", "lead_id"),
@@ -2527,7 +2533,7 @@ mod tests {
         }
         assert!(table_exists(&conn, "channel_notes").expect("channel_notes"));
         migrate(&conn).expect("migrate() is idempotent at head");
-        assert_eq!(head("after second run at head"), 138);
+        assert_eq!(head("after second run at head"), 139);
     }
 
     #[test]
@@ -3520,7 +3526,7 @@ mod v133_contract_tests {
         assert_eq!(
             conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
                 .unwrap(),
-            138
+            139
         );
         let before: String = conn.query_row("SELECT group_concat(sql, '\n') FROM sqlite_master WHERE type IN ('index','trigger') ORDER BY name", [], |r| r.get(0)).unwrap();
         migrate(&conn).unwrap();

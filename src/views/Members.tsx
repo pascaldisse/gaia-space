@@ -26,6 +26,7 @@ const newProfile = () => ({
   username: "",
   display_name: "",
   email: "",
+  avatar_url: "",
 });
 const newTeam = () => ({ name: "", description: "" });
 
@@ -133,6 +134,7 @@ export default function Members() {
       username: profile.username,
       display_name: profile.display_name,
       email: profile.email ?? "",
+      avatar_url: profile.avatar_url ?? "",
     });
   };
   const abandonEdit = () => {
@@ -188,6 +190,15 @@ export default function Members() {
     },
   );
 
+  const uploadAvatar = (file: File | undefined) => {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) { setProblem("Choose an image for the profile picture."); return; }
+    if (file.size > 10 * 1024 * 1024) { setProblem("Profile picture exceeds the 10 MiB attachment limit."); return; }
+    const reader = new FileReader();
+    reader.onload = () => setProfileDraft({ ...profileDraft(), avatar_url: typeof reader.result === "string" ? reader.result : "" });
+    reader.onerror = () => setProblem("Could not read profile picture.");
+    reader.readAsDataURL(file);
+  };
   const saveProfile = async (event: SubmitEvent) => {
     event.preventDefault();
     const value = profileDraft();
@@ -201,6 +212,7 @@ export default function Members() {
           username: value.username.trim(),
           display_name: value.display_name.trim(),
           email: value.email.trim() || null,
+          avatar_url: value.avatar_url.trim() || null,
         });
       } else {
         await platformApi.createProfile({
@@ -208,6 +220,7 @@ export default function Members() {
           username: value.username.trim(),
           display_name: value.display_name.trim(),
           email: value.email.trim() || null,
+          avatar_url: value.avatar_url.trim() || null,
           archived: false,
         });
       }
@@ -339,7 +352,7 @@ export default function Members() {
       </Show>
       <Show when={selectedProfile()}>{(profile) => (
         <section class="org-profile-panel" aria-label="Profile detail">
-          <div class="panel-title"><Avatar name={profile().display_name || profile().username} size={34} /><div><h2>{isOwnProfile() ? "My profile" : profile().display_name}</h2><span class="org-sub"><code>@{profile().username}</code>{profile().email ? <><span class="dot">·</span>{profile().email}</> : null}</span></div><GhostPill class="small" onClick={() => { setSelectedProfile(null); abandonEdit(); }}>Close</GhostPill></div>
+          <div class="panel-title"><Avatar name={profile().display_name || profile().username} avatarUrl={profile().avatar_url} size={34} /><div><h2>{isOwnProfile() ? "My profile" : profile().display_name}</h2><span class="org-sub"><code>@{profile().username}</code>{profile().email ? <><span class="dot">·</span>{profile().email}</> : null}</span></div><GhostPill class="small" onClick={() => { setSelectedProfile(null); abandonEdit(); }}>Close</GhostPill></div>
           <Show when={isOwnProfile()} fallback={<>
             <div class="org-profile-tabs" role="tablist"><button classList={{ active: profileTab() === "about" }} onClick={() => setProfileTab("about")}>About</button><button classList={{ active: profileTab() === "teams" }} onClick={() => setProfileTab("teams")}>Teams</button><button classList={{ active: profileTab() === "contacts" }} onClick={() => setProfileTab("contacts")}>Contacts</button></div>
             <Show when={profileTab() === "about"}><p class="org-profile-readonly">Username <strong>@{profile().username}</strong></p><p class="org-profile-readonly">Email <strong>{profile().email ?? "Not set"}</strong></p></Show>
@@ -352,6 +365,8 @@ export default function Members() {
               <input class="op-input" aria-label="Display name" placeholder="Display name" value={profileDraft().display_name} onInput={(event) => setProfileDraft({ ...profileDraft(), display_name: event.currentTarget.value })} />
               <input class="op-input" aria-label="Username" placeholder="Username" value={profileDraft().username} onInput={(event) => setProfileDraft({ ...profileDraft(), username: event.currentTarget.value })} />
               <input class="op-input" type="email" aria-label="Email" placeholder="Email" value={profileDraft().email} onInput={(event) => setProfileDraft({ ...profileDraft(), email: event.currentTarget.value })} />
+              <label class="op-avatar-upload">Profile picture <input type="file" accept="image/*" aria-label="Profile picture" onChange={(event) => uploadAvatar(event.currentTarget.files?.[0])} /></label>
+              <Show when={profileDraft().avatar_url}><div class="op-avatar-preview"><Avatar name={profileDraft().display_name || profileDraft().username} avatarUrl={profileDraft().avatar_url} size={42} /><GhostPill type="button" class="small" onClick={() => setProfileDraft({ ...profileDraft(), avatar_url: "" })}>Remove picture</GhostPill></div></Show>
               <button class="primary">Save my profile</button>
             </form>
             <section class="org-profile-settings" aria-label="Email status">
@@ -467,6 +482,7 @@ export default function Members() {
                 <li classList={{ archived: profile.archived }}>
                   <Avatar
                     name={profile.display_name || profile.username}
+                    avatarUrl={profile.avatar_url}
                     size={30}
                   />
                   <div class="org-list-text">
@@ -636,6 +652,7 @@ export default function Members() {
                       <li>
                         <Avatar
                           name={personName(membership.profile_id)}
+                          avatarUrl={profiles()?.find((profile) => profile.id === membership.profile_id)?.avatar_url}
                           size={30}
                         />
                         <div class="org-list-text">

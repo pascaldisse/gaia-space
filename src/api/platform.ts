@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 
-export type Profile = { id: string; username: string; display_name: string; email: string | null; archived: boolean };
+export type Profile = { id: string; username: string; display_name: string; email: string | null; avatar_url: string | null; archived: boolean };
 export type DirectoryFeedEvent = { id:string; event_type:"member.joined"|"member.left"|"team.joined"|"team.left"|"role.changed"; profile_id:string; profile_name:string; team_id:string|null; team_name:string|null; role_id:string|null; role_name:string|null; created_at:number };
 export type DirectoryCalendarEntry = { id:string; profile_id:string; profile_name:string; reason_type:string; date_from:string; date_to:string; availability:string };
 export type ProfileEmailStatus = { profile_id: string; status: "unverified" | "verified" | "bounced"; verified_at: number | null };
