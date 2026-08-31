@@ -155,6 +155,9 @@
 .space-chat-shell .more-item.active { background: var(--teal-soft); color: #006b5e; font-weight: 700; }
 
 /* ── sidebar ──────────────────────────────────────────────────────────── */
+.space-chat-shell.sidebar-collapsed { grid-template-columns: 68px 0 minmax(0, 1fr); }
+.space-chat-shell.sidebar-collapsed .space-sidebar { padding-inline: 0; border-right: 0; overflow: hidden; }
+.space-chat-shell.sidebar-collapsed .sidebar-toggle .rail-icon { transform: rotate(180deg); }
 .space-chat-shell .space-sidebar {
   background: var(--nav-sidebar-gradient);
   color: var(--nav-text);
@@ -341,7 +344,10 @@
 }
 @media (max-width: 720px) {
   .space-chat-shell { grid-template-columns: 68px minmax(0, 1fr); }
-  .space-chat-shell .space-sidebar { display: none; }
+  .space-chat-shell.sidebar-collapsed { grid-template-columns: 68px 0 minmax(0, 1fr); }
+.space-chat-shell.sidebar-collapsed .space-sidebar { padding-inline: 0; border-right: 0; overflow: hidden; }
+.space-chat-shell.sidebar-collapsed .sidebar-toggle .rail-icon { transform: rotate(180deg); }
+.space-chat-shell .space-sidebar { display: none; }
 }
 
 /* ── placeholder views (Home / Development) ───────────────────────────── */

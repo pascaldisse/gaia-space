@@ -149,6 +149,7 @@ export default function SpaceShell(props: {
   children: JSX.Element;
 }): JSX.Element {
   const [moreOpen, setMoreOpen] = createSignal(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = createSignal(false);
   const [filter, setFilter] = createSignal("");
   /** `undefined` = closed; a string (possibly "") = open, bound to that project. */
   const [newChannelFor, setNewChannelFor] = createSignal<string | undefined>();
@@ -504,7 +505,7 @@ export default function SpaceShell(props: {
   );
 
   return (
-    <div class="space-chat-shell theme-space-light" classList={{ "no-sidebar": !hasSidebar() }}>
+    <div class="space-chat-shell theme-space-light" classList={{ "no-sidebar": !hasSidebar(), "sidebar-collapsed": sidebarCollapsed() }}>
       <Show when={channelMenu()}>
         {(menu) => <ContextMenu x={menu().x} y={menu().y} items={menu().items} onClose={() => setChannelMenu(null)} />}
       </Show>
@@ -554,6 +555,9 @@ export default function SpaceShell(props: {
         >
           <span class="rail-icon" aria-hidden="true"><Icon name="menu" size={18} /></span>
           <span class="rail-label">More</span>
+        </button>
+        <button class="rail-item sidebar-toggle" aria-label="Toggle sidebar" title="Toggle sidebar" aria-pressed={sidebarCollapsed()} onClick={() => setSidebarCollapsed((collapsed) => !collapsed)}>
+          <span class="rail-icon" aria-hidden="true">◀</span><span class="rail-label">Sidebar</span>
         </button>
         <div class="rail-spacer" />
         {/* A PLUS MUST CREATE. This button said "Create new", drew a plus, and opened

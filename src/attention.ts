@@ -420,6 +420,8 @@ const ROUTE_BY_ENTITY: Record<string, string> = {
  *  the row stays a statement of fact rather than a dead link. */
 export function routeForAnchor(entityType: string | null, entityId: string | null): Route | undefined {
   if (!entityType || !entityId) return undefined;
+  // Message ids have no standalone route grammar; Chat is the safe real surface.
+  if (entityType === "message") return { view: "Chat" };
   const view = ROUTE_BY_ENTITY[entityType];
   return view ? { view, entityType, entityId } : undefined;
 }
