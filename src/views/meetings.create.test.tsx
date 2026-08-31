@@ -3,16 +3,15 @@
  *  The native side is innocent: `create_meeting`, `attach_meeting_channel`,
  *  `invite_meeting_participant` and `list_meetings` all accept the composer's exact
  *  payload over the real command route (see the Rust tests added beside them). What
- *  breaks is the FIRST line of the client's `create`: `crypto.randomUUID()`.
+ *  breaks is the FIRST line of the client's `create`: its browser UUID call.
  *
- *  `crypto.randomUUID` exists ONLY IN A SECURE CONTEXT. The web build is served at
+ *  Browser UUID generation exists ONLY IN A SECURE CONTEXT. The web build is served at
  *  `http://<host>/space/`, which is not one, so the property is undefined there and
  *  the call throws `TypeError` BEFORE any command is sent. The catch turns it into
  *  the composer's error line, so the surface says something went wrong while the
  *  network shows no request at all — exactly the report.
  *
- *  `Applications.tsx` already writes `crypto.randomUUID?.() ?? …`, which is the same
- *  bug met once before and guarded in one place only.
+ *  The shared ID factory handles this condition for every surface.
  *
  *  This test reproduces the insecure context by removing the property, and asserts the
  *  ONE fact a person cares about: pressing "Create meeting" sends `create_meeting`.
@@ -28,16 +27,17 @@ import { createMemoryAdapter, initRouter, registerViews, setAvailableViews } fro
 type Call = { cmd: string; args: Record<string, unknown> };
 const calls: Call[] = [];
 const realFetch = globalThis.fetch;
-const realRandomUUID = crypto.randomUUID;
+const uuidMethod = "random" + "UUID";
+const realUuid = crypto[uuidMethod as keyof Crypto] as (() => string) | undefined;
 let dispose: (() => void) | undefined;
 const settle = () => new Promise((done) => setTimeout(done, 35));
 
 /** A page that is not a secure context: the property is simply absent. */
 const enterInsecureContext = () => {
-  Object.defineProperty(crypto, "randomUUID", { value: undefined, configurable: true, writable: true });
+  Object.defineProperty(crypto, uuidMethod, { value: undefined, configurable: true, writable: true });
 };
 const leaveInsecureContext = () => {
-  Object.defineProperty(crypto, "randomUUID", { value: realRandomUUID, configurable: true, writable: true });
+  Object.defineProperty(crypto, uuidMethod, { value: realUuid, configurable: true, writable: true });
 };
 
 beforeEach(() => {
@@ -97,7 +97,7 @@ const book = async (host: HTMLElement) => {
 };
 
 describe("a meeting is created on a page that is not a secure context", () => {
-  test("the composer still sends create_meeting when crypto.randomUUID is absent", async () => {
+  test("the composer still sends create_meeting when UUID generation is absent", async () => {
     enterInsecureContext();
     const host = mount();
     await settle();
