@@ -101,6 +101,15 @@
   align-items: flex-end;
 }
 .theme-space-light .composer-hint { display: none; }
+/* Keep the compact idle card; expose the keyboard help while its 1–5-row editor has focus. */
+.theme-space-light .composer:focus-within .composer-hint {
+  display: block;
+  flex: 1 0 100%;
+  margin: 0 0 2px;
+  color: var(--quiet);
+  font-size: 12px;
+  line-height: 1.25;
+}
 .theme-space-light .composer textarea {
   min-height: 1.5em;
   max-height: 7.5em;
