@@ -1,9 +1,9 @@
-import { Show, createSignal, onCleanup, onMount } from "solid-js";
+import { Show, createEffect, createSignal, onCleanup, onMount } from "solid-js";
 import { planningApi, type Issue, type Status } from "../api/issues";
 import { PillMenu } from "./controls";
 import DateField from "./DateField";
 import { ProfilePicker } from "./Pickers";
-import { humanError } from "../session";
+import { humanError, projects, reloadProjects } from "../session";
 import "./WorkItemDrawer.css";
 
 /**
@@ -35,6 +35,18 @@ export default function IssueCreateDrawer(props: {
   onClose: () => void;
   onCreated: (issue: Issue) => void;
 }) {
+  // ISSUE #10: the drawer used to create into whatever project the page happened to
+  // be scoped to — an implicit destination, unnamed on screen and unchangeable. Where
+  // a ticket lands is a decision, so it is a FIELD: pre-filled with the current scope,
+  // required, and readable before the save.
+  const [projectIdValue, setProjectIdValue] = createSignal(props.projectId);
+  createEffect(() => setProjectIdValue(props.projectId));
+  onMount(() => { void reloadProjects(); });
+  const projectOptions = () => {
+    const list = (projects() ?? []).filter(project => !project.archived)
+      .map(project => ({ value: project.id, label: `${project.name} (${project.key})` }));
+    return list.length ? list : [{ value: "", label: "No projects yet" }];
+  };
   const [title, setTitle] = createSignal("");
   const [description, setDescription] = createSignal("");
   const [statusId, setStatusId] = createSignal("");
@@ -59,12 +71,12 @@ export default function IssueCreateDrawer(props: {
   const submit = async (event: SubmitEvent) => {
     event.preventDefault();
     const heading = title().trim();
-    if (!props.projectId) { setError("Pick a project first."); return; }
+    if (!projectIdValue()) { setError("Pick a project first."); return; }
     if (!heading) { setError("Enter a ticket title."); return; }
     setError(""); setBusy(true);
     try {
       const issue = await planningApi.createIssue({
-        project_id: props.projectId, title: heading, description: description().trim() || null,
+        project_id: projectIdValue(), title: heading, description: description().trim() || null,
         status_id: statusId() || null, assignee_id: assigneeId() || null, created_by: null,
         due_date: dueDate() || null, priority: priority() || null, archived: false,
       });
@@ -97,6 +109,11 @@ export default function IssueCreateDrawer(props: {
             of the redesign survived the click. A `<label>` cannot wrap them — a
             caption labels a form CONTROL, and the control here is a button — so
             the caption sits beside it in a div and names it via `label`. */}
+        {/* Project first: it is the ticket's address, and every field under it
+            (status, assignee) is read in that project's terms. */}
+        <div class="wid-field"><span>Project</span>
+          <PillMenu label="Ticket project" value={projectIdValue()} onChange={setProjectIdValue} options={projectOptions()} />
+        </div>
         <div class="wid-field"><span>Status</span>
           <PillMenu label="Ticket status" value={statusId()} onChange={setStatusId}
             options={[{ value: "", label: "No status" }, ...props.statuses.map(status => ({ value: status.id, label: status.name }))]} />
@@ -117,7 +134,7 @@ export default function IssueCreateDrawer(props: {
         <Show when={error()}><p class="wid-error" role="alert">{error()}</p></Show>
         <footer class="wid-actions">
           <button type="button" class="wid-btn" onClick={close} disabled={busy()}>Cancel</button>
-          <button type="submit" class="wid-btn wid-primary" disabled={busy() || !title().trim()}>{busy() ? "Creating…" : "Create ticket"}</button>
+          <button type="submit" class="wid-btn wid-primary" disabled={busy() || !title().trim() || !projectIdValue()}>{busy() ? "Creating…" : "Create ticket"}</button>
         </footer>
       </form>
     </aside>

@@ -59,7 +59,8 @@ describe("new ticket drawer: project selector", () => {
     await settle();
     const beta = Array.from(document.querySelectorAll<HTMLElement>(".pill-menu-option")).find((o) => o.textContent?.includes("Beta"))!;
     expect(beta).toBeTruthy();
-    beta.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    // PillMenu commits on mousedown (it owns the focus story), so drive that.
+    beta.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
     await settle();
     expect(picker.textContent).toContain("Beta");
     host.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
