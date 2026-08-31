@@ -269,15 +269,15 @@
 }
 
 .message-actions {
-  display: flex;
+  display: none;
   gap: 0.5em;
-  opacity: 0;
   font-size: 0.8em;
   margin-top: 0.15em;
 }
 
-.message-row:hover .message-actions {
-  opacity: 1;
+.message-row:hover .message-actions,
+.message-row:focus-within .message-actions {
+  display: flex;
 }
 
 .reaction-row {
