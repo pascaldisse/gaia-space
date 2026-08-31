@@ -7,6 +7,7 @@ import { currentUser, humanError, profileId, profiles, projects, reloadProfiles 
 import { linkEntity } from "../router";
 import SourceLink from "../components/SourceLink";
 import DateField from "../components/DateField";
+import { settleUploadBatch } from "../uploadBatch";
 import "./IssueDetail.css";
 
 /** An issue IS the card: title, description, assignee, due date, status,
@@ -60,14 +61,13 @@ const [targetProjectId, setTargetProjectId] = createSignal("");
   const addComment = async () => { const issue_id = currentId(); const body = commentBody().trim(); if (!issue_id || !body) return; try { await planningApi.addComment({ issue_id, author_id: profileId() || null, body }); setCommentBody(""); await refetch(); props.onChanged?.(); } catch (reason) { setError(humanError(reason)); } };
 const addAttachments = async (files: FileList | null) => {
 const id = currentId(); if (!id || !files?.length) return;
-try {
-for (const file of [...files]) {
+const batch = await settleUploadBatch([...files], async (file) => {
 if (file.size > 10 * 1024 * 1024) throw new Error(`${file.name} exceeds the 10 MiB attachment limit`);
 const data_url = await new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onerror = () => reject(reader.error ?? new Error(`Could not read ${file.name}`)); reader.onload = () => resolve(String(reader.result)); reader.readAsDataURL(file); });
 await planningApi.addAttachment(id, { id: prefixedId("issue-attachment"), file_name: file.name, mime_type: file.type || "application/octet-stream", byte_length: file.size, data_url });
-}
-await refetch(); props.onChanged?.();
-} catch (reason) { setError(issueAttachmentError(reason)); }
+});
+if (batch.successes.length) { await refetch(); props.onChanged?.(); }
+if (batch.failures.length) setError(batch.failures.map(({ item, error }) => `${item.name}: ${issueAttachmentError(error)}`).join("; "));
 };
 const removeAttachment = async (attachment: IssueAttachment) => { try { await planningApi.deleteAttachment(attachment.id); await refetch(); props.onChanged?.(); } catch (reason) { setError(humanError(reason)); } };
   const [availableTags, { refetch: reloadTags }] = createResource(() => issue()?.project_id, id => id ? planningApi.tags(id) : Promise.resolve([]));
