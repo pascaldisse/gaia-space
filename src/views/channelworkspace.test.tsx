@@ -79,18 +79,32 @@ describe("channel workspace", () => {
     expect(owner?.getAttribute("href")).toBe("/projects/p1");
   });
 
-  test("Channel status shows PROJECT numbers under the project's own name", async () => {
+  test("project sidebar sections are collapsed by default and their header controls toggle them", async () => {
     const host = await mount("c-project");
-    const card = host.querySelector(".cw-rail .cw-card") as HTMLElement;
-    // The label carries the project, so no figure can claim to be about this channel alone.
+    const status = host.querySelector<HTMLButtonElement>(".cw-rail-toggle[aria-controls=\"cw-project-status\"]");
+    const team = host.querySelector<HTMLButtonElement>(".cw-rail-toggle[aria-controls=\"cw-project-team\"]");
+    expect(status?.textContent).toContain("Project status");
+    expect(team?.textContent).toContain("Team");
+    expect(status?.getAttribute("aria-expanded")).toBe("false");
+    expect(team?.getAttribute("aria-expanded")).toBe("false");
+    expect(host.querySelector("#cw-project-status")).toBeNull();
+    expect(host.querySelector("#cw-project-team")).toBeNull();
+
+    status?.click();
+    await settle();
+    const card = host.querySelector("#cw-project-status") as HTMLElement;
+    expect(status?.getAttribute("aria-expanded")).toBe("true");
     expect(card.querySelector("h2")?.textContent).toBe("Atlas · Project status");
     const stats = Array.from(card.querySelectorAll(".cw-stat")).map(row => row.textContent);
     expect(stats[0]).toContain("Open tasks");
     expect(stats[0]).toContain("5");
     expect(stats[1]).toContain("Tickets");
     expect(stats[1]).toContain("2");
-    // Project members, with the informational lead role, come from the project — not the channel.
-    expect(host.textContent).toContain("Other Person · Member");
+
+    team?.click();
+    await settle();
+    expect(team?.getAttribute("aria-expanded")).toBe("true");
+    expect(host.querySelector("#cw-project-team")?.textContent).toContain("Other Person · Member");
     expect(host.textContent).toContain("Me · Responsible");
   });
 });

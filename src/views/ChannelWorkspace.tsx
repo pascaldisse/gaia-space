@@ -101,6 +101,10 @@ export default function ChannelWorkspace(): JSX.Element {
   const [memberIds] = createResource(projectIdOf, (id) =>
     id ? personalApi.projectMemberIds(id) : Promise.resolve([] as string[]),
   );
+  // Project-bound chat starts focused on the conversation. The project rail reveals
+  // its two independent sections only when explicitly requested.
+  const [statusOpen, setStatusOpen] = createSignal(false);
+  const [teamOpen, setTeamOpen] = createSignal(false);
   // Meetings carry `channel_id`, so "next meeting" is genuinely channel-scoped here.
   const [meetings] = createResource(actingProfileId, (id) => (id ? meetingsApi.list(id) : Promise.resolve([])));
 
@@ -294,45 +298,34 @@ export default function ChannelWorkspace(): JSX.Element {
 
         <Show when={project()}>
           {(value) => (
-            <aside class="cw-rail" aria-label="Channel status">
-              <section class="cw-card">
-                {/* HONESTY: these are PROJECT figures, so the project owns the title. */}
-                <h2>{value().name} · Project status</h2>
-                <div class="cw-stat"><span>Open tasks</span><strong>{dashboard()?.open_todos ?? "—"}</strong></div>
-                <div class="cw-stat"><span>Tickets</span><strong>{dashboard()?.open_issues ?? "—"}</strong></div>
-                <div class="cw-stat">
-                  <span>Next meeting</span>
-                  <strong>{nextMeeting() ? hhmm(nextMeeting()!.starts_at) : "—"}</strong>
-                </div>
-                <div class="cw-stat"><span>Replies needed</span><strong>{repliesNeeded()}</strong></div>
-              </section>
-
-              {/* REMOVED: a "Create from message" card that taught a mapping
-                  (Task / Ticket / Calendar) for a function the product does not have.
-                  Its comment claimed the WorkItemDrawer was wired to it; the drawer is
-                  imported by nothing but its own test. A card that advertises an absent
-                  feature is worse than an empty column, because the reader spends time
-                  looking for the affordance. When the drawer lands, the act belongs on
-                  the MESSAGE's action row, not in a side card. */}
-
-              <section class="cw-card">
-                <h2>Team</h2>
-                {/* NOTHING YET. The action is real: Organization is where people
-                    are added, and it is the only place this can be fixed. */}
-                <Show when={(memberIds() ?? []).length} fallback={<EmptyState
-                  title="Nobody is in this project yet"
-                  actions={<GhostPill {...linkProps({ view: "Members" })}>Add people</GhostPill>}
-                />}>
-                  <For each={memberIds()}>
-                    {(id) => (
-                      <div class="cw-person">
-                        <span class="cw-mini" aria-hidden="true">{initials(nameOf(id))}</span>
-                        <span>{nameOf(id)} · {roleOf(id)}</span>
-                      </div>
-                    )}
-                  </For>
-                </Show>
-              </section>
+            <aside class="cw-rail" aria-label="Project details">
+              <div class="cw-rail-tabs" role="group" aria-label="Project details">
+                <button type="button" class="cw-rail-toggle" classList={{ active: statusOpen() }} aria-controls="cw-project-status" aria-expanded={statusOpen()} onClick={() => setStatusOpen((open) => !open)}>
+                  Project status
+                </button>
+                <button type="button" class="cw-rail-toggle" classList={{ active: teamOpen() }} aria-controls="cw-project-team" aria-expanded={teamOpen()} onClick={() => setTeamOpen((open) => !open)}>
+                  Team
+                </button>
+              </div>
+              <Show when={statusOpen()}>
+                <section id="cw-project-status" class="cw-card">
+                  <h2>{value().name} · Project status</h2>
+                  <div class="cw-stat"><span>Open tasks</span><strong>{dashboard()?.open_todos ?? "—"}</strong></div>
+                  <div class="cw-stat"><span>Tickets</span><strong>{dashboard()?.open_issues ?? "—"}</strong></div>
+                  <div class="cw-stat"><span>Next meeting</span><strong>{nextMeeting() ? hhmm(nextMeeting()!.starts_at) : "—"}</strong></div>
+                  <div class="cw-stat"><span>Replies needed</span><strong>{repliesNeeded()}</strong></div>
+                </section>
+              </Show>
+              <Show when={teamOpen()}>
+                <section id="cw-project-team" class="cw-card">
+                  <h2>Team</h2>
+                  <Show when={(memberIds() ?? []).length} fallback={<EmptyState title="Nobody is in this project yet" actions={<GhostPill {...linkProps({ view: "Members" })}>Add people</GhostPill>} />}>
+                    <For each={memberIds()}>
+                      {(id) => <div class="cw-person"><span class="cw-mini" aria-hidden="true">{initials(nameOf(id))}</span><span>{nameOf(id)} · {roleOf(id)}</span></div>}
+                    </For>
+                  </Show>
+                </section>
+              </Show>
             </aside>
           )}
         </Show>

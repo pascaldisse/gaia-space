@@ -182,3 +182,23 @@
 .cw-actionbar { margin-top: 4px; }
 .cw-attach-error { font-size: 12.5px; }
 .theme-space-light .cw-attach-error { color: var(--red-ink, var(--red)); }
+.cw-rail-tabs {
+display: flex;
+gap: 6px;
+margin-bottom: 12px;
+}
+.cw-rail-toggle {
+flex: 1;
+padding: 8px 10px;
+border: 1px solid var(--line);
+border-radius: 9px;
+background: var(--paper);
+color: var(--muted);
+font: inherit;
+font-size: 13px;
+font-weight: 650;
+cursor: pointer;
+}
+.cw-rail-toggle:hover,
+.cw-rail-toggle.active { color: var(--ink); }
+.cw-rail-toggle.active { border-color: var(--teal); }
