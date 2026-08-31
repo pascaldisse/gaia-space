@@ -37,7 +37,7 @@ const settle = () => new Promise((done) => setTimeout(done, 40));
 const todo = (over: Partial<TodoItem> = {}): TodoItem => ({
   id: "t1", profile_id: "pa", content: "Buy milk", due_date: null, project_id: null,
   done: false, source_entity_type: null, source_entity_id: null, notes: null,
-  assignee_ids: [] as string[], content_kind: "text", ...over,
+  assignee_ids: ["pa"] as string[], content_kind: "text", ...over,
 });
 const mount = async () => {
   const host = document.createElement("div");

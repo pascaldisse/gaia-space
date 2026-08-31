@@ -50,7 +50,7 @@ describe("one action, one place", () => {
   test("with content the header carries it, and the empty state is gone", async () => {
     const host = await mountWith([
       { id: "t1", profile_id: "p1", content: "Something open", due_date: null, project_id: null, done: false,
-        source_entity_type: null, source_entity_id: null, notes: null, content_kind: "text", assignee_ids: [] },
+        source_entity_type: null, source_entity_id: null, notes: null, content_kind: "text", assignee_ids: ["p1"] },
     ]);
     expect(newTaskButtons(host).length).toBe(1);
     expect(host.querySelector(".empty-lead")).toBeNull();

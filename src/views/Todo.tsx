@@ -14,6 +14,7 @@ import { profileId, profiles, reloadProfiles, projects, reloadProjects } from ".
 import { parseMarkdown } from "../markdownLite";
 import { bandTone, deadlineBand, todayISO, urgencyOf } from "../statusTone";
 import { humanError } from "../session";
+import { myTasks } from "../taskScope";
 import { Icon } from "../components/Icon";
 import ContentHead from "../components/ContentHead";
 
@@ -36,6 +37,7 @@ export default function Todo() {
    *  with, and it only ever grows. */
   const [showDone,setShowDone]=createSignal(false);
   const [todos,{refetch}]=createResource(profileId,id=>id?personalApi.todos(id,true):Promise.resolve([]));
+const scopedTodos=()=>myTasks(todos()??[],profileId());
   /* The project-member read, the assignable-people list and the project list moved
      WITH the editor into components/TaskRowEdit.tsx — including the rule that a
      refused member read is carried as a value and said out loud, never shown as
@@ -122,12 +124,12 @@ export default function Todo() {
   };
 
   const today=todayISO;
-  const openTodos=()=>todos()?.filter(todo=>!todo.done)??[];
+  const openTodos=()=>scopedTodos().filter(todo=>!todo.done);
   // Overdue / due-soon come from the shared urgency rule, not from a local date
   // comparison — see `src/statusTone.ts`. "Due soon" here looks a week ahead.
   const overdue=()=>openTodos().filter(todo=>urgencyOf(todo.due_date,today(),7)==="overdue");
   const dueSoon=()=>openTodos().filter(todo=>["today","soon"].includes(urgencyOf(todo.due_date,today(),7)));
-  const doneCount=()=>todos()?.filter(todo=>todo.done).length??0;
+  const doneCount=()=>scopedTodos().filter(todo=>todo.done).length;
   // Today = due today or already overdue (an overdue task IS today's work); Later = a
   // future due date; No date = never scheduled. Every open task lands in exactly one.
   const todayList=()=>openTodos().filter(todo=>todo.due_date&&todo.due_date<=today());
@@ -137,8 +139,8 @@ export default function Todo() {
    *  not 'nothing exists' and not 'a filter matched nothing' — 'you are finished'. */
   const openCount=()=>openTodos().length;
   /** True while an EmptyState on this surface is showing its own "New task". */
-  const showsEmptyPrimary=()=>!!profileId()&&!todos.loading&&(!(todos()??[]).length||!openCount());
-  const doneList=()=>todos()?.filter(todo=>todo.done)??[];
+  const showsEmptyPrimary=()=>!!profileId()&&!todos.loading&&(!scopedTodos().length||!openCount());
+  const doneList=()=>scopedTodos().filter(todo=>todo.done);
   const postpone=async(todo:TodoItem,days:number)=>{ try { await personalApi.postponeTodo(todo.id,days); refetch(); } catch(reason) { setError(humanError(reason)); } };
   // Only a task that already belongs to a project can become that project's issue.
   const convert=async(todo:TodoItem)=>{ try { if(!todo.project_id) throw new Error("Give the task a project before converting it into a ticket."); await personalApi.convertTodoToIssue(todo.id,todo.project_id); refetch(); } catch(reason) { setError(humanError(reason)); } };
@@ -261,9 +263,9 @@ export default function Todo() {
     <PageHeader
       icon="check"
       title="My tasks"
-      subline="Only your tasks — yours and what people put on you, across every project."
+      subline="Only tasks assigned to you, across every project."
       chips={
-        <Show when={!todos.loading && !!(todos() ?? []).length}>
+        <Show when={!todos.loading && !!scopedTodos().length}>
           <Chip value={openCount()} label="open" />
           <Show when={overdue().length}><Chip value={overdue().length} label="overdue" tone="red" /></Show>
           <Show when={dueSoon().length}><Chip value={dueSoon().length} label="due in 7 days" tone="amber" /></Show>
@@ -295,7 +297,7 @@ export default function Todo() {
               <div class="task-body">
                 <TaskRowEdit
                   mode="create"
-                  task={blankTask(profileId())}
+                  task={{ ...blankTask(profileId()), assignee_ids: [profileId()] }}
                   advanced
                   canEdit
                   canComplete={false}
@@ -309,16 +311,16 @@ export default function Todo() {
         </div>
       </Show>
       <Show when={!profileId()}><p class="personal-empty">No profile selected — add one in Members.</p></Show>
-      <Show when={!todos.loading && !!profileId() && !(todos() ?? []).length}>
+      <Show when={!todos.loading && !!profileId() && !scopedTodos().length}>
         <EmptyState
           title="No tasks yet"
-          hint="Your own list — personal to-dos, and anything assigned to you from a project."
+          hint="Tasks assigned to you appear here, including project work."
           actions={<button type="button" class="primary" onClick={()=>setCreating(true)}>New task</button>}
         />
       </Show>
       {/* A SECTION WITH NOTHING IN IT IS NOT DRAWN — an empty section carries no
           information its own count does not already carry. */}
-      <Show when={!openCount() && !!(todos() ?? []).length}>
+      <Show when={!openCount() && !!scopedTodos().length}>
         <EmptyState
           title="Nothing open"
           hint={doneList().length ? `Everything on your list is done — ${doneList().length} completed.` : undefined}

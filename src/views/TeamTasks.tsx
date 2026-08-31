@@ -2,7 +2,6 @@ import { createMemo, createResource, createSignal, For, onCleanup, onMount, Show
 import { personalApi, type Todo } from "../api/personal";
 import { ProfilePicker } from "../components/Pickers";
 import { humanError, profileId, profiles, projects, reloadProjects } from "../session";
-import { linkProps } from "../router";
 import { ControlRow, GhostPill, QuietSearch } from "../components/controls";
 import ConfirmDialog from "../components/ConfirmDialog";
 import ContextMenu, { type ContextMenuItem } from "../components/ContextMenu";
@@ -13,6 +12,7 @@ import TaskRowEdit, { blankTask, focusTaskRow } from "../components/TaskRowEdit"
 import { Icon } from "../components/Icon";
 import ContentHead from "../components/ContentHead";
 import { bandTone, deadlineBand, todayISO, urgencyOf } from "../statusTone";
+import { groupByAssignee } from "../taskScope";
 import "../components/paper.css";
 import "../components/TaskList.css";
 import "../components/TaskRowEdit.css";
@@ -58,7 +58,6 @@ export default function TeamTasks() {
   });
 
   const nameOf = (id: string) => { const person = profiles()?.find(item => item.id === id); return person?.display_name || person?.username || id; };
-  const projectName = (id: string) => projects()?.find(item => item.id === id)?.name;
   /* A task pointing at a project this client never received is metadata we do not
      have — reported, never invented as a label. */
   const missingProjectId = createMemo(() => {
@@ -164,19 +163,8 @@ export default function TeamTasks() {
       setRowError(humanError(reason)); setPendingDelete(null);
     } finally { setDeleting(false); }
   };
-  /** Grouped by project, project names ordered alphabetically so the list is stable. */
-  const groups = () => {
-    const by = new Map<string, Todo[]>();
-    for (const task of visible()) {
-      const key = task.project_id ?? "";
-      const bucket = by.get(key); bucket ? bucket.push(task) : by.set(key, [task]);
-    }
-    return [...by.entries()]
-      .map(([project_id, items]) => { const name = projectName(project_id); return name === undefined ? undefined : { project_id, name, items }; })
-      .filter((group): group is { project_id: string; name: string; items: Todo[] } => group !== undefined)
-      .sort((a, b) => a.name.localeCompare(b.name));
-  };
-
+  /** Grouped by assignee so the surface directly answers who is carrying each task. */
+  const groups = () => groupByAssignee(visible(), profiles() ?? []);
   return <section class="planning-view team-tasks-view">
     <Show when={menu()}>{open => <ContextMenu x={open().x} y={open().y} items={open().items} onClose={() => setMenu(null)} />}</Show>
     <ConfirmDialog
@@ -269,10 +257,8 @@ export default function TeamTasks() {
         </Show>
         <ContentHead icon="users" title="Who is on what" line="Open a task to edit it, or drag it onto a project in the sidebar to file it there." />
         <For each={groups()}>{group => <section class="tt-group" aria-label={group.name}>
-          {/* The group IS a project, so its heading is the way into that project's
-              own task surface — the same link this view has always carried. */}
           <p class="task-group-heading tt-group-head">
-            <a {...linkProps({ view: "Project Tasks", projectId: group.project_id })}>{group.name}</a>
+            {group.name}
             <span class="count">{group.items.length}</span>
           </p>
           <div class="task-grid tt-list" aria-label={`${group.name} tasks`}>

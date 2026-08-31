@@ -59,10 +59,10 @@ const mount = async (component: () => unknown, options: { failProjectReload?: bo
 afterEach(() => { dispose?.(); dispose = undefined; document.body.innerHTML = ""; calls.length = 0; teamTodoResponse = teamTodos; failProjectReload = false; failTeamTodos = false; delete (window as any).__TAURI_INTERNALS__; setProfileId(""); setProjectId(""); });
 
 describe("team tasks", () => {
-  test("groups running todos from every project, including other people's", async () => {
+  test("groups running todos by assignee, including other people's", async () => {
     const host = await mount(() => <TeamTasks /> as any);
     const groups = Array.from(host.querySelectorAll(".tt-group")).map(group => group.getAttribute("aria-label"));
-    expect(groups).toEqual(["Atlas", "Borealis"]);
+    expect(groups).toEqual(["Me", "Other Person"]);
     /* ADDRESS ONLY (task-card pass): the team row is the shared task TILE now
        (`.task-tile`, views/taskCards.css), so its title is `.task-tile-title` instead
        of a bare <strong>. Same three rows, same order, same grouping. */
@@ -70,9 +70,8 @@ describe("team tasks", () => {
     expect(rows).toEqual(["Atlas mine", "Atlas theirs", "Borealis theirs"]);
     // Creator and assignee of somebody else's task are both visible.
     expect(host.textContent).toContain("Other Person");
-    // Each group heading links to that project's Project Tasks view.
-    const hrefs = Array.from(host.querySelectorAll<HTMLAnchorElement>(".tt-group-head a")).map(a => a.getAttribute("href"));
-    expect(hrefs).toEqual(["/projects/p1/tasks", "/projects/p2/tasks"]);
+    // Group headings name the assignee rather than a project.
+    expect(Array.from(host.querySelectorAll(".tt-group-head")).map(heading => heading.textContent?.replace(/\s+/g, " ").trim())).toEqual(["Me1", "Other Person2"]);
   });
 
   test("assignee filter defaults to ALL people and completed work is hidden", async () => {
