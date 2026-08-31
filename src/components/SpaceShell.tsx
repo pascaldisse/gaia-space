@@ -9,6 +9,7 @@ import ConfirmDialog from "./ConfirmDialog";
 import PromptDialog from "./PromptDialog";
 import ContextMenu, { type ContextMenuItem } from "./ContextMenu";
 import { actingProfileId as chatActingProfileId, bumpChannels, channelsVersion, setActingProfileId } from "../chatIdentity";
+import { dmLabel, partitionChannels } from "../chatPartition";
 import { chatApi, newId as newMessageId, type ChannelSummary } from "../api/chat";
 import { personalApi } from "../api/personal";
 import { documentsApi } from "../api/documents";
@@ -363,12 +364,22 @@ export default function SpaceShell(props: {
   // this it was the one mode where the second bar disappeared mid-navigation.
   const hasSidebar = createMemo(() => MODE_LINKS[mode()].length > 0 || showsChannels() || mode() === "knowledge");
 
-  /** Named channels grouped by owning project; project-less channels land in a final section.
-   *  DMs/threads carry no name and are not part of the project channel list. */
+  /** A profile's display name, for labelling a direct message with the OTHER person. */
+  const displayNameOf = (id: string) => (profiles() ?? []).find((person) => person.id === id)?.display_name;
+
+  /** The two sections the sidebar draws, split by kind and head count — never by whether
+   *  a row happens to carry a name. Chat names a DM after both people, so the old
+   *  name-based split filed every DM under the channels. */
+  const split = createMemo(() => partitionChannels((channels() ?? []).filter((channel) => !channel.archived)));
+
+  /** What a direct message is called HERE: the other person, with me removed. */
+  const labelOfDirect = (channel: ChannelSummary) => dmLabel(channel, actingProfileId(), { nameOf: displayNameOf });
+
+  /** Real channels grouped by owning project; project-less channels land in a final section. */
   const groups = createMemo(() => {
     const term = filter().trim().toLowerCase();
-    const named = (channels() ?? [])
-      .filter((channel) => !channel.archived && !!channel.name)
+    const named = split()
+      .channels.filter((channel) => !!channel.name)
       .filter((channel) => !term || (channel.name ?? "").toLowerCase().includes(term));
     const byProject = new Map<string, ChannelSummary[]>();
     const loose: ChannelSummary[] = [];
@@ -387,12 +398,11 @@ export default function SpaceShell(props: {
     return sections;
   });
 
-  /** Direct messages: channels WITHOUT a name. They live in the Chats mode only. */
+  /** Direct messages: 1:1 conversations. They live in the Chats mode only, and the
+   *  search matches what the row SHOWS — the other person's name. */
   const directs = createMemo(() => {
     const term = filter().trim().toLowerCase();
-    return (channels() ?? [])
-      .filter((channel) => !channel.archived && !channel.name)
-      .filter((channel) => !term || (channel.content_type ?? "").toLowerCase().includes(term));
+    return split().dms.filter((channel) => !term || labelOfDirect(channel).toLowerCase().includes(term));
   });
 
   /** Projects, for the Tasks mode's "by project" section. */
@@ -821,7 +831,7 @@ export default function SpaceShell(props: {
                   {...navLink(() => ({ view: "Chat", entityType: "channel", entityId: channel.id, tab: "messages" }))}
                 >
                   <span class="hash" aria-hidden="true">@</span>
-                  {channel.name ?? "Direct message"}
+                  {labelOfDirect(channel)}
                   <Show when={channel.unread_count > 0}><span class="count">{channel.unread_count}</span></Show>
                 </a>
               )}

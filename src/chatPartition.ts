@@ -89,10 +89,15 @@ export const dmLabel = (
 /**
  * Split a list into the two sections the sidebar draws. Order is preserved inside each
  * section \u2014 sorting is the caller's business, not the partition's.
+ *
+ * `_selfId` is accepted so the call site reads like the label call beside it, but the
+ * split deliberately does NOT depend on who is asking: the same list must produce the
+ * same two sections for everyone, or two people would disagree about what a channel is.
+ * Only the LABEL is personal (`dmLabel`).
  */
 export const partitionChannels = <T extends PartitionableChannel>(
   channels: readonly T[],
-  selfId?: string | null,
+  _selfId?: string | null,
   members?: MemberLookup,
 ): { channels: T[]; dms: T[] } => {
   const grouped: { channels: T[]; dms: T[] } = { channels: [], dms: [] };
