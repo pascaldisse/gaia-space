@@ -34,13 +34,7 @@ fn issue_event(event_type: &str, issue: &Issue) {
         eprintln!("webhook fan-out for {event_type} failed: {e}");
     }
     let result = crate::db::conn().and_then(|c| {
-        let mut recipients = c.prepare("SELECT created_by FROM projects WHERE id=?1 UNION SELECT profile_id FROM project_members WHERE project_id=?1")
-            .map_err(|e| e.to_string())?
-            .query_map([&issue.project_id], |row| row.get::<_, String>(0))
-            .map_err(|e| e.to_string())?
-            .collect::<std::result::Result<Vec<_>, _>>()
-            .map_err(|e| e.to_string())?;
-        recipients.sort();
+        let recipients = involved_recipients_on(&c, issue)?;
         crate::personal::fan_out_notification_on(&c, crate::personal::NotificationFanout {
             recipients, event_type, title: &issue.title, body: issue.description.as_deref(),
             entity_type: "issue", entity_id: &issue.id, target_type: Some("project"), target_id: Some(&issue.project_id),
@@ -51,6 +45,86 @@ fn issue_event(event_type: &str, issue: &Issue) {
     }
 }
 
+/// Who is *directly involved* with an issue. Everyone else — ordinary project
+/// members — keeps seeing the ticket in the project/board views only; their private
+/// feed stays quiet. Pure: the caller supplies the facts, this decides.
+///
+/// Involvement = assignees ∪ reporter/owner (`created_by`) ∪ explicit
+/// subscribers/followers (entity-scoped subscriptions) ∪ mentioned profiles.
+pub(crate) struct IssueInvolvement<'a> {
+    pub assignee_ids: &'a [String],
+    pub created_by: Option<&'a str>,
+    pub subscriber_ids: &'a [String],
+    pub mentioned_ids: &'a [String],
+}
+/// Sorted, de-duplicated, blank-free recipient list. Empty result = no private feed
+/// entry at all, which is the point of this change.
+pub(crate) fn issue_feed_recipients(involvement: &IssueInvolvement<'_>) -> Vec<String> {
+    let mut recipients: Vec<String> = involvement
+        .assignee_ids
+        .iter()
+        .map(String::as_str)
+        .chain(involvement.created_by)
+        .chain(involvement.subscriber_ids.iter().map(String::as_str))
+        .chain(involvement.mentioned_ids.iter().map(String::as_str))
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .map(str::to_owned)
+        .collect();
+    recipients.sort();
+    recipients.dedup();
+    recipients
+}
+/// `@handle` tokens in free text, lower-cased and de-duplicated, in first-seen order.
+/// Pure so mention parsing is testable without a database.
+pub(crate) fn mention_handles(text: &str) -> Vec<String> {
+    let mut handles: Vec<String> = Vec::new();
+    for chunk in text.split('@').skip(1) {
+        let handle: String = chunk
+            .chars()
+            .take_while(|ch| ch.is_ascii_alphanumeric() || *ch == '_' || *ch == '-' || *ch == '.')
+            .collect();
+        let handle = handle.trim_end_matches('.').to_ascii_lowercase();
+        if !handle.is_empty() && !handles.contains(&handle) {
+            handles.push(handle);
+        }
+    }
+    handles
+}
+/// Reads the involvement facts for `issue` and resolves them into feed recipients.
+fn involved_recipients_on(c: &Connection, issue: &Issue) -> Result<Vec<String>> {
+    let mut statement = err(c.prepare("SELECT profile_id FROM subscription_scopes WHERE target_type='entity' AND target_id=?1 AND enabled=1"))?;
+    let mut subscriber_ids = err(err(statement.query_map([&issue.id], |row| row.get::<_, String>(0)))?
+        .collect::<rusqlite::Result<Vec<_>>>())?;
+    subscriber_ids.sort();
+    let text = match &issue.description {
+        Some(description) => format!("{} {description}", issue.title),
+        None => issue.title.clone(),
+    };
+    let mut mentioned_ids = Vec::new();
+    for handle in mention_handles(&text) {
+        if let Some(profile_id) = err(c
+            .query_row(
+                "SELECT id FROM profiles WHERE lower(username)=?1",
+                [&handle],
+                |row| row.get::<_, String>(0),
+            )
+            .optional())?
+        {
+            mentioned_ids.push(profile_id);
+        }
+    }
+    let mut assignee_ids = issue.assignee_ids.clone();
+    if let Some(assignee) = &issue.assignee_id {
+        assignee_ids.push(assignee.clone());
+    }
+    Ok(issue_feed_recipients(&IssueInvolvement {
+        assignee_ids: &assignee_ids,
+        created_by: issue.created_by.as_deref(),
+        subscriber_ids: &subscriber_ids,
+        mentioned_ids: &mentioned_ids,
+    }))
+}
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Issue {
     pub id: String,
@@ -1981,6 +2055,91 @@ mod tests {
         assert!(valid_anchor(&Some("message".into()), &Some("m-1".into())).is_ok());
         assert!(valid_anchor(&Some("message".into()), &None).is_err());
         assert!(valid_anchor(&None, &Some("m-1".into())).is_err());
+    }
+
+    fn issue_fixture() -> Issue {
+        Issue {
+            id: "i".into(),
+            project_id: "p".into(),
+            number: 1,
+            title: "Ship notes".into(),
+            description: None,
+            status_id: None,
+            assignee_id: None,
+            created_by: None,
+            due_date: None,
+            priority: None,
+            archived: false,
+            assignee_ids: Vec::new(),
+            source_entity_type: None,
+            source_entity_id: None,
+        }
+    }
+
+    /// A plain project member is not "involved": the ticket belongs in the project and
+    /// board views, not in everybody's private feed.
+    #[test]
+    fn an_uninvolved_member_gets_no_feed_recipient() {
+        assert!(issue_feed_recipients(&IssueInvolvement {
+            assignee_ids: &[],
+            created_by: None,
+            subscriber_ids: &[],
+            mentioned_ids: &[],
+        })
+        .is_empty());
+    }
+
+    #[test]
+    fn assignee_owner_subscriber_and_mention_are_involved() {
+        assert_eq!(
+            issue_feed_recipients(&IssueInvolvement {
+                assignee_ids: &["pa".into(), "pa".into()],
+                created_by: Some("powner"),
+                subscriber_ids: &["psub".into()],
+                mentioned_ids: &["pmention".into(), " ".into()],
+            }),
+            vec!["pa", "pmention", "powner", "psub"],
+            "deduplicated, sorted, blanks dropped"
+        );
+    }
+
+    #[test]
+    fn mention_handles_are_parsed_from_free_text() {
+        assert_eq!(
+            mention_handles("cc @Alice and @bob-2, ping @alice again"),
+            vec!["alice", "bob-2"]
+        );
+        assert_eq!(mention_handles("no handles here"), Vec::<String>::new());
+    }
+
+    /// End to end over the real schema: only the involved profiles are resolved, the
+    /// other project member is not.
+    #[test]
+    fn involved_recipients_exclude_bystanding_project_members() {
+        let c = crate::db::open_in_memory().unwrap();
+        crate::db::migrate(&c).unwrap();
+        for (id, username) in [
+            ("pa", "alice"),
+            ("pb", "bob"),
+            ("pc", "carol"),
+            ("pd", "dave"),
+        ] {
+            c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES(?1,?2,?2,unixepoch())", params![id, username]).unwrap();
+        }
+        c.execute("INSERT INTO projects(id,name,key,archived,created_at) VALUES('p','P','P',0,unixepoch())", []).unwrap();
+
+        let mut issue = issue_fixture();
+        assert!(
+            involved_recipients_on(&c, &issue).unwrap().is_empty(),
+            "nobody involved yet"
+        );
+
+        c.execute("INSERT INTO subscription_scopes(profile_id,event_type,target_type,target_id,enabled) VALUES('pc','*','entity','i',1)", []).unwrap();
+        issue.assignee_ids = vec!["pa".into()];
+        issue.description = Some("please review @bob".into());
+        let recipients = involved_recipients_on(&c, &issue).unwrap();
+        assert_eq!(recipients, vec!["pa", "pb", "pc"]);
+        assert!(!recipients.contains(&"pd".to_string()), "bystander stays out");
     }
 
     #[test]
