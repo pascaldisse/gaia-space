@@ -39,6 +39,7 @@ import {
   resetPaging,
   visibleMessages,
 } from "../messagePaging";
+import { reactionChipTitle, reactionChips } from "./chatReactions";
 import { ballotAfterClick, optionShare, pollDraftError, pollIsOpen, POLL_MIN_OPTIONS } from "../poll";
 import { applicationsApi } from "../api/applications";
 import { personalApi } from "../api/personal";
@@ -1144,27 +1145,33 @@ export default function Chat(props: { embedded?: boolean } = {}) {
           </div>
         </Show>
 
-        <Show when={!activeChannel()?.read_only}><div class="reaction-row">
-          <For each={m.reactions}>
+        {/* Reactions already on the message are content: they render always, even in a
+            read-only channel and with no hover. Only the "add" palette is an
+            affordance, so only it is gated on write rights and on hover (CSS). */}
+        <Show when={reactionChips(m).length || !activeChannel()?.read_only}><div class="reaction-row">
+          <For each={reactionChips(m)}>
             {(r) => (
               <span
                 class="reaction-chip"
                 classList={{ mine: r.mine }}
+                title={reactionChipTitle(r)}
                 onClick={() => toggleReaction(m, r.emoji, inThread)}
               >
                 {r.emoji} {r.count}
               </span>
             )}
           </For>
-          <span class="reaction-add">
-            <For each={QUICK_EMOJI}>
-              {(e) => (
-                <span class="reaction-chip ghost" onClick={() => toggleReaction(m, e, inThread)}>
-                  {e}
-                </span>
-              )}
-            </For>
-          </span>
+          <Show when={!activeChannel()?.read_only}>
+            <span class="reaction-add">
+              <For each={QUICK_EMOJI}>
+                {(e) => (
+                  <span class="reaction-chip ghost" onClick={() => toggleReaction(m, e, inThread)}>
+                    {e}
+                  </span>
+                )}
+              </For>
+            </span>
+          </Show>
         </div></Show>
 
         <Show when={!activeChannel()?.read_only}><div class="message-actions">

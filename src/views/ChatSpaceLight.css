@@ -81,9 +81,12 @@
   font-weight: 650;
 }
 .theme-space-light .message-actions button:hover { background: var(--teal-soft); color: #006b5e; border-color: transparent; }
-.theme-space-light .reaction-row { opacity: 0; transition: opacity .12s ease; }
-.theme-space-light .message-row:hover .reaction-row,
-.theme-space-light .message-row:focus-within .reaction-row { opacity: 1; }
+/* Existing reactions are content, not an affordance: they stay visible always.
+   Only the "add a reaction" palette is quiet until the row is hovered. */
+.theme-space-light .reaction-row { opacity: 1; }
+.theme-space-light .reaction-add { opacity: 0; transition: opacity .12s ease; }
+.theme-space-light .message-row:hover .reaction-add,
+.theme-space-light .message-row:focus-within .reaction-add { opacity: 1; }
 .theme-space-light .thread-badge { color: #116ba8; font-size: 13px; font-weight: 650; margin-top: 8px; }
 
 /* ── composer: bordered card, hint line, teal round send ──────────────────── */
