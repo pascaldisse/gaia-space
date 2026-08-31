@@ -226,6 +226,13 @@
   padding: 0.4em 0.6em;
   border-radius: 6px;
 }
+/* Consecutive authored messages keep their content but share the preceding identity. */
+.message-row.grouped {
+  margin-top: -0.2em;
+  padding-block: 0.15em;
+}
+.message-row.grouped .message-head,
+.message-row.grouped .message-avatar { display: none; }
 
 /* Light-shell-only chrome. Present in the markup for every theme, drawn in none but
    `.theme-space-light` (see ChatSpaceLight.css), so grouped/flat render unchanged. */

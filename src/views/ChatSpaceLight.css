@@ -19,17 +19,24 @@
   padding: 6px 20px 14px;
   box-shadow: var(--shadow);
   gap: 0;
+  --chat-row-pad: .625rem;
+  --chat-group-pad: .1875rem;
 }
 
 .theme-space-light .message-row {
   display: grid;
   grid-template-columns: 40px minmax(0, 1fr);
   column-gap: 13px;
-  padding: 14px 0;
+  padding: var(--chat-row-pad) 0;
   border-radius: 0;
   border-top: 1px solid rgba(225, 216, 204, .65);
 }
 .theme-space-light .message-row:first-child { border-top: 0; }
+.theme-space-light .message-row.grouped {
+  margin-top: 0;
+  padding-block: var(--chat-group-pad);
+  border-top-color: transparent;
+}
 .theme-space-light .message-row:hover { background: transparent; }
 .theme-space-light .message-row > *:not(.message-avatar) { grid-column: 2; }
 
