@@ -374,6 +374,10 @@ pub struct ReactionSummary {
     pub emoji: String,
     pub count: i64,
     pub mine: bool,
+    /// Display names of everyone who reacted, in stable order — the client shows
+    /// them as the chip's tooltip so "who" is one hover away, never a click.
+    #[serde(default)]
+    pub reactors: Vec<String>,
 }
 #[derive(Debug, Serialize, Deserialize)]
 pub struct MessageView {
@@ -1064,16 +1068,28 @@ fn reactions_for_impl(
 ) -> Result<Vec<ReactionSummary>> {
     let mut s = c
         .prepare(
-            "SELECT emoji, COUNT(*), SUM(profile_id IS ?2) FROM reactions WHERE message_id=?1 GROUP BY emoji ORDER BY emoji",
+            "SELECT r.emoji, COUNT(*), SUM(r.profile_id IS ?2), \
+             GROUP_CONCAT(COALESCE(p.display_name, r.profile_id), CHAR(31)) \
+             FROM reactions r LEFT JOIN profiles p ON p.id = r.profile_id \
+             WHERE r.message_id=?1 GROUP BY r.emoji ORDER BY r.emoji",
         )
         .map_err(|e| e.to_string())?;
     let rows = s
         .query_map(rusqlite::params![message_id, acting_profile_id], |r| {
             let mine: i64 = r.get(2)?;
+            let names: Option<String> = r.get(3)?;
             Ok(ReactionSummary {
                 emoji: r.get(0)?,
                 count: r.get(1)?,
                 mine: mine > 0,
+                reactors: names
+                    .map(|n| {
+                        n.split('\u{1f}')
+                            .filter(|s| !s.is_empty())
+                            .map(|s| s.to_string())
+                            .collect()
+                    })
+                    .unwrap_or_default(),
             })
         })
         .map_err(|e| e.to_string())?
