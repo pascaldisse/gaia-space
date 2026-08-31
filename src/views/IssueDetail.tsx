@@ -12,6 +12,12 @@ import "./IssueDetail.css";
 /** An issue IS the card: title, description, assignee, due date, status,
  *  checklists (its to-do list), tags, time and sub-items — one surface,
  *  used by the board and by any other view that opens an issue. */
+export const issueAttachmentError = (reason: unknown) => {
+const message = humanError(reason);
+return message === "project access denied"
+? "You cannot attach files to this ticket because you are not a project member. Ask the project owner to add you to the project."
+: message;
+};
 export default function IssueDetail(props: { issueId: string; statuses?: Status[]; onChanged?: () => void; onClose?: () => void }) {
   const [error, setError] = createSignal("");
 const [transfer, setTransfer] = createSignal<"clone" | "move">();
@@ -61,7 +67,7 @@ const data_url = await new Promise<string>((resolve, reject) => { const reader =
 await planningApi.addAttachment(id, { id: prefixedId("issue-attachment"), file_name: file.name, mime_type: file.type || "application/octet-stream", byte_length: file.size, data_url });
 }
 await refetch(); props.onChanged?.();
-} catch (reason) { setError(humanError(reason)); }
+} catch (reason) { setError(issueAttachmentError(reason)); }
 };
 const removeAttachment = async (attachment: IssueAttachment) => { try { await planningApi.deleteAttachment(attachment.id); await refetch(); props.onChanged?.(); } catch (reason) { setError(humanError(reason)); } };
   const [availableTags, { refetch: reloadTags }] = createResource(() => issue()?.project_id, id => id ? planningApi.tags(id) : Promise.resolve([]));

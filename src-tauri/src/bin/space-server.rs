@@ -2491,6 +2491,9 @@ enum CommandPolicy {
     PipelineScriptExecute,
     BoardRead,
     IssueRead,
+    /// Ticket attachments are evidence attached to project work: every member who
+    /// may create a ticket may add or remove its evidence.
+    IssueAttachmentWrite,
     IssueAssign,
     ProjectMemberAdmin,
     ProjectDeadlineWrite,
@@ -2595,6 +2598,7 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "attempt_merge"
         | "open_merge_request"
         | "list_channels" => CommandPolicy::Unavailable,
+        "add_issue_attachment" | "delete_issue_attachment" => CommandPolicy::IssueAttachmentWrite,
         "add_channel_member"
         | "add_issue_child"
         | "add_reaction"
@@ -3573,6 +3577,32 @@ fn authorize_command(
         // Assigning people is an issue write scoped to the project. Whoever may
         // change the project's membership (owner/admin) also brings somebody new
         // onto it by assigning them; everybody else can only pick existing members.
+        CommandPolicy::IssueAttachmentWrite => {
+            let issue: String = if name == "add_issue_attachment" {
+                arg(body, "issue_id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?
+            } else {
+                let attachment_id: String = arg(body, "id")
+                    .map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
+                db::conn()
+                    .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?
+                    .query_row(
+                        "SELECT issue_id FROM issue_attachments WHERE id=?1",
+                        [&attachment_id],
+                        |row| row.get(0),
+                    )
+                    .map_err(|_| err(StatusCode::FORBIDDEN, "project access denied"))?
+            };
+            let project_id = issue_project(&issue)
+                .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?
+                .ok_or_else(|| err(StatusCode::FORBIDDEN, "project access denied"))?;
+            if project_readable(user, &project_id)
+                .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?
+            {
+                Ok(())
+            } else {
+                Err(err(StatusCode::FORBIDDEN, "project access denied"))
+            }
+        }
         CommandPolicy::IssueAssign => {
             let issue: String =
                 arg(body, "issue_id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
@@ -10482,7 +10512,23 @@ mod tests {
     /// An issue is worked by PEOPLE: several at once, sub-issues included, and only
     /// people who belong to the project. Outsiders can neither read nor assign.
     #[tokio::test]
-    async fn issue_assignment_takes_several_project_members_and_refuses_outsiders() {
+    async fn issue_attachment_write_allows_project_members_and_refuses_outsiders() {
+    let _serial = test_lock();
+    setup();
+    let c = db::conn().unwrap();
+    c.execute_batch("INSERT INTO projects(id,name,key,created_by,created_at) VALUES('attachment-project','Attachments','ATTACH','pa',1); INSERT INTO project_members(project_id,profile_id) VALUES('attachment-project','pb'); INSERT INTO issues(id,project_id,number,title,archived) VALUES('attachment-issue','attachment-project',1,'Evidence',0);").unwrap();
+    let attachment = json!({"id":"attachment-evidence","file_name":"proof.txt","mime_type":"text/plain","byte_length":2,"data_url":"data:text/plain,ok"});
+    let (status, value) = call(cookie("tb"), "add_issue_attachment", json!({"issue_id":"attachment-issue","attachment":attachment})).await;
+    assert_eq!(status, StatusCode::OK, "{value}");
+    assert_eq!(value["value"]["issue_id"], "attachment-issue");
+    let (status, _) = call(cookie("td"), "add_issue_attachment", json!({"issue_id":"attachment-issue","attachment":{"id":"attachment-forbidden","file_name":"secret.txt","mime_type":"text/plain","byte_length":2,"data_url":"data:text/plain,no"}})).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, value) = call(cookie("tb"), "delete_issue_attachment", json!({"id":"attachment-evidence"})).await;
+    assert_eq!(status, StatusCode::OK, "{value}");
+}
+
+#[tokio::test]
+async fn issue_assignment_takes_several_project_members_and_refuses_outsiders() {
         let _serial = test_lock();
         setup();
         let c = db::conn().unwrap();
