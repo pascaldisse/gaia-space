@@ -159,13 +159,18 @@ const onDrop = (event: DragEvent, column: BoardColumn) => { event.preventDefault
 const cardsOf = (column: BoardColumn, laneIssues = issues() ?? []) => laneIssues.filter(issue => column.status_ids.includes(issue.status_id ?? ""));
 const laneGroups = () => {
 const label = (issue: Issue) => {
-if (swimlaneGroup() === "assignee") return issue.assignee_ids?.length ? issue.assignee_ids.map(id => profiles()?.find(p => p.id === id)?.display_name || profiles()?.find(p => p.id === id)?.username || id).join(", ") : "Unassigned";
 if (swimlaneGroup() === "creator") return issue.created_by ? profiles()?.find(p => p.id === issue.created_by)?.display_name || profiles()?.find(p => p.id === issue.created_by)?.username || issue.created_by : "No creator";
 if (swimlaneGroup() === "due_date") return issue.due_date || "No due date";
 return "All work";
 };
+const assigneeLabel = (id: string) => profiles()?.find(p => p.id === id)?.display_name || profiles()?.find(p => p.id === id)?.username || id;
 const groups = new Map<string, Issue[]>();
-for (const issue of issues() ?? []) { const name = label(issue); groups.set(name, [...(groups.get(name) ?? []), issue]); }
+for (const issue of issues() ?? []) {
+const names = swimlaneGroup() === "assignee"
+? (issue.assignee_ids?.length ? issue.assignee_ids.map(assigneeLabel) : ["Unassigned"])
+: [label(issue)];
+for (const name of names) groups.set(name, [...(groups.get(name) ?? []), issue]);
+}
 // An empty board still has columns to show and cards to add to them — a board
 // with zero issues must not hide the whole kanban, only report each column empty.
 if (!groups.size) groups.set(swimlaneGroup() === "none" ? "All work" : "No issues yet", []);
@@ -473,14 +478,20 @@ function Backlog(props: { boardId: string; columns: BoardColumn[]; sprintId?: st
 function BoardMatrix(props: { issues: Issue[]; columns: BoardColumn[]; statuses?: Status[] }) {
 const [axis, setAxis] = createSignal<"assignee" | "priority">("assignee");
 const statusName = (column: BoardColumn) => column.name;
-const rowName = (issue: Issue) => axis() === "priority" ? (issue.priority ?? "No priority") : (issue.assignee_ids?.length ? issue.assignee_ids.map(id => profiles()?.find(p => p.id === id)?.display_name ?? id).join(", ") : "Unassigned");
-const rows = () => [...new Set(props.issues.map(rowName))].sort((a, b) => a.localeCompare(b));
+const assigneeName = (id: string) => profiles()?.find(p => p.id === id)?.display_name ?? id;
+const rows = () => axis() === "priority"
+? [...new Set(props.issues.map(issue => issue.priority ?? "No priority"))].sort((a, b) => a.localeCompare(b))
+: [...new Set(props.issues.flatMap(issue => issue.assignee_ids?.length ? issue.assignee_ids : [""]))].sort((a, b) => assigneeName(a || "Unassigned").localeCompare(assigneeName(b || "Unassigned")));
+const rowLabel = (row: string) => axis() === "priority" ? row : (row ? assigneeName(row) : "Unassigned");
+const includesRow = (issue: Issue, row: string) => axis() === "priority"
+? (issue.priority ?? "No priority") === row
+: row ? issue.assignee_ids.includes(row) : !issue.assignee_ids.length;
 const inColumn = (issue: Issue, column: BoardColumn) => column.status_ids.includes(issue.status_id ?? "");
 return <section class="board-matrix" aria-label="Board matrix report">
 <PillMenu class="chip chip-select" label="Rows" value={axis()} onChange={value => setAxis(value as "assignee" | "priority")}
   options={[{ value: "assignee", label: "Rows: Assignee" }, { value: "priority", label: "Rows: Priority" }]} />
 <Show when={props.issues.length} fallback={<EmptyState variant="no-match" title="No board tickets to report on yet." />}>
-<table><thead><tr><th>{axis() === "assignee" ? "Assignee" : "Priority"}</th><For each={props.columns}>{column => <th>{statusName(column)}</th>}</For><th>Total</th></tr></thead><tbody><For each={rows()}>{row => <tr><th>{row}</th><For each={props.columns}>{column => <td>{props.issues.filter(issue => rowName(issue) === row && inColumn(issue, column)).length}</td>}</For><td>{props.issues.filter(issue => rowName(issue) === row).length}</td></tr>}</For></tbody></table>
+<table><thead><tr><th>{axis() === "assignee" ? "Assignee" : "Priority"}</th><For each={props.columns}>{column => <th>{statusName(column)}</th>}</For><th>Total</th></tr></thead><tbody><For each={rows()}>{row => <tr><th>{rowLabel(row)}</th><For each={props.columns}>{column => <td>{props.issues.filter(issue => includesRow(issue, row) && inColumn(issue, column)).length}</td>}</For><td>{props.issues.filter(issue => includesRow(issue, row)).length}</td></tr>}</For></tbody></table>
 </Show>
 </section>;
 }

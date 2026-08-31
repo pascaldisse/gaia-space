@@ -12,6 +12,7 @@ import {
   type MessengerContact,
 } from "../api/platform";
 import { Avatar } from "../components/Avatar";
+import { compressAvatarDataUrl, readAvatarFile, readFileAsDataUrl } from "../profileAvatar";
 import { Icon } from "../components/Icon";
 import PageHeader from "../components/PageHeader";
 import EmptyState from "../components/EmptyState";
@@ -190,14 +191,16 @@ export default function Members() {
     },
   );
 
-  const uploadAvatar = (file: File | undefined) => {
+  const uploadAvatar = async (file: File | undefined) => {
     if (!file) return;
-    if (!file.type.startsWith("image/")) { setProblem("Choose an image for the profile picture."); return; }
-    if (file.size > 10 * 1024 * 1024) { setProblem("Profile picture exceeds the 10 MiB attachment limit."); return; }
-    const reader = new FileReader();
-    reader.onload = () => setProfileDraft({ ...profileDraft(), avatar_url: typeof reader.result === "string" ? reader.result : "" });
-    reader.onerror = () => setProblem("Could not read profile picture.");
-    reader.readAsDataURL(file);
+    try {
+      const source = await readAvatarFile(file, readFileAsDataUrl);
+      const avatar_url = await compressAvatarDataUrl(source);
+      setProfileDraft({ ...profileDraft(), avatar_url });
+      setProblem("");
+    } catch (error) {
+      setProblem(String(error));
+    }
   };
   const saveProfile = async (event: SubmitEvent) => {
     event.preventDefault();

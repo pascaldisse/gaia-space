@@ -145,4 +145,38 @@ describe("document files", () => {
     expect(uploaded[0]).toContain("filename=a.txt");
     expect(uploaded[0]).toContain("container_type=my-docs");
   });
+
+  test("a failed middle upload does not drop the remaining files", async () => {
+    setProfileId("me");
+    const uploaded: string[] = [];
+    serve({ list_documents: [], list_document_folders: [] });
+    class BatchXhr {
+      upload = { onprogress: null as ((event: { lengthComputable: boolean; loaded: number; total: number }) => void) | null };
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      status = 200;
+      responseText = "";
+      withCredentials = false;
+      private url = "";
+      open(_method: string, url: string) { this.url = url; }
+      setRequestHeader() {}
+      send() {
+        uploaded.push(this.url);
+        this.responseText = this.url.includes("filename=bad.txt")
+          ? JSON.stringify({ ok: false, error: "upload refused" })
+          : JSON.stringify({ ok: true, value: { document_id: `up-${uploaded.length}`, filename: "ok.txt", mime: "text/plain", size: 1, uploaded_by: "me", uploaded_at: 1 } });
+        setTimeout(() => this.onload?.(), 0);
+      }
+    }
+    (globalThis as unknown as { XMLHttpRequest: unknown }).XMLHttpRequest = BatchXhr;
+    const host = await mount();
+    const tree = host.querySelector(".documents-editor") as HTMLElement;
+    const drop = new Event("drop", { bubbles: true }) as DragEvent;
+    Object.defineProperty(drop, "dataTransfer", { value: { files: [new File(["a"], "first.txt"), new File(["b"], "bad.txt"), new File(["c"], "last.txt")], types: ["Files"] } });
+    tree.dispatchEvent(drop);
+    await settle(120);
+    expect(uploaded).toHaveLength(3);
+    expect(uploaded.map((url) => new URL(url, "http://test").searchParams.get("filename"))).toEqual(["first.txt", "bad.txt", "last.txt"]);
+    expect(host.textContent).toContain("bad.txt: Error: upload refused");
+  });
 });
