@@ -3,9 +3,15 @@ import type { Todo } from "./api/personal";
 export type TaskMember = { id: string; display_name?: string | null; username?: string | null };
 export type AssigneeGroup = { id: string; name: string; items: Todo[] };
 
-/** Tasks assigned to the active profile; authorship alone does not put work on My Tasks. */
+/** My Tasks is MINE TO CARRY: work assigned to me, plus my own task that nobody was
+ *  assigned to. Somebody else's work never appears (GS #4), but a task I wrote for
+ *  myself and never assigned must not vanish from the only surface that showed it. */
 export const myTasks = (tasks: Todo[], userId: string): Todo[] =>
-  userId ? tasks.filter(task => task.assignee_ids.includes(userId)) : [];
+  userId
+    ? tasks.filter(task =>
+        task.assignee_ids.includes(userId) ||
+        (task.assignee_ids.length === 0 && task.profile_id === userId))
+    : [];
 
 /** A task appears beneath each assigned person's name; unassigned work remains explicit. */
 export const groupByAssignee = (tasks: Todo[], members: TaskMember[]): AssigneeGroup[] => {

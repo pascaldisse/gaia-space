@@ -297,7 +297,7 @@ const scopedTodos=()=>myTasks(todos()??[],profileId());
               <div class="task-body">
                 <TaskRowEdit
                   mode="create"
-                  task={{ ...blankTask(profileId()), assignee_ids: [profileId()] }}
+                  task={blankTask(profileId())}
                   advanced
                   canEdit
                   canComplete={false}

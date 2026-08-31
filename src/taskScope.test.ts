@@ -8,9 +8,14 @@ const task = (id: string, assignee_ids: string[], profile_id = "author"): Todo =
 });
 
 describe("task scope", () => {
-  test("My Tasks includes only tasks assigned to the active user", () => {
-    const tasks = [task("assigned", ["me"], "other"), task("authored", [], "me"), task("other", ["other"], "other")];
-    expect(myTasks(tasks, "me").map(item => item.id)).toEqual(["assigned"]);
+  test("My Tasks carries my assigned work and my own unassigned task, never other people's", () => {
+    const tasks = [
+      task("assigned", ["me"], "other"),
+      task("authored", [], "me"),
+      task("other", ["other"], "other"),
+      task("authored-by-other", [], "other"),
+    ];
+    expect(myTasks(tasks, "me").map(item => item.id)).toEqual(["assigned", "authored"]);
     expect(myTasks(tasks, "")).toEqual([]);
   });
 
