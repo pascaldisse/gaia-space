@@ -8,6 +8,7 @@ import { ProfilePicker } from "../components/Pickers";
 import { ControlRow, GhostPill, QuietSearch } from "../components/controls";
 import EmptyState from "../components/EmptyState";
 import TaskRowEdit, { blankTask, focusTaskRow } from "../components/TaskRowEdit";
+import { stableTasks } from "./taskIdentity";
 import { humanError, profileId, profiles, projectId as sessionProject, projects, setProjectId } from "../session";
 import { linkProps, navigate, route } from "../router";
 import { Icon } from "../components/Icon";
@@ -95,7 +96,10 @@ export default function ProjectTasks(props: { projectId?: string } = {}) {
     event.preventDefault(); openTickets();
   } });
   const openTicketCount = () => dashboard()?.open_issues ?? 0;
-  const visibleTasks = () => (tasks() ?? []).filter(task => {
+  /* Rows keep their identity across re-reads (see taskIdentity.ts): a poll must not
+     dispose the row a person is editing. */
+  const taskRows = stableTasks(() => (tasks.error ? [] : tasks()));
+  const visibleTasks = () => taskRows().filter(task => {
     const query = text().trim().toLowerCase();
     return (!query || task.content.toLowerCase().includes(query) || (task.notes ?? "").toLowerCase().includes(query))
       && (!assigneeId() || task.assignee_ids.includes(assigneeId()));
@@ -192,6 +196,11 @@ export default function ProjectTasks(props: { projectId?: string } = {}) {
   const todayList = () => openTasks().filter(task => task.due_date && task.due_date <= todayISO());
   const laterList = () => openTasks().filter(task => task.due_date && task.due_date > todayISO());
   const somedayList = () => openTasks().filter(task => !task.due_date);
+  const dayGroups = [
+    { key: "today", label: "Today", rows: todayList },
+    { key: "later", label: "Later", rows: laterList },
+    { key: "someday", label: "No date", rows: somedayList },
+  ];
   const overdueCount = () => openTasks().filter(task => urgencyOf(task.due_date, todayISO(), 7) === "overdue").length;
   const dueSoonCount = () => openTasks().filter(task => ["today", "soon"].includes(urgencyOf(task.due_date, todayISO(), 7))).length;
   /* Three different facts about "there is nothing to read": the project has no tasks,
@@ -355,16 +364,16 @@ export default function ProjectTasks(props: { projectId?: string } = {}) {
         <Show when={openTasks().length}>
           <ContentHead icon="alert" title="Open work in this project" line="Open a task to edit it, or drag it onto a project in the sidebar to move it there." />
         </Show>
-        <For each={[
-          { key: "today", label: "Today", rows: todayList() },
-          { key: "later", label: "Later", rows: laterList() },
-          { key: "someday", label: "No date", rows: somedayList() },
-        ]}>
+        {/* THE GROUPS ARE THREE FIXED THINGS, not three objects rebuilt from every
+            read: the array is built once and each group's rows are an ACCESSOR, so a
+            poll can add or remove a task without disposing the section — and with it
+            the row somebody has open as an editor (see taskIdentity.ts). */}
+        <For each={dayGroups}>
           {group => (
-            <Show when={group.rows.length}>
-              <p class="task-group-heading">{group.label}<span class="count">{group.rows.length}</span></p>
+            <Show when={group.rows().length}>
+              <p class="task-group-heading">{group.label}<span class="count">{group.rows().length}</span></p>
               <div class="task-grid project-task-list" aria-label={`${group.label} tasks`}>
-                <For each={group.rows}>{taskTile}</For>
+                <For each={group.rows()}>{taskTile}</For>
               </div>
             </Show>
           )}
