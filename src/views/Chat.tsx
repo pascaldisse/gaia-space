@@ -48,6 +48,7 @@ import { canSendDraft, uploadableAttachments } from "../chatAttachments";
 import { captureScroll, isNearBottom, restorePrependedScroll, scrollTargetFor, shouldAutoScroll, type ScrollAnchor, type ScrollMetrics } from "../chatScroll";
 import { insertMention, mentionCandidates as candidatesFor, survivingMentions as survivorsOf, type MentionTarget, type MentionTargetRef } from "../chatMentions";
 import { UI_LOCALE } from "../calendar";
+import { isGrouped } from "../messageGrouping";
 
 const GROUP_ORDER: { key: ChannelContentType; label: string }[] = [
   { key: "public", label: "Public" },
@@ -1013,11 +1014,12 @@ export default function Chat(props: { embedded?: boolean } = {}) {
   function absenceCard(text: string) {
     try { const card = JSON.parse(text) as { profile_id:string; date_from:string; date_to:string; availability:string; action:string }; return card; } catch { return null; }
   }
-  function renderMessage(m: MessageView, inThread: boolean) {
+  function renderMessage(m: MessageView, inThread: boolean, previous?: () => MessageView | undefined) {
     const mine = () => m.author_id === actingProfileId();
     const card = () => m.content_kind === "absence-card" ? absenceCard(m.text) : null;
+    const grouped = () => isGrouped(previous?.(), m);
     return (
-      <div class="message-row">
+      <div class="message-row" classList={{ grouped: grouped() }}>
         {/* Avatar circle: markup only, `display:none` by default (Chat.css). It becomes
             visible under `.theme-space-light` — the chat-first shell — so the dark theme
             renders exactly what it rendered before. */}
@@ -1393,7 +1395,7 @@ export default function Chat(props: { embedded?: boolean } = {}) {
                   </button>
                 </div>
               </Show>
-              <For each={shownMessages()}>{(m) => renderMessage(m, false)}</For>
+              <For each={shownMessages()}>{(m, index) => renderMessage(m, false, () => shownMessages()[index() - 1])}</For>
             </Show>
           </Show>
           </Show>
@@ -1575,7 +1577,7 @@ export default function Chat(props: { embedded?: boolean } = {}) {
               </div>
             </Show>
             <Show when={!threadPage.loading} fallback={<p class="hint">Loading thread…</p>}>
-              <For each={shownThreadReplies()}>{(m) => renderMessage(m, true)}</For>
+              <For each={shownThreadReplies()}>{(m, index) => renderMessage(m, true, () => shownThreadReplies()[index() - 1])}</For>
             </Show>
           </div>
           <div class="composer composer-wrap">
