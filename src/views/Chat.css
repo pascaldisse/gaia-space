@@ -223,6 +223,7 @@
 }
 
 .message-row {
+  position: relative;
   padding: 0.4em 0.6em;
   border-radius: 6px;
 }
@@ -269,15 +270,21 @@
 }
 
 .message-actions {
-  display: none;
+  display: flex;
+  position: absolute;
   gap: 0.5em;
   font-size: 0.8em;
   margin-top: 0.15em;
+  opacity: 0;
+  pointer-events: none;
+  visibility: hidden;
 }
 
 .message-row:hover .message-actions,
 .message-row:focus-within .message-actions {
-  display: flex;
+  opacity: 1;
+  pointer-events: auto;
+  visibility: visible;
 }
 
 .reaction-row {
