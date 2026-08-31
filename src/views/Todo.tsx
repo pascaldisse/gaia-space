@@ -15,6 +15,7 @@ import { parseMarkdown } from "../markdownLite";
 import { bandTone, deadlineBand, todayISO, urgencyOf } from "../statusTone";
 import { humanError } from "../session";
 import { myTasks } from "../taskScope";
+import { stableBy, stableTasks } from "./taskIdentity";
 import { Icon } from "../components/Icon";
 import ContentHead from "../components/ContentHead";
 
@@ -37,7 +38,12 @@ export default function Todo() {
    *  with, and it only ever grows. */
   const [showDone,setShowDone]=createSignal(false);
   const [todos,{refetch}]=createResource(profileId,id=>id?personalApi.todos(id,true):Promise.resolve([]));
-const scopedTodos=()=>myTasks(todos()??[],profileId());
+  /* A ROW IS THE TASK, NOT THE READ THAT DELIVERED IT (GS issue #2). Every read hands
+     back freshly deserialised objects; `<For>` keys BY REFERENCE, so an unchanged task
+     looked new and its row — with any OPEN editor in it — was disposed and rebuilt.
+     `stableTasks` keeps the object a task already had when its content did not change. */
+  const stableTodos=stableTasks(()=>todos());
+const scopedTodos=()=>myTasks(stableTodos(),profileId());
   /* The project-member read, the assignable-people list and the project list moved
      WITH the editor into components/TaskRowEdit.tsx — including the rule that a
      refused member read is carried as a value and said out loud, never shown as
@@ -141,6 +147,12 @@ const scopedTodos=()=>myTasks(todos()??[],profileId());
   /** True while an EmptyState on this surface is showing its own "New task". */
   const showsEmptyPrimary=()=>!!profileId()&&!todos.loading&&(!scopedTodos().length||!openCount());
   const doneList=()=>scopedTodos().filter(todo=>todo.done);
+  const dayGroups=stableBy(
+    ()=>[{ key:"today", label:"Today" },{ key:"later", label:"Later" },{ key:"someday", label:"No date" }],
+    group=>group.key,
+    (a,b)=>a.label===b.label,
+  );
+  const rowsOf=(key:string)=>key==="today"?todayList:key==="later"?laterList:somedayList;
   const postpone=async(todo:TodoItem,days:number)=>{ try { await personalApi.postponeTodo(todo.id,days); refetch(); } catch(reason) { setError(humanError(reason)); } };
   // Only a task that already belongs to a project can become that project's issue.
   const convert=async(todo:TodoItem)=>{ try { if(!todo.project_id) throw new Error("Give the task a project before converting it into a ticket."); await personalApi.convertTodoToIssue(todo.id,todo.project_id); refetch(); } catch(reason) { setError(humanError(reason)); } };
@@ -332,16 +344,16 @@ const scopedTodos=()=>myTasks(todos()??[],profileId());
         <ContentHead icon="alert" title="Open work" line="Open a task to edit it, or drag it onto a project in the sidebar to file it there." />
       </Show>
 
-      <For each={[
-        { key: "today", label: "Today", rows: todayList() },
-        { key: "later", label: "Later", rows: laterList() },
-        { key: "someday", label: "No date", rows: somedayList() },
-      ]}>
+      {/* A GROUP IS A DAY, not the read that filled it (GS issue #2). The group objects
+          keep their identity across reads and hand out their rows as an ACCESSOR, so a
+          task arriving or leaving does not dispose the whole section — which used to
+          take an open row editor down with it. */}
+      <For each={dayGroups()}>
         {group => (
-          <Show when={group.rows.length}>
-            <p class="task-group-heading">{group.label}<span class="count">{group.rows.length}</span></p>
+          <Show when={rowsOf(group.key)().length}>
+            <p class="task-group-heading">{group.label}<span class="count">{rowsOf(group.key)().length}</span></p>
             <div class="task-grid" aria-label={`${group.label} tasks`}>
-              <For each={group.rows}>{todoRow}</For>
+              <For each={rowsOf(group.key)()}>{todoRow}</For>
             </div>
           </Show>
         )}
