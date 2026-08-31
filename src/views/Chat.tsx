@@ -44,6 +44,7 @@ import { personalApi } from "../api/personal";
 import { platformApi } from "../api/platform";
 import { applyCommand, COMMAND_FANOUT_LIMIT, mapWithLimit, mergeCommandListings, slashPrefix, type CommandEntry } from "../chatCommands";
 import { canSendDraft, uploadableAttachments } from "../chatAttachments";
+import { COMPOSER_MAX_ROWS, COMPOSER_MIN_ROWS, composerRows } from "../chatComposer";
 import { insertMention, mentionCandidates as candidatesFor, survivingMentions as survivorsOf, type MentionTarget, type MentionTargetRef } from "../chatMentions";
 import { UI_LOCALE } from "../calendar";
 
@@ -1401,6 +1402,7 @@ export default function Chat(props: { embedded?: boolean } = {}) {
             <textarea
               placeholder="Message…"
               value={draft()}
+              rows={composerRows(draft(), COMPOSER_MIN_ROWS, COMPOSER_MAX_ROWS)}
               onInput={(e) => onDraftInput(e.currentTarget.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
@@ -1506,6 +1508,7 @@ export default function Chat(props: { embedded?: boolean } = {}) {
             <textarea
               placeholder="Reply in thread…"
               value={threadDraft()}
+              rows={composerRows(threadDraft(), COMPOSER_MIN_ROWS, COMPOSER_MAX_ROWS)}
               onInput={(e) => setThreadDraft(e.currentTarget.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
