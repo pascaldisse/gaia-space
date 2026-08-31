@@ -394,7 +394,9 @@ export default function SpaceShell(props: {
     const sections = [...byProject.entries()]
       .map(([id, list]) => ({ id, label: nameOf(id), channels: list }))
       .sort((a, b) => a.label.localeCompare(b.label));
-    if (loose.length) sections.push({ id: "", label: "Other channels", channels: loose });
+    /* "Channels" when it is the only heading, "Other channels" when project sections
+       stand above it — the word says what the section is relative to what is shown. */
+    if (loose.length) sections.push({ id: "", label: sections.length ? "Other channels" : "Channels", channels: loose });
     return sections;
   });
 
