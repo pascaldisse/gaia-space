@@ -39,6 +39,11 @@ import { settleUploadBatch } from "../uploadBatch";
 // The storage containers are unchanged — `kb` is still its own container_type — this
 // is purely the navigation the person sees.
 
+export const documentTreeLoading = (
+  foldersState: "unresolved" | "pending" | "ready" | "refreshing" | "errored",
+  documentsState: "unresolved" | "pending" | "ready" | "refreshing" | "errored",
+) => foldersState === "unresolved" || foldersState === "pending" || documentsState === "unresolved" || documentsState === "pending";
+
 function when(ts: number | null) {
   if (!ts) return "";
   return new Date(ts * 1000).toLocaleString(UI_LOCALE, {
@@ -215,7 +220,9 @@ try { await documentsApi.updateBookAccess(bookId, (bookAccess() ?? []).filter((e
 }
 const [showArchived, setShowArchived] = createSignal(false);
 
-  const treeLoading = () => allFolders.loading || allDocuments.loading;
+  // A revalidation has prior rows to render. Only the first read is a loading state;
+  // blanking a loaded library during every project switch looks like a stuck spinner.
+  const treeLoading = () => documentTreeLoading(allFolders.state, allDocuments.state);
   const loadFailure = () => {
     const e = allFolders.error ?? allDocuments.error;
     return e ? `Documents could not be loaded: ${String(e)}` : null;
