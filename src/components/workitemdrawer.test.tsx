@@ -87,7 +87,6 @@ test("assignment is restricted to project members", async () => {
   expect(calls.some(entry => entry.cmd === "list_project_member_ids" && entry.args.projectId === "p1")).toBe(true);
 });
 
-
 test("a refused event invite stays visible instead of closing the drawer", async () => {
   rejectInvite = true;
   let closed = 0;
@@ -96,8 +95,10 @@ test("a refused event invite stays visible instead of closing the drawer", async
   host.querySelector<HTMLFormElement>(".wid-form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
   await settle();
 
-  expect(calls.some(entry => entry.cmd === "create_meeting")).toBe(true);
-  expect(calls.some(entry => entry.cmd === "invite_meeting_participant")).toBe(true);
+  const created = calls.findIndex(entry => entry.cmd === "create_meeting");
+  const invited = calls.findIndex(entry => entry.cmd === "invite_meeting_participant");
+  expect(created).toBeGreaterThanOrEqual(0);
+  expect(invited).toBeGreaterThan(created);
   expect(closed).toBe(0);
   expect(host.querySelector(".wid-error")?.textContent).toContain("invite refused");
 });
