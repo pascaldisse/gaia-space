@@ -163,6 +163,8 @@ pub struct Profile {
     pub username: String,
     pub display_name: String,
     pub email: Option<String>,
+    /// Existing attachment data URL; NULL means initials fallback.
+    pub avatar_url: Option<String>,
     pub archived: bool,
 }
 
@@ -320,7 +322,7 @@ pub fn list_profiles() -> Result<Vec<Profile>> {
     let c = db::conn()?;
     let mut s = c
         .prepare(
-            "SELECT id,username,display_name,email,archived FROM profiles ORDER BY display_name",
+            "SELECT id,username,display_name,email,avatar_url,archived FROM profiles ORDER BY display_name",
         )
         .map_err(|e| e.to_string())?;
     let rows = s
@@ -330,7 +332,8 @@ pub fn list_profiles() -> Result<Vec<Profile>> {
                 username: r.get(1)?,
                 display_name: r.get(2)?,
                 email: r.get(3)?,
-                archived: r.get(4)?,
+                avatar_url: r.get(4)?,
+                archived: r.get(5)?,
             })
         })
         .map_err(|e| e.to_string())?
@@ -345,7 +348,7 @@ pub fn get_profile(id: String) -> Result<Option<Profile>> {
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn create_profile(profile: Profile) -> Result<()> {
     let c = db::conn()?;
-    c.execute("INSERT INTO profiles(id,username,display_name,email,archived,created_at)VALUES(?1,?2,?3,?4,?5,unixepoch())",rusqlite::params![profile.id,profile.username,profile.display_name,profile.email,profile.archived]).map_err(|e|e.to_string())?;
+    c.execute("INSERT INTO profiles(id,username,display_name,email,avatar_url,archived,created_at)VALUES(?1,?2,?3,?4,?5,?6,unixepoch())",rusqlite::params![profile.id,profile.username,profile.display_name,profile.email,profile.avatar_url,profile.archived]).map_err(|e|e.to_string())?;
     if !profile.archived {
         record_directory_event(&c, "member.joined", &profile.id, None, None)?;
     }
@@ -369,12 +372,13 @@ pub fn update_profile(profile: Profile) -> Result<()> {
         |row| row.get(0),
     ))?;
     c.execute(
-        "UPDATE profiles SET username=?2,display_name=?3,email=?4,archived=?5 WHERE id=?1",
+        "UPDATE profiles SET username=?2,display_name=?3,email=?4,avatar_url=?5,archived=?6 WHERE id=?1",
         rusqlite::params![
             profile.id,
             profile.username,
             profile.display_name,
             profile.email,
+            profile.avatar_url,
             profile.archived
         ],
     )

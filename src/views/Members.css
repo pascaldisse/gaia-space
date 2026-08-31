@@ -139,3 +139,6 @@
 @media (max-width: 760px) {
   .org-view { padding: 20px 16px 32px; }
 }
+
+.op-avatar-upload { display: flex; align-items: center; gap: .5rem; color: var(--text-muted); font-size: .85rem; }
+.op-avatar-preview { display: flex; align-items: center; gap: .6rem; }

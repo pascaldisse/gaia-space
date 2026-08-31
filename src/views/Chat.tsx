@@ -10,6 +10,7 @@ import ContextMenu, { type ContextMenuItem } from "../components/ContextMenu";
 import WorkItemDrawer, { type WorkItemKind } from "../components/WorkItemDrawer";
 import { openPath } from "@tauri-apps/plugin-opener";
 import { Icon } from "../components/Icon";
+import { Avatar } from "../components/Avatar";
 import "../App.css";
 import "./Chat.css";
 import {
@@ -68,8 +69,6 @@ const POLL_OPTIONS = [
 ];
 
 /** Two-letter monogram for the message avatar (light shell only). */
-const avatarInitials = (label: string) =>
-  label.trim().split(/\s+/).slice(0, 2).map((word) => word[0]?.toUpperCase() ?? "").join("") || "?";
 
 function when(ts: number | null) {
   if (!ts) return "";
@@ -1025,7 +1024,7 @@ export default function Chat(props: { embedded?: boolean } = {}) {
         {/* Avatar circle: markup only, `display:none` by default (Chat.css). It becomes
             visible under `.theme-space-light` — the chat-first shell — so the dark theme
             renders exactly what it rendered before. */}
-        <span class="message-avatar" aria-hidden="true">{avatarInitials(profileName(m.author_id))}</span>
+        <Avatar class="message-avatar" name={profileName(m.author_id)} avatarUrl={profiles()?.find((profile) => profile.id === m.author_id)?.avatar_url} size={28} />
         <Show
           when={editingId() === m.id}
           fallback={

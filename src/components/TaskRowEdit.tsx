@@ -133,7 +133,7 @@ export default function TaskRowEdit(props: {
   const active = () => (profiles() ?? []).filter(person => !person.archived);
   const nameOf = (id: string) => { const person = active().find(item => item.id === id); return person ? (person.display_name || person.username) : id; };
   const assignable = () => active().filter(person => memberIds().includes(person.id))
-    .map(person => ({ id: person.id, label: person.display_name || person.username, sub: person.username }));
+    .map(person => ({ id: person.id, label: person.display_name || person.username, sub: person.username, avatarUrl: person.avatar_url }));
   const selectableProjects = () => (projects() ?? []).filter(project => !project.archived)
     .map(project => ({ id: project.id, name: project.name, key: project.key }));
 

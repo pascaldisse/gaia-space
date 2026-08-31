@@ -144,7 +144,7 @@ export type MentionView = MessageView & { channel_name: string | null; notificat
 export type ProfileLite = {
   id: string;
   username: string;
-  display_name: string; archived?: boolean };
+  display_name: string; avatar_url: string | null; archived?: boolean };
 
 // Enough of an anchor's target to render a back-link into the conversation that
 // produced a task/ticket/meeting. `excerpt` is a one-line preview, never the body.
