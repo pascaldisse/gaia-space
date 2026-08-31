@@ -3,7 +3,7 @@ import { chatApi, type SourceRef } from "../api/chat";
 import { planningApi } from "../api/issues";
 import { meetingsApi } from "../api/meetings";
 import { personalApi } from "../api/personal";
-import { humanError, profileId, profiles } from "../session";
+import { humanError, isWeb, profileId, profiles } from "../session";
 import { newId } from "../api/ids";
 import { NO_ORGANIZER } from "../calendar";
 import { PillMenu } from "./controls";
@@ -123,10 +123,9 @@ export default function WorkItemDrawer(props: {
       } else {
         const starts = Math.floor(new Date(startsAt()).getTime() / 1000);
         if (!Number.isFinite(starts)) throw new Error("Please pick a valid time.");
-        // A meeting whose organizer cannot be named is stored invisible to its own
-        // author, so this refuses before the write rather than after it.
-        const organizer = profileId();
-        if (!organizer) throw new Error(NO_ORGANIZER);
+        // HTTP carries the authenticated web session; desktop IPC has no rebinding.
+        const organizer = profileId() || null;
+        if (!organizer && !isWeb()) throw new Error(NO_ORGANIZER);
         const id = newId();
         await meetingsApi.create({
           id, title: heading, description: body().trim() || null,
@@ -139,11 +138,14 @@ export default function WorkItemDrawer(props: {
         });
         /* The meeting exists now. An invite that is refused is reported as itself and
            does not undo — or deny — the meeting that was already created. */
+        let inviteFailed = false;
         for (const person of everyone()) {
           try { await meetingsApi.invite(id, person); }
-          catch (reason) { setError(humanError(reason)); }
+          catch (reason) { inviteFailed = true; setError(humanError(reason)); }
         }
         props.onCreated?.("event", id);
+        // Keep the error mounted: closing immediately makes a refused invite silent.
+        if (inviteFailed) return;
       }
       props.onClose();
     } catch (reason) {

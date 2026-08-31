@@ -11,6 +11,7 @@ import { reloadProfiles, setProfileId } from "../session";
 // source anchor on whatever it does write, and (c) leave without a trace on Escape.
 
 const calls: { cmd: string; args: Record<string, unknown> }[] = [];
+let rejectInvite = false;
 let dispose: (() => void) | undefined;
 const writes = () => calls.filter(entry => entry.cmd.startsWith("create_") || entry.cmd.startsWith("update_") || entry.cmd.startsWith("set_"));
 
@@ -23,7 +24,7 @@ const reply = (cmd: string) => {
 };
 const settle = () => new Promise(resolve => setTimeout(resolve, 40));
 const mount = async (component: () => unknown) => {
-  (window as any).__TAURI_INTERNALS__ = { invoke: (cmd: string, args: Record<string, unknown>) => { calls.push({ cmd, args }); return Promise.resolve(reply(cmd)); } };
+  (window as any).__TAURI_INTERNALS__ = { invoke: (cmd: string, args: Record<string, unknown>) => { calls.push({ cmd, args }); return rejectInvite && cmd === "invite_meeting_participant" ? Promise.reject(new Error("invite refused")) : Promise.resolve(reply(cmd)); } };
   setProfileId("me"); await reloadProfiles();
   const host = document.createElement("div"); document.body.appendChild(host);
   dispose = render(component as any, host);
@@ -31,7 +32,7 @@ const mount = async (component: () => unknown) => {
   return host;
 };
 
-afterEach(() => { dispose?.(); dispose = undefined; document.body.innerHTML = ""; calls.length = 0; delete (window as any).__TAURI_INTERNALS__; setProfileId(""); });
+afterEach(() => { dispose?.(); dispose = undefined; document.body.innerHTML = ""; calls.length = 0; rejectInvite = false; delete (window as any).__TAURI_INTERNALS__; setProfileId(""); });
 
 const source = { entity_type: "message", entity_id: "m-1", channel_id: "c-1", excerpt: "Skript prüfen bis Freitag" };
 
@@ -84,4 +85,19 @@ test("assignment is restricted to project members", async () => {
   const options = Array.from(host.querySelectorAll<HTMLOptionElement>("select.wid-input option")).map(node => node.value);
   expect(options).toEqual(["", "me", "other"]);
   expect(calls.some(entry => entry.cmd === "list_project_member_ids" && entry.args.projectId === "p1")).toBe(true);
+});
+
+
+test("a refused event invite stays visible instead of closing the drawer", async () => {
+  rejectInvite = true;
+  let closed = 0;
+  const host = await mount(() => <WorkItemDrawer kind="event" source={source} projectId="p1" prefillTitle="Release sync" onClose={() => { closed += 1; }} /> as any);
+  (host.querySelector(".wid-person input") as HTMLInputElement).click();
+  host.querySelector<HTMLFormElement>(".wid-form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+  await settle();
+
+  expect(calls.some(entry => entry.cmd === "create_meeting")).toBe(true);
+  expect(calls.some(entry => entry.cmd === "invite_meeting_participant")).toBe(true);
+  expect(closed).toBe(0);
+  expect(host.querySelector(".wid-error")?.textContent).toContain("invite refused");
 });

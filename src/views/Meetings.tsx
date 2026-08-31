@@ -162,14 +162,10 @@ export default function Meetings() {
     setNotice("");
     try {
       const draft = form();
-      /* WHO IS THE ORGANIZER IS NOT OPTIONAL. A meeting stored with `organizer_id`
-         null is created and then INVISIBLE: `MEETING_READ_SCOPE` (meetings.rs) shows
-         a `participants` meeting to its organizer, to an invited participant, or
-         through a project channel — a null organizer matches none of them, and the
-         person who just booked it cannot see it. Refusing here, with the reason, is
-         the honest act; writing a row nobody can read is not. */
-      const organizer = draft.organizer_id || profileId();
-      if (!organizer) throw new Error(NO_ORGANIZER);
+      // HTTP carries the authenticated web session, which the server binds as organizer.
+      // Desktop IPC has no session rebinding, so only that transport requires a profile.
+      const organizer = draft.organizer_id || profileId() || null;
+      if (!organizer && !isWeb()) throw new Error(NO_ORGANIZER);
       const meeting: Meeting = {
         id: newId(),
         title: draft.title.trim(),

@@ -48,10 +48,11 @@ afterEach(() => {
   dispose?.(); dispose = undefined;
   document.body.innerHTML = ""; calls.length = 0;
   globalThis.fetch = realFetch; setProfileId("");
+  delete (window as any).__TAURI_INTERNALS__;
 });
 
-describe("a meeting whose organizer cannot be named is refused, not written", () => {
-  test("no profile means no create_meeting, and the reason is said in the composer", async () => {
+describe("organizer resolution follows the command transport", () => {
+  test("a web session sends create_meeting with a null organizer for server rebinding", async () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
     dispose = render(() => <Meetings /> as any, host);
@@ -66,9 +67,29 @@ describe("a meeting whose organizer cannot be named is refused, not written", ()
     form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
     await settle();
 
+    const create = calls.find((call) => call.cmd === "create_meeting");
+    expect(create).toBeTruthy();
+    expect((create!.args.meeting as { organizer_id: string | null }).organizer_id).toBeNull();
+  });
+
+  test("desktop IPC refuses an unresolved organizer and says why in the composer", async () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    dispose = render(() => <Meetings /> as any, host);
+    await settle();
+    (window as any).__TAURI_INTERNALS__ = { invoke: (cmd: string, args: Record<string, unknown>) => {
+      calls.push({ cmd, args }); return Promise.resolve([]);
+    } };
+    (host.querySelector("button.meeting-new") as HTMLButtonElement).click();
+    await settle();
+    const form = host.querySelector("form[aria-label='New meeting']") as HTMLFormElement;
+    const title = form.querySelector("input[aria-label='Meeting title']") as HTMLInputElement;
+    title.value = "Planning";
+    title.dispatchEvent(new Event("input", { bubbles: true }));
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    await settle();
+
     expect(calls.some((call) => call.cmd === "create_meeting")).toBe(false);
     expect(host.querySelector(".mtd-error")?.textContent ?? "").toBe(NO_ORGANIZER);
-    // The draft is kept: the person fixes the identity and presses the same button.
-    expect(host.querySelector("form[aria-label='New meeting']")).toBeTruthy();
   });
 });

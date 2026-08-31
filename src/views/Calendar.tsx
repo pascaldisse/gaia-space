@@ -195,12 +195,10 @@ try {
 const f=form(); const invalid=meetingDraftError(f) || meetingLinkError(f.meeting_url);
 if (invalid) throw new Error(invalid);
 const starts_at=epoch(f.starts_at), ends_at=epoch(f.ends_at);
-/* Organizer is always the acting account (the web server rebinds it from the session),
-   but it must be NAMEABLE: a meeting stored with a null organizer is invisible to the
-   person who just booked it, so the day composer refuses with the shared sentence
-   instead of writing a row nobody can read. */
-const organizer=profileId();
-if (!organizer) throw new Error(NO_ORGANIZER);
+// HTTP carries the authenticated web session, which the server binds as organizer.
+// Desktop IPC has no session rebinding, so only that transport requires a profile.
+const organizer=profileId() || null;
+if (!organizer && !isWeb()) throw new Error(NO_ORGANIZER);
 const meeting:Meeting={id:newId(),title:f.title.trim(),description:null,starts_at,ends_at,rrule:f.rrule.trim()||null,location:f.location.trim()||null,organizer_id:organizer,channel_id:null,visibility:f.visibility,modification_preference:f.modification_preference,archived:false,video_provider:null,video_room_id:null,join_url:null,meeting_url:f.meeting_url.trim()||null,video_status:"scheduled",video_started_at:null,video_ended_at:null,video_ended_by:null,source_entity_type:null,source_entity_id:null};
 await meetingsApi.create(meeting);
 /* The meeting EXISTS from here on. Attaching its discussion is a second act on a
