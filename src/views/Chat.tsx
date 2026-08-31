@@ -3,6 +3,7 @@ import { useDeepLink, linkProps, route } from "../router";
 import { currentUser, isWeb } from "../session";
 import { navLayout } from "../nav";
 import { actingProfileId, bumpChannels, setActingProfileId } from "../chatIdentity";
+import { markChannelRead } from "../attention";
 import { authApi } from "../api/auth";
 import DateTimeField from "../components/DateTimeField";
 import ContextMenu, { type ContextMenuItem } from "../components/ContextMenu";
@@ -173,7 +174,13 @@ export default function Chat(props: { embedded?: boolean } = {}) {
   createEffect(() => {
     const ch = activeChannelId();
     const p = actingProfileId();
-    if (ch && p) chatApi.markChannelRead(ch, p).then(refetchChannels).catch(fail);
+    // Through attention, never chatApi directly: the shared snapshot every OTHER
+    // surface's badge reads is what was stale. `bumpChannels` re-reads the shell's
+    // own channel list, so the row's badge and the rail's Chats total clear too.
+    if (ch && p)
+      markChannelRead(ch, p)
+        .then(() => { bumpChannels(); refetchChannels(); })
+        .catch(fail);
   });
 
   // messages in the active channel (root pane, thread replies excluded)
@@ -270,7 +277,7 @@ export default function Chat(props: { embedded?: boolean } = {}) {
   createEffect(() => {
     const thread = threadChannel();
     const p = actingProfileId();
-    if (thread && p) chatApi.markChannelRead(thread.id, p).catch(fail);
+    if (thread && p) markChannelRead(thread.id, p).then(bumpChannels).catch(fail);
   });
   const threadPageKey = () => {
     const k = threadKey(); const thread = threadChannel();

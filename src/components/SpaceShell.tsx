@@ -14,7 +14,7 @@ import { personalApi } from "../api/personal";
 import { documentsApi } from "../api/documents";
 import { platformApi } from "../api/platform";
 import { currentUser, isWeb, profileId, profiles, reloadProfiles, projects, reloadProjects, workspaceId, workspaces } from "../session";
-import { attentionCount, attentionFilterCount, asActivityFilter, setAttentionProfile, type ActivityFilter } from "../attention";
+import { attentionCount, attentionFilterCount, asActivityFilter, setAttentionProfile, unreadChannelTotal, type ActivityFilter } from "../attention";
 import { isViewAvailable, linkEntity, linkProps, navigate, route, type Route } from "../router";
 import { NAV_GROUPS, hiddenGroups, railModeOfRoute, railModeOfView, viewLabel, type RailMode } from "../nav";
 
@@ -173,7 +173,10 @@ export default function SpaceShell(props: {
   // number. "What needs me" is NOT this: that is attention.attentionCount(), the single
   // definition every surface reads, and it is what the Activity badge shows now. Summing
   // unread_count over all channels there is the defect that started this stage.
-  const unreadTotal = () => (channels() ?? []).reduce((sum, channel) => sum + (channel.unread_count || 0), 0);
+  // The sum itself lives in attention.ts (`unreadChannelTotal`) so it is one
+  // definition and testable without a shell: an inline reduce here is how the
+  // badge kept its own stale arithmetic.
+  const unreadTotal = () => unreadChannelTotal(channels() ?? []);
   createEffect(() => setAttentionProfile(actingProfileId() ?? ""));
   const badgeOf = (kind?: "chat" | "mentions") =>
     kind === "chat" ? unreadTotal() : kind === "mentions" ? attentionCount() : 0;
