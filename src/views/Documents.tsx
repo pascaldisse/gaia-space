@@ -31,6 +31,7 @@ import { actingProfileId as chatActingProfileId } from "../chatIdentity";
 import { applyMarkdownCommand, sanitizeRichHtml, type MarkdownCommand } from "../richtext";
 import { blogsApi, type BlogPost } from "../api/blogs";
 import { UI_LOCALE } from "../calendar";
+import { settleUploadBatch } from "../uploadBatch";
 
 // Two places, not three. A document lives either with a person ("My Documents") or
 // with a project ("Project Docs"); the knowledge base is not a third home, it is a
@@ -718,8 +719,8 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
     if (!cid || files.length === 0) return;
     setUploading(true);
     try {
-      let last: string | null = null;
-      for (const file of files) {
+      const documentIds = new Map<File, string>();
+      const batch = await settleUploadBatch(files, async (file) => {
         setUploadProgress({ name: file.name, fraction: 0 });
         const uploaded = await documentsApi.uploadWebFileWithProgress(
           file,
@@ -731,12 +732,14 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
           },
           (fraction) => setUploadProgress({ name: file.name, fraction }),
         );
-        last = uploaded.document_id;
+        documentIds.set(file, uploaded.document_id);
+      });
+      if (batch.successes.length) {
+        await refetchDocuments();
+        const last = batch.successes.at(-1);
+        if (last) setSelectedDocumentId(documentIds.get(last) ?? null);
       }
-      await refetchDocuments();
-      if (last) setSelectedDocumentId(last);
-    } catch (e) {
-      fail(e);
+      if (batch.failures.length) fail(new Error(batch.failures.map(({ item, error }) => `${item.name}: ${String(error)}`).join("; ")));
     } finally {
       setUploading(false);
       setUploadProgress(null);
