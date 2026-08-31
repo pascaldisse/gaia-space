@@ -20,6 +20,7 @@ const reply = (cmd: string) => {
   if (cmd === "list_project_member_ids") return ["me", "other"];
   if (cmd === "list_profiles") return [{ id: "me", username: "me", display_name: "Me", email: null, archived: false }, { id: "other", username: "other", display_name: "Other Person", email: null, archived: false }];
   if (cmd === "create_todo") return { id: "todo-1" };
+  if (cmd === "create_issue") return { id: "issue-1" };
   return [];
 };
 const settle = () => new Promise(resolve => setTimeout(resolve, 40));
@@ -58,6 +59,14 @@ test("a task created from a message carries the source anchor and the prefilled-
   expect(input.content).toBe("Skript final prüfen");
   expect(input.project_id).toBe("p1");
   expect(created).toEqual([["task", "todo-1"]]);
+});
+
+test("a ticket created from a message reports its project to the caller", async () => {
+  const created: [string, string, string | undefined][] = [];
+  const host = await mount(() => <WorkItemDrawer kind="ticket" source={source} projectId="p-ticket" prefillTitle="Safari Login hängt" onClose={() => {}} onCreated={(kind, id, projectId) => created.push([kind, id, projectId])} /> as any);
+  host.querySelector<HTMLFormElement>(".wid-form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+  await settle();
+  expect(created).toEqual([["ticket", "issue-1", "p-ticket"]]);
 });
 
 test("the drawer never creates anything without an explicit submit", async () => {
