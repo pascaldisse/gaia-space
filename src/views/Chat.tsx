@@ -3,6 +3,7 @@ import { useDeepLink, linkProps, route } from "../router";
 import { currentUser, isWeb, setProjectId } from "../session";
 import { navLayout } from "../nav";
 import { actingProfileId, bumpChannels, setActingProfileId } from "../chatIdentity";
+import { chatHeaderLabel } from "../chatPartition";
 import { markChannelRead } from "../attention";
 import { authApi } from "../api/auth";
 import DateTimeField from "../components/DateTimeField";
@@ -1318,7 +1319,7 @@ export default function Chat(props: { embedded?: boolean } = {}) {
       <section class="chat-center">
         <header class="chat-topbar">
           <Show when={activeChannel()} fallback={<span class="hint">No channel selected</span>}>
-            <strong>{activeChannel()!.name ?? activeChannel()!.content_type}</strong>
+            <strong>{chatHeaderLabel(activeChannel()!, actingProfileId(), { nameOf: profileName })}</strong>
             <span class="branch-chip">{activeChannel()!.content_type}</span>
           </Show>
           <div class="members-toggle">

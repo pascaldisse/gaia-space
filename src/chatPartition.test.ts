@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { DIRECT_FALLBACK_LABEL, dmLabel, isDirectMessage, participantCount, partitionChannels } from "./chatPartition";
+import { DIRECT_FALLBACK_LABEL, chatHeaderLabel, dmLabel, isDirectMessage, participantCount, partitionChannels } from "./chatPartition";
 import type { PartitionableChannel } from "./chatPartition";
 
 const channel = (over: Partial<PartitionableChannel> & { id: string }): PartitionableChannel => ({
@@ -83,5 +83,13 @@ describe("partitionChannels", () => {
 
   test("an empty list yields two empty sections", () => {
     expect(partitionChannels([], "me")).toEqual({ channels: [], dms: [] });
+  });
+});
+
+
+describe("chatHeaderLabel", () => {
+  test("a named direct message header names only the other person", () => {
+    const row = channel({ id: "a", content_type: "dm", name: "Bjarne · Jannes", member_count: 2 });
+    expect(chatHeaderLabel(row, "me", { nameOf })).toBe("Bjarne");
   });
 });
