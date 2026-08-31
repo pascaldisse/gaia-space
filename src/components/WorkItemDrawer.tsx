@@ -4,6 +4,8 @@ import { planningApi } from "../api/issues";
 import { meetingsApi } from "../api/meetings";
 import { personalApi } from "../api/personal";
 import { humanError, profileId, profiles } from "../session";
+import { newId } from "../api/ids";
+import { NO_ORGANIZER } from "../calendar";
 import { PillMenu } from "./controls";
 import DateField from "./DateField";
 import DateTimeField from "./DateTimeField";
@@ -121,17 +123,26 @@ export default function WorkItemDrawer(props: {
       } else {
         const starts = Math.floor(new Date(startsAt()).getTime() / 1000);
         if (!Number.isFinite(starts)) throw new Error("Please pick a valid time.");
-        const id = crypto.randomUUID();
+        // A meeting whose organizer cannot be named is stored invisible to its own
+        // author, so this refuses before the write rather than after it.
+        const organizer = profileId();
+        if (!organizer) throw new Error(NO_ORGANIZER);
+        const id = newId();
         await meetingsApi.create({
           id, title: heading, description: body().trim() || null,
           starts_at: starts, ends_at: starts + Math.max(1, minutes()) * 60,
-          rrule: null, location: null, organizer_id: profileId() || null,
+          rrule: null, location: null, organizer_id: organizer,
           channel_id: resolved()?.channel_id ?? props.source.channel_id ?? null,
           visibility: "participants", modification_preference: "organizer-only", archived: false,
           video_provider: null, video_room_id: null, join_url: null, meeting_url: null, video_status: "scheduled",
           video_started_at: null, video_ended_at: null, video_ended_by: null, ...anchor(),
         });
-        for (const person of everyone()) await meetingsApi.invite(id, person);
+        /* The meeting exists now. An invite that is refused is reported as itself and
+           does not undo — or deny — the meeting that was already created. */
+        for (const person of everyone()) {
+          try { await meetingsApi.invite(id, person); }
+          catch (reason) { setError(humanError(reason)); }
+        }
         props.onCreated?.("event", id);
       }
       props.onClose();
