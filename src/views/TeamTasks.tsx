@@ -9,6 +9,7 @@ import DeleteButton from "../components/DeleteButton";
 import EmptyState from "../components/EmptyState";
 import PageHeader, { Chip } from "../components/PageHeader";
 import TaskRowEdit, { blankTask, focusTaskRow } from "../components/TaskRowEdit";
+import { stableBy, stableTasks } from "./taskIdentity";
 import { Icon } from "../components/Icon";
 import ContentHead from "../components/ContentHead";
 import { bandTone, deadlineBand, todayISO, urgencyOf } from "../statusTone";
@@ -41,6 +42,9 @@ export default function TeamTasks() {
     () => [profileId(), includeDone()] as const,
     ([profile_id, include_done]) => profile_id ? personalApi.teamTodos(profile_id, include_done) : Promise.resolve([] as Todo[]),
   );
+  /* Rows keep their identity across re-reads (see taskIdentity.ts): a poll must not
+     dispose the row a person is editing. */
+  const taskRows = stableTasks(() => (tasks.error ? [] : tasks()));
   /* A FAILED PROJECT READ IS NOT AN EMPTY LIST (carried over from master, 5680579).
      Swallowing it used to leave the rows labelled "Unknown project", which invents a
      fact. The failure is carried as a value and shown as one alert instead. */
@@ -62,14 +66,14 @@ export default function TeamTasks() {
      have — reported, never invented as a label. */
   const missingProjectId = createMemo(() => {
     if (projectsLoading() || projectError() || tasks.error) return undefined;
-    return (tasks() ?? []).find(task => task.project_id && !projects()?.some(item => item.id === task.project_id))?.project_id;
+    return taskRows().find(task => task.project_id && !projects()?.some(item => item.id === task.project_id))?.project_id;
   });
   const loadError = () => tasks.error ?? projectError() ?? (missingProjectId() ? "Project metadata is unavailable." : undefined);
   /** True while the empty state below draws its own creation primary. The no-match
    *  state offers "Clear filters" instead, so it does not suppress the header. */
   const showsEmptyPrimary = () => !loadError() && !tasks.loading && !projectsLoading() && !groups().length && !filtered() && !!profileId();
 
-  const visible = () => (tasks() ?? []).filter(task => {
+  const visible = () => taskRows().filter(task => {
     const query = text().trim().toLowerCase();
     return (!query || task.content.toLowerCase().includes(query) || (task.notes ?? "").toLowerCase().includes(query))
       && (!assigneeId() || task.assignee_ids.includes(assigneeId()));
@@ -163,8 +167,19 @@ export default function TeamTasks() {
       setRowError(humanError(reason)); setPendingDelete(null);
     } finally { setDeleting(false); }
   };
-  /** Grouped by assignee so the surface directly answers who is carrying each task. */
-  const groups = () => groupByAssignee(visible(), profiles() ?? []);
+  /* A GROUP IS A PERSON (GS #4), not the read that filled it (GS #2). The group
+     objects keep their identity while their contents change (taskIdentity.ts) and
+     hand out their rows as an ACCESSOR, so a poll adds or removes one task without
+     disposing the whole section — which used to take an open row editor down with
+     it (GS issue #2). Unassigned work keeps its own explicit group. */
+  const groups = stableBy(
+    () => groupByAssignee(visible(), profiles() ?? []).map(group => ({ id: group.id, name: group.name })),
+    group => group.id,
+    (a, b) => a.name === b.name,
+  );
+  const itemsOf = (assignee_id: string) => visible().filter(task =>
+    assignee_id ? task.assignee_ids.includes(assignee_id) : !task.assignee_ids.length);
+
   return <section class="planning-view team-tasks-view">
     <Show when={menu()}>{open => <ContextMenu x={open().x} y={open().y} items={open().items} onClose={() => setMenu(null)} />}</Show>
     <ConfirmDialog
@@ -256,13 +271,14 @@ export default function TeamTasks() {
           </div>
         </Show>
         <ContentHead icon="users" title="Who is on what" line="Open a task to edit it, or drag it onto a project in the sidebar to file it there." />
-        <For each={groups()}>{group => <section class="tt-group" aria-label={group.name}>
+        <For each={groups()}>{group => { const items = () => itemsOf(group.id); return <section class="tt-group" aria-label={group.name}>
+          {/* The group IS a person, so its heading names whoever carries the work. */}
           <p class="task-group-heading tt-group-head">
             {group.name}
-            <span class="count">{group.items.length}</span>
+            <span class="count">{items().length}</span>
           </p>
           <div class="task-grid tt-list" aria-label={`${group.name} tasks`}>
-            <For each={group.items}>{task => {
+            <For each={items()}>{task => {
               /* THE TASK TILE, the card My tasks introduced, said for OTHER people's
                  work: the mark carries how much room is left, the name is bold, and the
                  ONE meta line names WHOSE work this is — creator first, then whoever
@@ -333,7 +349,7 @@ export default function TeamTasks() {
               </Show>;
             }}</For>
           </div>
-        </section>}</For>
+        </section>; }}</For>
       </div>
     </Show>
   </section>;
