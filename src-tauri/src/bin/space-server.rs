@@ -3236,13 +3236,68 @@ const RIGHTS_ADMIN_COMMANDS: &[(&str, gaia_space_lib::rights::Right)] = &[
         gaia_space_lib::rights::Right::EditRoles,
     ),
 ];
-fn require_rights_administration(user: &User, name: &str) -> Result<(), (StatusCode, Json<Value>)> {
+fn project_role_assignment_scope(
+    name: &str,
+    body: &Value,
+) -> Result<Option<String>, (StatusCode, Json<Value>)> {
+    let project_id = match name {
+        "create_role_assignment" => body
+            .get("input")
+            .filter(|input| input.get("scope_type").and_then(Value::as_str) == Some("project"))
+            .and_then(|input| input.get("scope_id").and_then(Value::as_str))
+            .map(str::to_owned),
+        "delete_role_assignment" => {
+            let id: String = arg(body, "id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
+            let c = db::conn().map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?;
+            c.query_row(
+                "SELECT scope_id FROM role_assignments WHERE id=?1 AND scope_type='project'",
+                [&id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?
+        }
+        _ => None,
+    };
+    Ok(project_id)
+}
+
+fn require_project_role_administration(
+    user: &User,
+    right: gaia_space_lib::rights::Right,
+    project_id: &str,
+) -> Result<(), (StatusCode, Json<Value>)> {
+    let c = db::conn().map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?;
+    if platform::is_admin_on(&c, &user.profile_id).unwrap_or(false) {
+        return Ok(());
+    }
+    if platform::require_right_on(&c, &user.profile_id, right, "global", None).is_ok() {
+        return Ok(());
+    }
+    if project_owner(project_id)
+        .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?
+        .is_some_and(|owner| owner == user.profile_id)
+    {
+        return Ok(());
+    }
+    platform::require_right_on(&c, &user.profile_id, right, "project", Some(project_id))
+        .map_err(|_| err(StatusCode::FORBIDDEN, "right required"))
+}
+
+fn require_rights_administration(
+    user: &User,
+    name: &str,
+    body: &Value,
+) -> Result<(), (StatusCode, Json<Value>)> {
     let Some((_, right)) = RIGHTS_ADMIN_COMMANDS
         .iter()
         .find(|(command, _)| *command == name)
     else {
         return Ok(());
     };
+    if let Some(project_id) = project_role_assignment_scope(name, body)? {
+        return require_project_role_administration(user, *right, &project_id);
+    }
     let c = db::conn().map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?;
     if platform::is_admin_on(&c, &user.profile_id).unwrap_or(false) {
         return Ok(());
@@ -3263,7 +3318,7 @@ fn authorize_command(
     // another person's menu — and be announced to a third party as them.
     // `user_id` is not in `bind_session_identity` because elsewhere it legitimately
     // names someone else, so the rebinding is done here, for this command only.
-    require_rights_administration(user, name)?;
+    require_rights_administration(user, name, body)?;
     if name == "list_chatbot_commands" {
         if let Value::Object(object) = &mut *body {
             object.insert("userId".to_string(), json!(user.profile_id));
@@ -7996,6 +8051,59 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn project_role_assignment_administration_is_scoped_to_owner_or_edit_roles() {
+        let _serial = test_lock();
+        setup();
+        let c = db::conn().unwrap();
+        c.execute("INSERT INTO projects(id,name,key,created_by,created_at) VALUES('project-roles','Project Roles','PROLES','pa',1)", []).unwrap();
+        c.execute("INSERT INTO roles(id,name) VALUES('role-member','Member'),('role-editor','Editor')", []).unwrap();
+        c.execute("INSERT OR IGNORE INTO rights(id,code,title,right_type) VALUES('right-edit-roles','Global.EditRoles','Edit roles','Global')", []).unwrap();
+        c.execute("INSERT INTO role_rights(role_id,right_id) VALUES('role-editor','right-edit-roles')", []).unwrap();
+        drop(c);
+
+        let input = json!({
+            "id": "assignment-owner",
+            "role_id": "role-member",
+            "profile_id": "pb",
+            "scope_type": "project",
+            "scope_id": "project-roles"
+        });
+        let (status, body) = call(cookie("ta"), "create_role_assignment", json!({"input": input})).await;
+        assert_eq!(status, StatusCode::OK, "a project owner may assign within the project: {body}");
+        assert_eq!(call(cookie("ta"), "delete_role_assignment", json!({"id":"assignment-owner"})).await.0, StatusCode::OK, "a project owner may remove the assignment");
+
+        let (status, body) = call(cookie("td"), "create_role_assignment", json!({"input": {
+            "id": "assignment-outsider",
+            "role_id": "role-member",
+            "profile_id": "pa",
+            "scope_type": "project",
+            "scope_id": "project-roles"
+        }})).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "an unrelated member stays denied: {body}");
+
+        let c = db::conn().unwrap();
+        c.execute("INSERT INTO role_assignments(id,role_id,profile_id,scope_type,scope_id) VALUES('editor-dora','role-editor','pd','project','project-roles')", []).unwrap();
+        drop(c);
+        let (status, body) = call(cookie("td"), "create_role_assignment", json!({"input": {
+            "id": "assignment-editor",
+            "role_id": "role-member",
+            "profile_id": "pa",
+            "scope_type": "project",
+            "scope_id": "project-roles"
+        }})).await;
+        assert_eq!(status, StatusCode::OK, "a project EditRoles grant may assign in its project: {body}");
+
+        let (status, body) = call(cookie("ta"), "create_role_assignment", json!({"input": {
+            "id": "assignment-global",
+            "role_id": "role-member",
+            "profile_id": "pb",
+            "scope_type": "global",
+            "scope_id": null
+        }})).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "a project owner does not gain global EditRoles: {body}");
     }
 
     #[tokio::test]
