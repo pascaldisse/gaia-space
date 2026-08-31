@@ -48,8 +48,8 @@ import { personalApi } from "../api/personal";
 import { platformApi } from "../api/platform";
 import { applyCommand, COMMAND_FANOUT_LIMIT, mapWithLimit, mergeCommandListings, slashPrefix, type CommandEntry } from "../chatCommands";
 import { canSendDraft, uploadableAttachments } from "../chatAttachments";
-import { captureScroll, isNearBottom, restorePrependedScroll, scrollTargetFor, shouldAutoScroll, type ScrollAnchor, type ScrollMetrics } from "../chatScroll";
-import { COMPOSER_MAX_ROWS, COMPOSER_MIN_ROWS, composerRows } from "../chatComposer";
+import { captureScroll, isNearBottom, restorePrependedScroll, scrollTargetFor, shouldAutoScroll, shouldShowJumpButton, type ScrollAnchor, type ScrollMetrics } from "../chatScroll";
+import { COMPOSER_MAX_ROWS, COMPOSER_MIN_ROWS, composerRows, composerRowsForHeight } from "../chatComposer";
 import { insertMention, mentionCandidates as candidatesFor, survivingMentions as survivorsOf, type MentionTarget, type MentionTargetRef } from "../chatMentions";
 import { UI_LOCALE } from "../calendar";
 import { isGrouped } from "../messageGrouping";
@@ -216,6 +216,7 @@ export default function Chat(props: { embedded?: boolean } = {}) {
   // their own panes, so this policy never overrides an explicit reader position there.
   let messagePane: HTMLDivElement | undefined;
   let messagePaneWasNearBottom = true;
+const [showJumpToLatest, setShowJumpToLatest] = createSignal(false);
   let openedMessagePaneKey: string | null = null;
   let messagePaneFrame: number | undefined;
   let pendingHistoryAnchor: { key: string; anchor: ScrollAnchor } | null = null;
@@ -423,6 +424,7 @@ export default function Chat(props: { embedded?: boolean } = {}) {
   // rejected by the backend) must not discard the ones that are fine.
   type PendingAttachment = NewMessageAttachment & { state: "loading" | "uploading" | "completed" | "failed"; error?: string };
   const [draft, setDraft] = createSignal("");
+  const [draftRows, setDraftRows] = createSignal(COMPOSER_MIN_ROWS);
   const [draftAttachments, setDraftAttachments] = createSignal<PendingAttachment[]>([]);
 
   // ---- draft persistence + typing presence ----
@@ -453,8 +455,9 @@ export default function Chat(props: { embedded?: boolean } = {}) {
       .finally(() => { restoring = false; });
   });
 
-  function onDraftInput(value: string) {
+  function onDraftInput(value: string, scrollHeight?: number, lineHeight?: number) {
     setDraft(value);
+    setDraftRows(composerRowsForHeight(value, COMPOSER_MIN_ROWS, COMPOSER_MAX_ROWS, scrollHeight ?? 0, lineHeight ?? 0));
     const ch = activeChannelId();
     const p = actingProfileId();
     if (!ch || !p || restoring) return;
@@ -822,7 +825,7 @@ export default function Chat(props: { embedded?: boolean } = {}) {
       });
       const ok = await saveAttachments(message.id, attachments, setDraftAttachments);
       setDraftMessageId(ok ? null : message.id);
-      setDraft(""); setDraftMentionIds([]);
+      setDraft(""); setDraftRows(COMPOSER_MIN_ROWS); setDraftMentionIds([]);
       clearDraftState();
       refetchMessages();
       refetchChannels();
@@ -1377,7 +1380,7 @@ export default function Chat(props: { embedded?: boolean } = {}) {
         <div
           class="message-pane"
           ref={(element) => { messagePane = element; }}
-          onScroll={() => { const metrics = messagePaneMetrics(); if (metrics) messagePaneWasNearBottom = isNearBottom(metrics); }}
+          onScroll={() => { const metrics = messagePaneMetrics(); if (metrics) { messagePaneWasNearBottom = isNearBottom(metrics); setShowJumpToLatest(shouldShowJumpButton(metrics)); } }}
         >
           {/* Honest empty state: with no channel selected there is nothing to say hello in. */}
           <Show when={activeChannelId() || showLegacySidebar()} fallback={
@@ -1408,6 +1411,10 @@ export default function Chat(props: { embedded?: boolean } = {}) {
           </Show>
           </Show>
         </div>
+
+        <Show when={showJumpToLatest()}>
+          <button type="button" class="jump-to-latest" onClick={() => scrollMessagePane(true)}>Jump to latest</button>
+        </Show>
 
         <Show when={activeChannelId() && !activeChannel()?.read_only} fallback={<Show when={activeChannelId() && activeChannel()?.read_only}><p class="hint pad">This private feed is read-only. Notifications arrive here automatically.</p></Show>}>
           <Show when={typingLabel()}>
@@ -1487,8 +1494,11 @@ export default function Chat(props: { embedded?: boolean } = {}) {
             <textarea
               placeholder="Message…"
               value={draft()}
-              rows={composerRows(draft(), COMPOSER_MIN_ROWS, COMPOSER_MAX_ROWS)}
-              onInput={(e) => onDraftInput(e.currentTarget.value)}
+              rows={draftRows()}
+              onInput={(e) => {
+                const style = getComputedStyle(e.currentTarget);
+                onDraftInput(e.currentTarget.value, e.currentTarget.scrollHeight, Number.parseFloat(style.lineHeight));
+              }}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();

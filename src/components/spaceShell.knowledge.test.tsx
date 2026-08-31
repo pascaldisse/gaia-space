@@ -1,10 +1,19 @@
 import { expect, test, describe, afterEach, mock } from "bun:test";
 import { invoke } from "../api/invoke";
+import { readFileSync } from "node:fs";
 mock.module("@tauri-apps/api/core", () => ({ invoke }));
 import { render } from "solid-js/web";
 import SpaceShell from "./SpaceShell";
 import { setProfileId, reloadProjects } from "../session";
 import { navigate, registerViews, setAvailableViews } from "../router";
+
+test("sidebar collapse uses a state class and an accessible rail toggle", () => {
+  const source = readFileSync(new URL("./SpaceShell.tsx", import.meta.url), "utf8");
+  const css = readFileSync(new URL("./SpaceShell.css", import.meta.url), "utf8");
+  expect(source).toContain("sidebarCollapsed");
+  expect(source).toContain('aria-label="Toggle sidebar"');
+  expect(css).toContain(".space-chat-shell.sidebar-collapsed");
+});
 
 // KNOWLEDGE KEEPS THE SECOND BAR. Every other rail mode lists its objects beside the
 // rail; Knowledge listed none, so the column vanished mid-navigation. Its objects are

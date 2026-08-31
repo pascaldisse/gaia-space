@@ -7,6 +7,7 @@ import {
   emptySources,
   isOrganisationEvent,
   readActor,
+  routeForAnchor,
   unreadChannelTotal,
   type AttentionSources,
 } from "./attention";
@@ -150,6 +151,14 @@ describe("one definition of what needs me", () => {
   });
 });
 
+describe("notification anchor routes", () => {
+test("a message notification opens the real Chat surface", () => {
+expect(routeForAnchor("message", "m-1")).toEqual({ view: "Chat" });
+});
+test("an unknown anchor stays undefined for the caller safe fallback", () => {
+expect(routeForAnchor("unknown", "x")).toBeUndefined();
+});
+});
 describe("the organisation feed", () => {
   test("news is a feed: not counted, not cleared, read state irrelevant", () => {
     const s = sources({

@@ -201,6 +201,7 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  position: relative;
   border-right: 1px solid #243050;
 }
 
@@ -211,6 +212,12 @@
   gap: 0.6em;
   padding: 0.6em 0.9em;
   border-bottom: 1px solid #243050;
+}
+
+.jump-to-latest {
+  position: absolute; right: 1rem; bottom: 4.5rem; z-index: 2;
+  border: 1px solid var(--accent, #00c2a8); border-radius: 999px;
+  padding: .4em .75em; background: var(--surface, #141d30); color: var(--text, #fff);
 }
 
 .message-pane {

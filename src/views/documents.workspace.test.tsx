@@ -2,7 +2,7 @@ import { expect, test, describe, afterEach, mock } from "bun:test";
 import { invoke } from "../api/invoke";
 mock.module("@tauri-apps/api/core", () => ({ invoke }));
 import { render } from "solid-js/web";
-import Documents from "./Documents";
+import Documents, { documentTreeLoading } from "./Documents";
 import { setProfileId, setProjectId } from "../session";
 import { navigate, registerViews } from "../router";
 
@@ -49,6 +49,10 @@ const folder = (over: Record<string, unknown> = {}) => ({
 });
 
 describe("documents workspace composition", () => {
+  test("a refresh keeps the already loaded tree visible", () => {
+    expect(documentTreeLoading("refreshing", "ready")).toBe(false);
+    expect(documentTreeLoading("pending", "ready")).toBe(true);
+  });
   test("web mode locks the personal container to the session and offers no actor switch", async () => {
     setProfileId("me");
     serve({

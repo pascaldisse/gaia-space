@@ -19,9 +19,9 @@ afterEach(() => { dispose?.(); dispose = undefined; document.body.innerHTML = ""
 
 const open = { id: "c-open", board_id: "b1", name: "open", ordering: 0, status_ids: ["s-open"] };
 const progress = { id: "c-prog", board_id: "b1", name: "in progress", ordering: 1, status_ids: [] as string[] };
-const issue = { id: "i1", project_id: "p1", number: 3, title: "test issue", description: null, status_id: "s-open", assignee_id: null, created_by: null, due_date: null, priority: null, archived: false };
+const issue = { id: "i1", project_id: "p1", number: 3, title: "test issue", description: null, status_id: "s-open", assignee_id: null, assignee_ids: [], created_by: null, due_date: null, priority: null, archived: false };
 
-const serve = () => {
+const serve = (boardIssues = [issue]) => {
   globalThis.fetch = (async (url: any, init: any) => {
     const cmd = String(url).split("api/cmd/")[1] ?? String(url);
     const body = init?.body ? JSON.parse(init.body) : {};
@@ -30,7 +30,7 @@ const serve = () => {
       list_boards: [{ id: "b1", project_id: "p1", name: "B1", backlog_type: "MANUAL", archived: false }],
       list_issue_statuses: [{ id: "s-open", project_id: "p1", name: "open", resolved: false, color: "#fff", ordering: 0 }],
       list_board_columns: [open, progress],
-      list_board_issues: [issue],
+      list_board_issues: boardIssues,
       list_backlog_issues: [],
       list_sprints: [],
       get_issue_detail: { ...issue, tags: [], checklists: [], time_total_minutes: 0, children: [] },
@@ -104,6 +104,20 @@ describe("board columns accept work", () => {
     expect(grouping.textContent).toContain("Assignee");
     expect(host.querySelector(".swimlane-row header")?.textContent).toContain("Unassigned");
     expect(host.querySelectorAll(".swimlane-row .board-column").length).toBe(2);
+  });
+
+  test("places multi-assignee cards in each person's lane", async () => {
+    setProjectId("p1");
+    serve([{ ...issue, id: "pair", assignee_ids: ["a", "b"] }, { ...issue, id: "solo", assignee_ids: ["a"] }]);
+    const host = document.createElement("div"); document.body.appendChild(host);
+    dispose = render(() => <Boards />, host);
+    await settle();
+    const grouping = host.querySelector('[aria-label="Swimlane grouping"]') as HTMLButtonElement;
+    grouping.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true })); await settle();
+    document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true })); await settle();
+    document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true })); await settle();
+    const laneA = [...host.querySelectorAll(".swimlane-row")].find(row => row.querySelector("header")?.textContent?.includes("a"))!;
+    expect(laneA.querySelectorAll(".issue-card")).toHaveLength(2);
   });
 
   test("dropping a column header on another column reorders to that slot", async () => {
