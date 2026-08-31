@@ -48,6 +48,12 @@ export type MeetingDraft = { title: string; starts_at: string; ends_at: string; 
 export type TaskDraft = { title: string; day: string };
 export type DeadlineDraft = { project_id: string; day: string };
 
+/** A meeting whose organizer cannot be named would be stored INVISIBLE to the person
+ *  who booked it (`MEETING_READ_SCOPE` in meetings.rs admits the organizer, an invited
+ *  participant, or a project channel — a null organizer matches none). Every composer
+ *  refuses with this one sentence rather than writing a row nobody can read. */
+export const NO_ORGANIZER = "Select a profile before creating a meeting.";
+
 /** Quick-create validation. Returns the error a person should read, or "" when the
  *  draft may be sent. The same rules gate the submit button and the alert. */
 export const meetingDraftError = (draft: MeetingDraft) => {
