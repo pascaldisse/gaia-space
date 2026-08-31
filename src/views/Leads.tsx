@@ -1,9 +1,11 @@
-import { createResource, For, Show } from "solid-js";
-import { leadsApi } from "../api/leads";
+import { createResource, createSignal, For, Show } from "solid-js";
+import { leadsApi, type Lead } from "../api/leads";
 import PageHeader, { Chip } from "../components/PageHeader";
 import { GhostPill } from "../components/controls";
 import EmptyState from "../components/EmptyState";
-import { humanError } from "../session";
+import { currentUser, humanError, isWeb } from "../session";
+import ConfirmDialog from "../components/ConfirmDialog";
+import DeleteButton from "../components/DeleteButton";
 import "../components/paper.css";
 import "./Leads.css";
 
@@ -31,9 +33,40 @@ const displayDate = (value: string) => {
 
 export default function Leads() {
   const [leads, { refetch }] = createResource(leadsApi.list);
+  const [pendingDelete, setPendingDelete] = createSignal<Lead>();
+  const [deleting, setDeleting] = createSignal(false);
+  const [deleteError, setDeleteError] = createSignal("");
   const count = () => leads()?.length ?? 0;
   const settled = () => !leads.loading && !leads.error;
+  // Web navigation admits administrators only; a direct pre-auth mount must not
+  // suppress the server-authorized control before the session resolves.
+  const canDelete = () => !isWeb() || !currentUser() || currentUser()?.role === "GlobalAdmin";
+  const deleteLead = async () => {
+    const lead = pendingDelete();
+    if (!lead) return;
+    setDeleteError("");
+    setDeleting(true);
+    try {
+      await leadsApi.delete(lead.id);
+      setPendingDelete();
+      await refetch();
+    } catch (reason) {
+      setDeleteError(humanError(reason));
+      setPendingDelete();
+    } finally {
+      setDeleting(false);
+    }
+  };
   return <section class="leads-view">
+    <ConfirmDialog
+      open={!!pendingDelete()}
+      title="Delete contact submission?"
+      body={<><strong>{pendingDelete()?.name ?? "This contact submission"}</strong> will be permanently deleted. This cannot be undone.</>}
+      confirmLabel="Delete contact submission"
+      busy={deleting()}
+      onConfirm={() => void deleteLead()}
+      onCancel={() => setPendingDelete()}
+    />
     {/* NOT the inbox glyph: nav.ts argues at length that Leads is not a second inbox —
         it is the people who came in from the landing page. A mark that repeats a wrong
         claim is worse than no mark. */}
@@ -53,6 +86,7 @@ export default function Leads() {
     {/* A refusal is NAMED, and it replaces the list — never an empty state, which
         would claim there are no submissions when we simply were not allowed to see them. */}
     <Show when={leads.error}><p class="leads-error" role="alert">{humanError(leads.error)}</p></Show>
+    <Show when={deleteError()}><p class="leads-error" role="alert">{deleteError()}</p></Show>
     <Show when={settled() && count() === 0}>
       <EmptyState
         title="No contact submissions yet"
@@ -64,7 +98,10 @@ export default function Leads() {
         <For each={leads()}>{lead => <article class="paper-card lead-card">
           <header>
             <div><h2>{lead.name}</h2><p>{lead.business}</p></div>
-            <time dateTime={lead.created_at}>{displayDate(lead.created_at)}</time>
+            <div class="lead-card-actions">
+              <time dateTime={lead.created_at}>{displayDate(lead.created_at)}</time>
+              <DeleteButton label={`Delete contact submission from ${lead.name}`} canDelete={canDelete()} onRequest={() => setPendingDelete(lead)} />
+            </div>
           </header>
           <p class="lead-intent"><strong>{lead.bereich}</strong> · {lead.interesse}</p>
           <address>{lead.address}</address>
