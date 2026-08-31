@@ -16,6 +16,8 @@ import { bandTone, deadlineBand, todayISO, urgencyOf } from "../statusTone";
 import { humanError } from "../session";
 import { myTasks } from "../taskScope";
 import { Icon } from "../components/Icon";
+import { planningApi, type Issue, type Status } from "../api/issues";
+import { linkProps } from "../router";
 import ContentHead from "../components/ContentHead";
 
 // Tokens, never HTML: a task body can style itself but can never inject markup.
@@ -38,6 +40,11 @@ export default function Todo() {
   const [showDone,setShowDone]=createSignal(false);
   const [todos,{refetch}]=createResource(profileId,id=>id?personalApi.todos(id,true):Promise.resolve([]));
 const scopedTodos=()=>myTasks(todos()??[],profileId());
+const [assignedIssues]=createResource(profileId,id=>id?planningApi.issues({assignee_id:id}):Promise.resolve([]));
+const [issueFacts]=createResource(()=>assignedIssues()?.map(issue=>issue.id).join(",")??"",async()=>Promise.all((assignedIssues()??[]).map(async issue=>({issue,detail:await planningApi.issue(issue.id)}))));
+const [issueStatuses]=createResource(()=>[...new Set((assignedIssues()??[]).map(issue=>issue.project_id))].sort().join(","),async()=>Promise.all([...new Set((assignedIssues()??[]).map(issue=>issue.project_id))].map(id=>planningApi.statuses(id))).then(groups=>groups.flat()));
+const statusName=(issue:Issue)=>issueStatuses()?.find((status:Status)=>status.id===issue.status_id)?.name??"No status";
+const issueKind=(issue:Issue)=>issueFacts()?.find(fact=>fact.issue.id===issue.id)?.detail?.tags.some(tag=>tag.name.toLowerCase()==="bug")?"Bug":"Ticket";
   /* The project-member read, the assignable-people list and the project list moved
      WITH the editor into components/TaskRowEdit.tsx — including the rule that a
      refused member read is carried as a value and said out loud, never shown as
@@ -193,6 +200,7 @@ const scopedTodos=()=>myTasks(todos()??[],profileId());
         <span class="task-tile-title">
           <Show when={todo.content_kind==="markdown"} fallback={todo.content}>{markdownBody(todo.content)}</Show>
         </span>
+        <span class="task-work-kind"><Icon name="check" size={13} />Task</span>
         {/* THE META LINE JOINS ITSELF. Every separator used to be placed by hand next
             to the fact it followed, so each new fact had to guess what might come
             before it — and got it wrong: a category with nothing after it printed
@@ -347,6 +355,15 @@ const scopedTodos=()=>myTasks(todos()??[],profileId());
         )}
       </For>
 
+      <Show when={assignedIssues()?.length}>
+        <p class="task-group-heading">Assigned work<span class="count">{assignedIssues()!.length}</span></p>
+        <div class="task-grid" aria-label="Assigned ticket work">
+          <For each={assignedIssues()}>{issue=><a class="task-tile task-ticket-tile" {...linkProps({view:"Issues",entityType:"issue",entityId:issue.id,projectId:issue.project_id})}>
+            <span class="task-tile-check"><Icon name={issueKind(issue)==="Bug"?"alert":"target"} size={15} /></span>
+            <span class="task-tile-body"><span class="task-tile-title">{issue.title}</span><span class="task-work-kind"><Icon name={issueKind(issue)==="Bug"?"alert":"target"} size={13} />{issueKind(issue)}</span><span class="task-tile-meta"><span>{projectName(issue.project_id)}</span><span class="sep">·</span><span>{statusName(issue)}</span><Show when={issue.priority}><span class="sep">·</span><span>{issue.priority!.toLowerCase()}</span></Show><span class="sep">·</span><span>#{issue.number}</span></span></span>
+          </a>}</For>
+        </div>
+      </Show>
       {/* Done is folded away by default: it is the part of the list you are finished
           with, and it grows forever. The count stays visible on the toggle. */}
       <Show when={showDone() && doneList().length}>
