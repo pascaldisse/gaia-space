@@ -2,6 +2,7 @@ import { UI_LOCALE } from "../calendar";
 import { createEffect, createSignal, For, onCleanup, Show } from "solid-js";
 import { Room, RoomEvent, Track, type Participant } from "livekit-client";
 import { meetingsApi, type CallJoin, type CallRecording, type CallTranscriptSegment, type Meeting } from "../api/meetings";
+import { newId } from "../api/ids";
 
 type DeviceLists = { audioinput: MediaDeviceInfo[]; videoinput: MediaDeviceInfo[]; audiooutput: MediaDeviceInfo[] };
 type DeviceKind = keyof DeviceLists;
@@ -198,7 +199,7 @@ const toggleRecording = async () => {
   const sendChat = async () => {
     const current = room(); const text = chatDraft().trim();
     if (!current || !text) return;
-    const message: ChatMessage = { id: crypto.randomUUID(), author: props.displayName || props.identity, text };
+    const message: ChatMessage = { id: newId(), author: props.displayName || props.identity, text };
     try {
       await current.localParticipant.publishData(chatEncoder.encode(JSON.stringify(message)), { reliable: true });
       setChatMessages(items => [...items, message]); setChatDraft("");

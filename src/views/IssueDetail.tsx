@@ -2,6 +2,7 @@ import { UI_LOCALE } from "../calendar";
 import { createResource, createSignal, For, Show } from "solid-js";
 import { planningApi, type Checklist, type ChecklistItem, type Issue, type IssueActivity, type IssueAttachment, type PlanningTag, type Status, type TimeEntry, type TrackerLink } from "../api/issues";
 import { personalApi } from "../api/personal";
+import { prefixedId } from "../api/ids";
 import { currentUser, humanError, profileId, profiles, projects, reloadProfiles } from "../session";
 import { linkEntity } from "../router";
 import SourceLink from "../components/SourceLink";
@@ -57,7 +58,7 @@ try {
 for (const file of [...files]) {
 if (file.size > 10 * 1024 * 1024) throw new Error(`${file.name} exceeds the 10 MiB attachment limit`);
 const data_url = await new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onerror = () => reject(reader.error ?? new Error(`Could not read ${file.name}`)); reader.onload = () => resolve(String(reader.result)); reader.readAsDataURL(file); });
-await planningApi.addAttachment(id, { id: `issue-attachment-${crypto.randomUUID()}`, file_name: file.name, mime_type: file.type || "application/octet-stream", byte_length: file.size, data_url });
+await planningApi.addAttachment(id, { id: prefixedId("issue-attachment"), file_name: file.name, mime_type: file.type || "application/octet-stream", byte_length: file.size, data_url });
 }
 await refetch(); props.onChanged?.();
 } catch (reason) { setError(humanError(reason)); }

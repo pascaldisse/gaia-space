@@ -1,23 +1,16 @@
-/** ── MINTING A CLIENT-SIDE ID ────────────────────────────────────────────────
- *
- *  `crypto.randomUUID` is a SECURE-CONTEXT API. The desktop webview and an HTTPS
- *  deployment have it; a web build served at plain `http://<host>/space/` does not,
- *  and the property is simply `undefined` there. Calling it then throws a TypeError
- *  in the FIRST line of a composer's submit handler — before any command is sent —
- *  so the surface reports a failure while the network shows no request at all.
- *
- *  `Applications.tsx` already carried that guard inline, for one surface. This is the
- *  same rule stated once, for every surface that mints an id: the real UUID where it
- *  exists, and a collision-resistant fallback where it does not. The fallback is only
- *  ever a local row id — nothing authenticates on it.
- */
-export const newId = (): string =>
-  crypto.randomUUID?.() ??
-  [
-    Date.now().toString(16),
-    Math.random().toString(16).slice(2, 10),
-    Math.random().toString(16).slice(2, 10),
-  ].join("-");
+/** Client-generated IDs must also work when the web build is served over HTTP. */
+const fallbackId = (): string => `${Date.now().toString(16)}-${Math.random().toString(16).slice(2)}-${Math.random().toString(16).slice(2)}`;
 
-/** The same id, prefixed by the kind of thing it names (`document-…`, `review-…`). */
+export const newId = (): string => {
+  const uuid = crypto.randomUUID?.();
+  if (uuid) return uuid;
+  if (!crypto.getRandomValues) return fallbackId();
+
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = Array.from(bytes, byte => byte.toString(16).padStart(2, "0"));
+  return `${hex.slice(0, 4).join("")}-${hex.slice(4, 6).join("")}-${hex.slice(6, 8).join("")}-${hex.slice(8, 10).join("")}-${hex.slice(10).join("")}`;
+};
+
 export const prefixedId = (prefix: string): string => `${prefix}-${newId()}`;

@@ -2,6 +2,7 @@
 // Kept standalone from ../api.ts (owned by another lane): types + calls needed by
 // views/Chat.tsx + views/Chat.css only.
 import { invoke } from "@tauri-apps/api/core";
+import { newId as rawId } from "./ids";
 
 export type ChannelContentType = "dm" | "private" | "public" | "entity-bound";
 
@@ -315,5 +316,5 @@ listPinnedMessages: (channelId: string, actingProfileId?: string | null) =>
 };
 
 export function newId(prefix: string): string {
-  return `${prefix}-${crypto.randomUUID()}`;
+  return `${prefix}-${rawId()}`;
 }
