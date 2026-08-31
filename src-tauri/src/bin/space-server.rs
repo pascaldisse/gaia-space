@@ -2527,6 +2527,8 @@ enum CommandPolicy {
     CalendarOptionsWrite,
     /// Contact leads contain private contact data; GlobalAdmin only.
     LeadRead,
+    /// Erasing a contact lead is the same administrator door as reading it.
+    LeadDelete,
     /// Application credentials: rotate/issue/verify/revoke/list plus marketplace
     /// installs. `applications` carries no owner column, so the only ownership
     /// resource available is the account role — administrators only.
@@ -2556,6 +2558,7 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         "calendar_aggregate" | "get_calendar_options" => CommandPolicy::CalendarRead,
         "list_calendar_feeds" => CommandPolicy::CalendarFeedRead,
         "list_leads" => CommandPolicy::LeadRead,
+        "delete_lead" => CommandPolicy::LeadDelete,
         "list_calendars" => CommandPolicy::CalendarRead,
         "save_calendar" => CommandPolicy::CalendarUpsert,
         "delete_calendar" => CommandPolicy::CalendarOwnerAction,
@@ -3528,6 +3531,13 @@ fn authorize_command(
                 Ok(())
             } else {
                 Err(err(StatusCode::FORBIDDEN, "only an administrator can view leads"))
+            }
+        }
+        CommandPolicy::LeadDelete => {
+            if user.role == "GlobalAdmin" {
+                Ok(())
+            } else {
+                Err(err(StatusCode::FORBIDDEN, "only an administrator can delete leads"))
             }
         }
         // App credentials are workspace-wide secrets with no per-app owner to fall
@@ -5517,6 +5527,7 @@ async fn cmd(
     "list_meetings" => meetings::list_meetings_scoped(profile_id: String),
     "list_locations" => platform::list_locations(),
     "list_leads" => leads::list_leads(),
+    "delete_lead" => leads::delete_lead(id: String),
     "save_location" => platform::save_location(location: platform::Location),
     "location_channel" => platform::location_channel(location_id: String),
     "list_desk_assignments" => platform::list_desk_assignments(profile_id: Option<String>, location_id: Option<String>),
@@ -6453,6 +6464,27 @@ mod tests {
         let (status, body) = call(cookie("tc"), "list_leads", json!({})).await;
         assert_eq!(status, StatusCode::OK, "{body}");
         assert_eq!(body["value"][0]["email"], "ada@example.test");
+
+        env::remove_var("SPACE_LEADS_PATH");
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn leads_can_be_deleted_by_an_administrator_only() {
+        let _serial = test_lock();
+        setup();
+        let path = env::temp_dir().join(format!("gaia-space-leads-delete-http-{}.json", std::process::id()));
+        std::fs::write(&path, r#"[{"id":"lead-1","bereich":"software","interesse":"vormerken","name":"Ada","business":"Analytical Engines","address":"1 Logic Lane","phone":"+49","email":"ada@example.test","consent":true,"createdAt":"2026-08-25T13:00:22.544Z"}]"#).unwrap();
+        env::set_var("SPACE_LEADS_PATH", &path);
+
+        let (status, body) = call(cookie("ta"), "delete_lead", json!({ "id": "lead-1" })).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "a member must not erase lead PII: {body}");
+        let (status, body) = call(cookie("tc"), "delete_lead", json!({ "id": "lead-1" })).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+
+        let (status, body) = call(cookie("tc"), "list_leads", json!({})).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["value"].as_array().unwrap().len(), 0, "the deleted lead must not come back");
 
         env::remove_var("SPACE_LEADS_PATH");
         let _ = std::fs::remove_file(path);
