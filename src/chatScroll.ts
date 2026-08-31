@@ -22,6 +22,11 @@ export function shouldAutoScroll(state: AutoScrollState): boolean {
   return state.opening || state.wasNearBottom;
 }
 
+/** Offer a manual return only after the reader leaves the live edge. */
+export function shouldShowJumpButton(metrics: ScrollMetrics, threshold = 24): boolean {
+  return !isNearBottom(metrics, threshold);
+}
+
 // Browsers clamp this to the maximum scrollTop; using scrollHeight also remains correct
 // if the client height changes between measuring and assigning.
 export function scrollTargetFor(metrics: ScrollMetrics): number {

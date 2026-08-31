@@ -5,6 +5,7 @@ import {
   restorePrependedScroll,
   scrollTargetFor,
   shouldAutoScroll,
+  shouldShowJumpButton,
 } from "./chatScroll";
 
 describe("chat scroll", () => {
@@ -28,7 +29,11 @@ describe("chat scroll", () => {
     expect(scrollTargetFor({ scrollTop: 0, scrollHeight: 1184, clientHeight: 555 })).toBe(1184);
   });
 
-  test("preserves the visible history row when an older page is prepended", () => {
+  test("shows a jump-to-latest control only away from the live edge", () => {
+expect(shouldShowJumpButton({ scrollTop: 500, scrollHeight: 1200, clientHeight: 600 })).toBe(true);
+expect(shouldShowJumpButton({ scrollTop: 576, scrollHeight: 1200, clientHeight: 600 })).toBe(false);
+});
+test("preserves the visible history row when an older page is prepended", () => {
     const anchor = captureScroll({ scrollTop: 120, scrollHeight: 800, clientHeight: 400 });
     expect(restorePrependedScroll(anchor, { scrollTop: 120, scrollHeight: 1040, clientHeight: 400 })).toBe(360);
   });
