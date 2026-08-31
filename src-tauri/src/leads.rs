@@ -1,7 +1,7 @@
 //! Paloptic landing-page contact entries. The Quest service owns writes; Space
-//! receives a read-only, administrator-only view through a host-provided path.
-//! The browser never learns the storage path and ordinary Space members never
-//! receive personal contact data.
+//! receives an administrator-only view and erasure command through a host-provided
+//! path. The browser never learns the storage path and ordinary Space members
+//! never receive personal contact data.
 use serde::{Deserialize, Serialize};
 use std::{env, fs, path::Path};
 
