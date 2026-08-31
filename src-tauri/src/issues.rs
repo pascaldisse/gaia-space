@@ -2127,7 +2127,6 @@ mod tests {
             c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES(?1,?2,?2,unixepoch())", params![id, username]).unwrap();
         }
         c.execute("INSERT INTO projects(id,name,key,archived,created_at) VALUES('p','P','P',0,unixepoch())", []).unwrap();
-        c.execute("INSERT INTO subscription_scopes(profile_id,event_type,target_type,target_id,enabled) VALUES('pc','*','entity','i',1)", []).unwrap();
 
         let mut issue = issue_fixture();
         assert!(
@@ -2135,6 +2134,7 @@ mod tests {
             "nobody involved yet"
         );
 
+        c.execute("INSERT INTO subscription_scopes(profile_id,event_type,target_type,target_id,enabled) VALUES('pc','*','entity','i',1)", []).unwrap();
         issue.assignee_ids = vec!["pa".into()];
         issue.description = Some("please review @bob".into());
         let recipients = involved_recipients_on(&c, &issue).unwrap();
