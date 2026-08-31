@@ -2,9 +2,10 @@
 // src-tauri/src/documents.rs. Kept standalone from ../api.ts (owned by another lane):
 // types + calls needed by views/Documents.tsx + views/Documents.css only.
 import { invoke } from "@tauri-apps/api/core";
+import { newId as rawId } from "./ids";
 
 export function newId(prefix: string): string {
-  return `${prefix}-${crypto.randomUUID()}`;
+  return `${prefix}-${rawId()}`;
 }
 
 // "my-docs"  -> container_id = owning profile id (personal, private tree)

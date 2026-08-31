@@ -2,9 +2,10 @@
 // Kept standalone from ../api.ts (owned by another lane): types + calls needed by
 // views/Reviews.tsx + views/Reviews.css only.
 import { invoke } from "@tauri-apps/api/core";
+import { newId as rawId } from "./ids";
 
 export function newId(prefix: string): string {
-  return `${prefix}-${crypto.randomUUID()}`;
+  return `${prefix}-${rawId()}`;
 }
 
 export type Review = {

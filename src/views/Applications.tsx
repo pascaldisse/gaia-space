@@ -1,6 +1,7 @@
 import { createResource, createSignal, For, Show } from "solid-js";
 import { appHttpApi, applicationsApi, type AppDispatch, type AppInstall, type AppSecret, type AppSigningKey, type AppToken, type Application, type ChatbotRegistration, type CommandListing, type RightDto, type ScopeApprovalStatus, type Devfile, type MarketplaceApp, type UiExtension, type WebhookSubscription, type WebhookDelivery, type RotatedWebhookSecret } from "../api/applications";
 import { platformApi } from "../api/platform";
+import { prefixedId } from "../api/ids";
 import PageHeader from "../components/PageHeader";
 import EmptyState from "../components/EmptyState";
 import { Icon } from "../components/Icon";
@@ -20,7 +21,7 @@ const appTypeLabel = (type: string): string =>
   : "Application";
 const payloadClassLabel = (name: string): string =>
   name.replace(/Payload$/, "").replace(/(?!^)([A-Z])/g, " $1");
-const id=(kind:string)=>`${kind}-${crypto.randomUUID?.()??`${Date.now()}-${Math.random().toString(16).slice(2)}`}`;
+const id = prefixedId;
 const blankApp=():Application=>({id:id("app"),name:"",description:null,application_type:"Application",endpoint_uri:null,client_id:"",client_credentials_flow_enabled:true,code_flow_enabled:false,pkce_required:false,connection_status:"CONNECTING",archived:false,owner_profile_id:null,owner_application_id:null});
 export default function Applications(){
  const [error,setError]=createSignal(""); const [delivery,setDelivery]=createSignal<WebhookDelivery|null>(null); const [rotated,setRotated]=createSignal<RotatedWebhookSecret|null>(null); const [selected,setSelected]=createSignal<Application|null>(null); const [appForm,setAppForm]=createSignal(blankApp()); const [repoPath,setRepoPath]=createSignal(""); const [ide,setIde]=createSignal("JetBrains Gateway");

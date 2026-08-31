@@ -1,6 +1,6 @@
 import { createMemo, createResource, createSignal, For, Show } from "solid-js";
 import { hasMeetingLink, meetingLinkError, meetingsApi, openMeetingLink, type Meeting, type MeetingParticipant } from "../api/meetings";
-import { localInput, meetingDraftError, UI_LOCALE} from "../calendar";
+import { localInput, meetingDraftError, NO_ORGANIZER, UI_LOCALE} from "../calendar";
 import { ProfilePicker } from "../components/Pickers";
 import DateTimeField from "../components/DateTimeField";
 import MeetingDrawer, { type MeetingForm } from "../components/MeetingDrawer";
@@ -10,6 +10,7 @@ import { Icon } from "../components/Icon";
 import { GhostPill, PillSelect, QuietSearch } from "../components/controls";
 import EmptyState from "../components/EmptyState";
 import { humanError, isWeb, profileId } from "../session";
+import { newId } from "../api/ids";
 import { linkProps, useDeepLink } from "../router";
 import CallPanel from "./CallPanel";
 import "./Meetings.css";
@@ -161,15 +162,19 @@ export default function Meetings() {
     setNotice("");
     try {
       const draft = form();
+      // HTTP carries the authenticated web session, which the server binds as organizer.
+      // Desktop IPC has no session rebinding, so only that transport requires a profile.
+      const organizer = draft.organizer_id || profileId() || null;
+      if (!organizer && !isWeb()) throw new Error(NO_ORGANIZER);
       const meeting: Meeting = {
-        id: crypto.randomUUID(),
+        id: newId(),
         title: draft.title.trim(),
         description: draft.description?.trim() || null,
         starts_at: draft.starts_at,
         ends_at: draft.ends_at,
         rrule: draft.rrule?.trim() || null,
         location: draft.location?.trim() || null,
-        organizer_id: draft.organizer_id || profileId() || null,
+        organizer_id: organizer,
         channel_id: draft.channel_id || null,
         visibility: draft.visibility,
         modification_preference: draft.modification_preference,
@@ -189,7 +194,15 @@ export default function Meetings() {
       const invalid = validate(meeting);
       if (invalid) throw new Error(invalid);
       await meetingsApi.create(meeting);
-      const channel_id = await meetingsApi.attachChannel(meeting.id);
+      /* THE MEETING NOW EXISTS. Everything below is a SECOND act on a thing that is
+         already stored, so each one carries its own catch: a discussion channel that
+         could not be attached, or a person who could not be invited, is reported as
+         itself and never as "create failed". The one outer catch used to swallow
+         these, leaving the composer open over a meeting that had in fact been booked
+         — which is what "create doesn't work" looked like from the outside. */
+      let channel_id = meeting.channel_id;
+      try { channel_id = await meetingsApi.attachChannel(meeting.id); }
+      catch (reason) { setError(humanError(reason)); }
       // The drawer collects people before there is a meeting to invite them to,
       // so the invites land here, once. A failing invite must not lose the
       // meeting that was already created.

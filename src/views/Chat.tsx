@@ -1,6 +1,6 @@
 import { createResource, createSignal, createEffect, onCleanup, For, Show } from "solid-js";
 import { useDeepLink, linkProps, route } from "../router";
-import { currentUser, isWeb } from "../session";
+import { currentUser, isWeb, setProjectId } from "../session";
 import { navLayout } from "../nav";
 import { actingProfileId, bumpChannels, setActingProfileId } from "../chatIdentity";
 import { markChannelRead } from "../attention";
@@ -1639,7 +1639,13 @@ export default function Chat(props: { embedded?: boolean } = {}) {
             projectId={activeChannel()?.project_id ?? undefined}
             prefillTitle={draft().excerpt}
             onClose={() => setWorkDraft(null)}
-            onCreated={() => setWorkDraft(null)}
+            onCreated={(kind, _id, createdProjectId) => {
+              // A ticket made from a project channel belongs to that channel's project.
+              // Keep Development's shared project filter there, so the next ticket list
+              // shows the work just created instead of an unrelated empty project.
+              if (kind === "ticket" && createdProjectId) setProjectId(createdProjectId);
+              setWorkDraft(null);
+            }}
           />
         )}
       </Show>

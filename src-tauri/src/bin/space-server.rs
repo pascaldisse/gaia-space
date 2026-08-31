@@ -2491,6 +2491,9 @@ enum CommandPolicy {
     PipelineScriptExecute,
     BoardRead,
     IssueRead,
+    /// Ticket attachments are evidence attached to project work: every member who
+    /// may create a ticket may add or remove its evidence.
+    IssueAttachmentWrite,
     IssueAssign,
     ProjectMemberAdmin,
     ProjectDeadlineWrite,
@@ -2527,6 +2530,8 @@ enum CommandPolicy {
     CalendarOptionsWrite,
     /// Contact leads contain private contact data; GlobalAdmin only.
     LeadRead,
+    /// Erasing a contact lead is the same administrator door as reading it.
+    LeadDelete,
     /// Application credentials: rotate/issue/verify/revoke/list plus marketplace
     /// installs. `applications` carries no owner column, so the only ownership
     /// resource available is the account role — administrators only.
@@ -2556,6 +2561,7 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         "calendar_aggregate" | "get_calendar_options" => CommandPolicy::CalendarRead,
         "list_calendar_feeds" => CommandPolicy::CalendarFeedRead,
         "list_leads" => CommandPolicy::LeadRead,
+        "delete_lead" => CommandPolicy::LeadDelete,
         "list_calendars" => CommandPolicy::CalendarRead,
         "save_calendar" => CommandPolicy::CalendarUpsert,
         "delete_calendar" => CommandPolicy::CalendarOwnerAction,
@@ -2592,6 +2598,7 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "attempt_merge"
         | "open_merge_request"
         | "list_channels" => CommandPolicy::Unavailable,
+        "add_issue_attachment" | "delete_issue_attachment" => CommandPolicy::IssueAttachmentWrite,
         "add_channel_member"
         | "add_issue_child"
         | "add_reaction"
@@ -3236,13 +3243,68 @@ const RIGHTS_ADMIN_COMMANDS: &[(&str, gaia_space_lib::rights::Right)] = &[
         gaia_space_lib::rights::Right::EditRoles,
     ),
 ];
-fn require_rights_administration(user: &User, name: &str) -> Result<(), (StatusCode, Json<Value>)> {
+fn project_role_assignment_scope(
+    name: &str,
+    body: &Value,
+) -> Result<Option<String>, (StatusCode, Json<Value>)> {
+    let project_id = match name {
+        "create_role_assignment" => body
+            .get("input")
+            .filter(|input| input.get("scope_type").and_then(Value::as_str) == Some("project"))
+            .and_then(|input| input.get("scope_id").and_then(Value::as_str))
+            .map(str::to_owned),
+        "delete_role_assignment" => {
+            let id: String = arg(body, "id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
+            let c = db::conn().map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?;
+            c.query_row(
+                "SELECT scope_id FROM role_assignments WHERE id=?1 AND scope_type='project'",
+                [&id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?
+        }
+        _ => None,
+    };
+    Ok(project_id)
+}
+
+fn require_project_role_administration(
+    user: &User,
+    right: gaia_space_lib::rights::Right,
+    project_id: &str,
+) -> Result<(), (StatusCode, Json<Value>)> {
+    let c = db::conn().map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?;
+    if platform::is_admin_on(&c, &user.profile_id).unwrap_or(false) {
+        return Ok(());
+    }
+    if platform::require_right_on(&c, &user.profile_id, right, "global", None).is_ok() {
+        return Ok(());
+    }
+    if project_owner(project_id)
+        .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?
+        .is_some_and(|owner| owner == user.profile_id)
+    {
+        return Ok(());
+    }
+    platform::require_right_on(&c, &user.profile_id, right, "project", Some(project_id))
+        .map_err(|_| err(StatusCode::FORBIDDEN, "right required"))
+}
+
+fn require_rights_administration(
+    user: &User,
+    name: &str,
+    body: &Value,
+) -> Result<(), (StatusCode, Json<Value>)> {
     let Some((_, right)) = RIGHTS_ADMIN_COMMANDS
         .iter()
         .find(|(command, _)| *command == name)
     else {
         return Ok(());
     };
+    if let Some(project_id) = project_role_assignment_scope(name, body)? {
+        return require_project_role_administration(user, *right, &project_id);
+    }
     let c = db::conn().map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?;
     if platform::is_admin_on(&c, &user.profile_id).unwrap_or(false) {
         return Ok(());
@@ -3263,7 +3325,7 @@ fn authorize_command(
     // another person's menu — and be announced to a third party as them.
     // `user_id` is not in `bind_session_identity` because elsewhere it legitimately
     // names someone else, so the rebinding is done here, for this command only.
-    require_rights_administration(user, name)?;
+    require_rights_administration(user, name, body)?;
     if name == "list_chatbot_commands" {
         if let Value::Object(object) = &mut *body {
             object.insert("userId".to_string(), json!(user.profile_id));
@@ -3475,6 +3537,13 @@ fn authorize_command(
                 Err(err(StatusCode::FORBIDDEN, "only an administrator can view leads"))
             }
         }
+        CommandPolicy::LeadDelete => {
+            if user.role == "GlobalAdmin" {
+                Ok(())
+            } else {
+                Err(err(StatusCode::FORBIDDEN, "only an administrator can delete leads"))
+            }
+        }
         // App credentials are workspace-wide secrets with no per-app owner to fall
         // back on: an ordinary member must not rotate another app's secret, mint a
         // token, or probe one for validity.
@@ -3508,6 +3577,32 @@ fn authorize_command(
         // Assigning people is an issue write scoped to the project. Whoever may
         // change the project's membership (owner/admin) also brings somebody new
         // onto it by assigning them; everybody else can only pick existing members.
+        CommandPolicy::IssueAttachmentWrite => {
+            let issue: String = if name == "add_issue_attachment" {
+                arg(body, "issue_id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?
+            } else {
+                let attachment_id: String = arg(body, "id")
+                    .map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
+                db::conn()
+                    .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?
+                    .query_row(
+                        "SELECT issue_id FROM issue_attachments WHERE id=?1",
+                        [&attachment_id],
+                        |row| row.get(0),
+                    )
+                    .map_err(|_| err(StatusCode::FORBIDDEN, "project access denied"))?
+            };
+            let project_id = issue_project(&issue)
+                .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?
+                .ok_or_else(|| err(StatusCode::FORBIDDEN, "project access denied"))?;
+            if project_readable(user, &project_id)
+                .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?
+            {
+                Ok(())
+            } else {
+                Err(err(StatusCode::FORBIDDEN, "project access denied"))
+            }
+        }
         CommandPolicy::IssueAssign => {
             let issue: String =
                 arg(body, "issue_id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
@@ -5462,6 +5557,7 @@ async fn cmd(
     "list_meetings" => meetings::list_meetings_scoped(profile_id: String),
     "list_locations" => platform::list_locations(),
     "list_leads" => leads::list_leads(),
+    "delete_lead" => leads::delete_lead(id: String),
     "save_location" => platform::save_location(location: platform::Location),
     "location_channel" => platform::location_channel(location_id: String),
     "list_desk_assignments" => platform::list_desk_assignments(profile_id: Option<String>, location_id: Option<String>),
@@ -6398,6 +6494,27 @@ mod tests {
         let (status, body) = call(cookie("tc"), "list_leads", json!({})).await;
         assert_eq!(status, StatusCode::OK, "{body}");
         assert_eq!(body["value"][0]["email"], "ada@example.test");
+
+        env::remove_var("SPACE_LEADS_PATH");
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn leads_can_be_deleted_by_an_administrator_only() {
+        let _serial = test_lock();
+        setup();
+        let path = env::temp_dir().join(format!("gaia-space-leads-delete-http-{}.json", std::process::id()));
+        std::fs::write(&path, r#"[{"id":"lead-1","bereich":"software","interesse":"vormerken","name":"Ada","business":"Analytical Engines","address":"1 Logic Lane","phone":"+49","email":"ada@example.test","consent":true,"createdAt":"2026-08-25T13:00:22.544Z"}]"#).unwrap();
+        env::set_var("SPACE_LEADS_PATH", &path);
+
+        let (status, body) = call(cookie("ta"), "delete_lead", json!({ "id": "lead-1" })).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "a member must not erase lead PII: {body}");
+        let (status, body) = call(cookie("tc"), "delete_lead", json!({ "id": "lead-1" })).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+
+        let (status, body) = call(cookie("tc"), "list_leads", json!({})).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["value"].as_array().unwrap().len(), 0, "the deleted lead must not come back");
 
         env::remove_var("SPACE_LEADS_PATH");
         let _ = std::fs::remove_file(path);
@@ -7996,6 +8113,59 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn project_role_assignment_administration_is_scoped_to_owner_or_edit_roles() {
+        let _serial = test_lock();
+        setup();
+        let c = db::conn().unwrap();
+        c.execute("INSERT INTO projects(id,name,key,created_by,created_at) VALUES('project-roles','Project Roles','PROLES','pa',1)", []).unwrap();
+        c.execute("INSERT INTO roles(id,name) VALUES('role-member','Member'),('role-editor','Editor')", []).unwrap();
+        c.execute("INSERT OR IGNORE INTO rights(id,code,title,right_type) VALUES('right-edit-roles','Global.EditRoles','Edit roles','Global')", []).unwrap();
+        c.execute("INSERT INTO role_rights(role_id,right_id) VALUES('role-editor','right-edit-roles')", []).unwrap();
+        drop(c);
+
+        let input = json!({
+            "id": "assignment-owner",
+            "role_id": "role-member",
+            "profile_id": "pb",
+            "scope_type": "project",
+            "scope_id": "project-roles"
+        });
+        let (status, body) = call(cookie("ta"), "create_role_assignment", json!({"input": input})).await;
+        assert_eq!(status, StatusCode::OK, "a project owner may assign within the project: {body}");
+        assert_eq!(call(cookie("ta"), "delete_role_assignment", json!({"id":"assignment-owner"})).await.0, StatusCode::OK, "a project owner may remove the assignment");
+
+        let (status, body) = call(cookie("td"), "create_role_assignment", json!({"input": {
+            "id": "assignment-outsider",
+            "role_id": "role-member",
+            "profile_id": "pa",
+            "scope_type": "project",
+            "scope_id": "project-roles"
+        }})).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "an unrelated member stays denied: {body}");
+
+        let c = db::conn().unwrap();
+        c.execute("INSERT INTO role_assignments(id,role_id,profile_id,scope_type,scope_id) VALUES('editor-dora','role-editor','pd','project','project-roles')", []).unwrap();
+        drop(c);
+        let (status, body) = call(cookie("td"), "create_role_assignment", json!({"input": {
+            "id": "assignment-editor",
+            "role_id": "role-member",
+            "profile_id": "pa",
+            "scope_type": "project",
+            "scope_id": "project-roles"
+        }})).await;
+        assert_eq!(status, StatusCode::OK, "a project EditRoles grant may assign in its project: {body}");
+
+        let (status, body) = call(cookie("ta"), "create_role_assignment", json!({"input": {
+            "id": "assignment-global",
+            "role_id": "role-member",
+            "profile_id": "pb",
+            "scope_type": "global",
+            "scope_id": null
+        }})).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "a project owner does not gain global EditRoles: {body}");
     }
 
     #[tokio::test]
@@ -9855,6 +10025,64 @@ mod tests {
         assert_eq!(value["value"]["deadline"], json!("2030-07-07"));
     }
 
+    /// ISSUE #5 REPRO — the whole act a person performs in the composer, in order and
+    /// over the real command route: create with the EXACT payload `Meetings.tsx` /
+    /// `Calendar.tsx` build, then attach the discussion, then invite the people the
+    /// drawer collected, then read the list back. "Create meeting doesn't work" is a
+    /// report about this sequence, not about `create_meeting` alone.
+    #[tokio::test]
+    async fn the_composer_sequence_creates_a_meeting_a_person_can_then_see() {
+        let _serial = test_lock();
+        setup();
+        let payload = json!({"meeting":{
+            "id":"issue-5-meeting",
+            "title":"Weekly product review",
+            "description":null,
+            "starts_at":1893456000_i64,
+            "ends_at":1893459600_i64,
+            "rrule":null,
+            "location":null,
+            "organizer_id":"pa",
+            "channel_id":null,
+            "visibility":"participants",
+            "modification_preference":"organizer-only",
+            "meeting_url":null,
+            "archived":false,
+            "video_provider":null,
+            "video_room_id":null,
+            "join_url":null,
+            "video_status":"scheduled",
+            "video_started_at":null,
+            "video_ended_at":null,
+            "video_ended_by":null,
+            "source_entity_type":null,
+            "source_entity_id":null
+        }});
+        let (status, value) = call(cookie("ta"), "create_meeting", payload).await;
+        assert_eq!(status, StatusCode::OK, "create_meeting: {value}");
+
+        let (status, value) =
+            call(cookie("ta"), "attach_meeting_channel", json!({"id":"issue-5-meeting"})).await;
+        assert_eq!(status, StatusCode::OK, "attach_meeting_channel: {value}");
+
+        let (status, value) = call(
+            cookie("ta"),
+            "invite_meeting_participant",
+            json!({"meetingId":"issue-5-meeting","profileId":"pb"}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "invite_meeting_participant: {value}");
+
+        let (status, value) = call(cookie("ta"), "list_meetings", json!({})).await;
+        assert_eq!(status, StatusCode::OK, "list_meetings: {value}");
+        let listed = value["value"]
+            .as_array()
+            .expect("list_meetings returns an array")
+            .iter()
+            .any(|meeting| meeting["id"] == json!("issue-5-meeting"));
+        assert!(listed, "the created meeting must be listed back: {value}");
+    }
+
     #[tokio::test]
     async fn meeting_and_document_identity_writes_rebind_the_session_profile() {
         let _serial = test_lock();
@@ -10278,6 +10506,22 @@ mod tests {
         );
         let (status, value) =
             call(cookie("ta"), "list_issues", json!({"project_id":"private"})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+    }
+
+    #[tokio::test]
+    async fn issue_attachment_write_allows_project_members_and_refuses_outsiders() {
+        let _serial = test_lock();
+        setup();
+        let c = db::conn().unwrap();
+        c.execute_batch("INSERT INTO projects(id,name,key,created_by,created_at) VALUES('attachment-project','Attachments','ATTACH','pa',1); INSERT INTO project_members(project_id,profile_id) VALUES('attachment-project','pb'); INSERT INTO issues(id,project_id,number,title,archived) VALUES('attachment-issue','attachment-project',1,'Evidence',0);").unwrap();
+        let attachment = json!({"id":"attachment-evidence","file_name":"proof.txt","mime_type":"text/plain","byte_length":2,"data_url":"data:text/plain,ok"});
+        let (status, value) = call(cookie("tb"), "add_issue_attachment", json!({"issue_id":"attachment-issue","attachment":attachment})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        assert_eq!(value["value"]["issue_id"], "attachment-issue");
+        let (status, _) = call(cookie("td"), "add_issue_attachment", json!({"issue_id":"attachment-issue","attachment":{"id":"attachment-forbidden","file_name":"secret.txt","mime_type":"text/plain","byte_length":2,"data_url":"data:text/plain,no"}})).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        let (status, value) = call(cookie("tb"), "delete_issue_attachment", json!({"id":"attachment-evidence"})).await;
         assert_eq!(status, StatusCode::OK, "{value}");
     }
 

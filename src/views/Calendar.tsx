@@ -13,7 +13,8 @@ import SourceLink from "../components/SourceLink";
 import { JoinLink } from "./Meetings";
 import DateField from "../components/DateField";
 import DateTimeField from "../components/DateTimeField";
-import { dateKey, dayRange, itemsOnDay, kindLabels, localInput, meetingIdOf, meetingDraftError, taskDraftError, deadlineDraftError, scheduleDays, scheduleRange, SCHEDULE_DAYS, UI_LOCALE, WEEKDAY_LETTERS, WEEKDAY_NAMES, type QuickKind } from "../calendar";
+import { dateKey, dayRange, itemsOnDay, kindLabels, localInput, meetingIdOf, meetingDraftError, NO_ORGANIZER, taskDraftError, deadlineDraftError, scheduleDays, scheduleRange, SCHEDULE_DAYS, UI_LOCALE, WEEKDAY_LETTERS, WEEKDAY_NAMES, type QuickKind } from "../calendar";
+import { newId } from "../api/ids";
 import "../components/paper.css";
 import "./Calendar.css";
 import "./Meetings.css";
@@ -194,10 +195,18 @@ try {
 const f=form(); const invalid=meetingDraftError(f) || meetingLinkError(f.meeting_url);
 if (invalid) throw new Error(invalid);
 const starts_at=epoch(f.starts_at), ends_at=epoch(f.ends_at);
-// Organizer is always the acting account — the server rebinds it anyway.
-const meeting:Meeting={id:crypto.randomUUID(),title:f.title.trim(),description:null,starts_at,ends_at,rrule:f.rrule.trim()||null,location:f.location.trim()||null,organizer_id:profileId()||null,channel_id:null,visibility:f.visibility,modification_preference:f.modification_preference,archived:false,video_provider:null,video_room_id:null,join_url:null,meeting_url:f.meeting_url.trim()||null,video_status:"scheduled",video_started_at:null,video_ended_at:null,video_ended_by:null,source_entity_type:null,source_entity_id:null};
+// HTTP carries the authenticated web session, which the server binds as organizer.
+// Desktop IPC has no session rebinding, so only that transport requires a profile.
+const organizer=profileId() || null;
+if (!organizer && !isWeb()) throw new Error(NO_ORGANIZER);
+const meeting:Meeting={id:newId(),title:f.title.trim(),description:null,starts_at,ends_at,rrule:f.rrule.trim()||null,location:f.location.trim()||null,organizer_id:organizer,channel_id:null,visibility:f.visibility,modification_preference:f.modification_preference,archived:false,video_provider:null,video_room_id:null,join_url:null,meeting_url:f.meeting_url.trim()||null,video_status:"scheduled",video_started_at:null,video_ended_at:null,video_ended_by:null,source_entity_type:null,source_entity_id:null};
 await meetingsApi.create(meeting);
-const channel_id = await meetingsApi.attachChannel(meeting.id);
+/* The meeting EXISTS from here on. Attaching its discussion is a second act on a
+   stored thing, so its failure is reported as itself — never as a create that did
+   not happen, which would leave the composer open over a meeting already booked. */
+let channel_id = meeting.channel_id;
+try { channel_id = await meetingsApi.attachChannel(meeting.id); }
+catch (reason) { setError(humanError(reason)); }
 /* The invite needs the id create() just minted. A refusal is reported and does not
    pretend the meeting failed — it exists, and it says who could not be added. */
 const invited:string[] = [];

@@ -759,6 +759,52 @@ pub fn expand_meeting_occurrences(
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// ISSUE #5 REPRO: the exact JSON body the composer sends (`Meetings.tsx` create /
+    /// `Calendar.tsx` create) walked through serde into `create_meeting` on a migrated
+    /// database. Nothing is hand-built here: a hand-built struct cannot fail the way a
+    /// wire payload fails.
+    #[test]
+    fn create_meeting_accepts_the_composer_payload() {
+        let _serial = db::test_serial();
+        let temp = db::TempDb::new("issue-5-create-meeting");
+        db::migrate_path(&temp).expect("migration");
+        std::env::set_var("SPACE_DB", temp.path());
+        let body = serde_json::json!({
+            "id": "issue-5-meeting",
+            "title": "Weekly product review",
+            "description": null,
+            "starts_at": 1_893_456_000_i64,
+            "ends_at": 1_893_459_600_i64,
+            "rrule": null,
+            "location": null,
+            "organizer_id": null,
+            "channel_id": null,
+            "visibility": "participants",
+            "modification_preference": "organizer-only",
+            "meeting_url": null,
+            "archived": false,
+            "video_provider": null,
+            "video_room_id": null,
+            "join_url": null,
+            "video_status": "scheduled",
+            "video_started_at": null,
+            "video_ended_at": null,
+            "video_ended_by": null,
+            "source_entity_type": null,
+            "source_entity_id": null
+        });
+        let parsed: Meeting = serde_json::from_value(body).expect("composer payload deserializes");
+        create_meeting(parsed).expect("create_meeting accepts the composer payload");
+        let c = db::conn().expect("connection");
+        let stored: i64 = c
+            .query_row(
+                "SELECT COUNT(*) FROM meetings WHERE id='issue-5-meeting'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("count");
+        assert_eq!(stored, 1, "the meeting row must exist after create_meeting");
+    }
     fn meeting(starts_at: i64, rrule: Option<&str>) -> Meeting {
         Meeting {
             id: "m-1".into(),

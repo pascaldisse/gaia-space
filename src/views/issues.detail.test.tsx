@@ -2,7 +2,7 @@ import { expect, test, describe, afterEach, mock } from "bun:test";
 import { invoke } from "../api/invoke";
 mock.module("@tauri-apps/api/core", () => ({ invoke }));
 import { render } from "solid-js/web";
-import IssueDetail from "./IssueDetail";
+import IssueDetail, { issueAttachmentError } from "./IssueDetail";
 import { planningApi } from "../api/issues";
 import { reloadProfiles } from "../session";
 
@@ -44,6 +44,9 @@ const serve = (table: Record<string, unknown>) => {
 const settle = () => new Promise(done => setTimeout(done, 40));
 
 describe("issue detail contract", () => {
+test("attachment denial explains the required project-membership next step", () => {
+expect(issueAttachmentError(new Error("project access denied"))).toBe("You cannot attach files to this ticket because you are not a project member. Ask the project owner to add you to the project.");
+});
   test("the flattened server shape is normalised into { issue, … }", async () => {
     serve({ get_issue_detail: flat });
     const detail = await planningApi.issue("i1");

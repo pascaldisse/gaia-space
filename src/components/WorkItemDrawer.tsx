@@ -3,7 +3,9 @@ import { chatApi, type SourceRef } from "../api/chat";
 import { planningApi } from "../api/issues";
 import { meetingsApi } from "../api/meetings";
 import { personalApi } from "../api/personal";
-import { humanError, profileId, profiles } from "../session";
+import { humanError, isWeb, profileId, profiles } from "../session";
+import { newId } from "../api/ids";
+import { NO_ORGANIZER } from "../calendar";
 import { PillMenu } from "./controls";
 import DateField from "./DateField";
 import DateTimeField from "./DateTimeField";
@@ -42,7 +44,7 @@ export default function WorkItemDrawer(props: {
   projectId?: string;
   prefillTitle?: string;
   onClose: () => void;
-  onCreated?: (kind: WorkItemKind, id: string) => void;
+  onCreated?: (kind: WorkItemKind, id: string, projectId?: string) => void;
 }) {
   const [title, setTitle] = createSignal(props.prefillTitle?.trim() || props.source.excerpt?.trim() || "");
   const [body, setBody] = createSignal("");
@@ -106,7 +108,7 @@ export default function WorkItemDrawer(props: {
           due_date: dueDate() || null, project_id: props.projectId ?? null, done: false,
           ...anchor(), assignee_ids: everyone(), content_kind: "text",
         });
-        props.onCreated?.("task", todo.id);
+        props.onCreated?.("task", todo.id, props.projectId);
       } else if (props.kind === "ticket") {
         if (!props.projectId) throw new Error("A ticket needs a project.");
         const issue = await planningApi.createIssue({
@@ -117,22 +119,33 @@ export default function WorkItemDrawer(props: {
         });
         // "Type" is a planning tag, not a column (see the deviation note on `tags`).
         if (typeTagId()) await planningApi.setTags(issue.id, [typeTagId()]);
-        props.onCreated?.("ticket", issue.id);
+        props.onCreated?.("ticket", issue.id, props.projectId);
       } else {
         const starts = Math.floor(new Date(startsAt()).getTime() / 1000);
         if (!Number.isFinite(starts)) throw new Error("Please pick a valid time.");
-        const id = crypto.randomUUID();
+        // HTTP carries the authenticated web session; desktop IPC has no rebinding.
+        const organizer = profileId() || null;
+        if (!organizer && !isWeb()) throw new Error(NO_ORGANIZER);
+        const id = newId();
         await meetingsApi.create({
           id, title: heading, description: body().trim() || null,
           starts_at: starts, ends_at: starts + Math.max(1, minutes()) * 60,
-          rrule: null, location: null, organizer_id: profileId() || null,
+          rrule: null, location: null, organizer_id: organizer,
           channel_id: resolved()?.channel_id ?? props.source.channel_id ?? null,
           visibility: "participants", modification_preference: "organizer-only", archived: false,
           video_provider: null, video_room_id: null, join_url: null, meeting_url: null, video_status: "scheduled",
           video_started_at: null, video_ended_at: null, video_ended_by: null, ...anchor(),
         });
-        for (const person of everyone()) await meetingsApi.invite(id, person);
-        props.onCreated?.("event", id);
+        /* The meeting exists now. An invite that is refused is reported as itself and
+           does not undo — or deny — the meeting that was already created. */
+        let inviteFailed = false;
+        for (const person of everyone()) {
+          try { await meetingsApi.invite(id, person); }
+          catch (reason) { inviteFailed = true; setError(humanError(reason)); }
+        }
+        props.onCreated?.("event", id, props.projectId);
+        // Keep the error mounted: closing immediately makes a refused invite silent.
+        if (inviteFailed) return;
       }
       props.onClose();
     } catch (reason) {

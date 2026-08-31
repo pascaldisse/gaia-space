@@ -57,15 +57,25 @@ function ProjectMembers(props: { projectId: string; owner: string | null; canMan
     catch (reason) { setError(humanError(reason)); void reloadMembers(); }
     finally { setBusy(""); }
   };
+  // The select is uncontrolled once the user picks: a refused write leaves the browser showing
+  // the role the server never granted, so keep a handle per row and put it back.
+  const pickers = new Map<string, HTMLSelectElement>();
   const setRole = async (member: string, roleId: string) => {
     const previous = assignmentFor(member);
     if ((previous?.role_id ?? "") === roleId) return;
     setError(""); setBusy(member);
+    // Grant the new role BEFORE dropping the old one. delete-then-create loses the member's
+    // role outright when the create is denied; this order leaves the previous grant intact.
     try {
-      if (previous) await platformApi.deleteAssignment(previous.id);
       if (roleId) await platformApi.createAssignment({ role_id: roleId, profile_id: member, scope_type: "project", scope_id: props.projectId });
+      if (previous) await platformApi.deleteAssignment(previous.id);
       await reloadAssignments();
-    } catch (reason) { setError(humanError(reason)); await reloadAssignments(); }
+    } catch (reason) {
+      setError(humanError(reason));
+      await reloadAssignments();
+      const picker = pickers.get(member);
+      if (picker) picker.value = assignmentFor(member)?.role_id ?? "";
+    }
     finally { setBusy(""); }
   };
 
@@ -81,7 +91,7 @@ function ProjectMembers(props: { projectId: string; owner: string | null; canMan
           <Show when={props.canManage} fallback={<span class="ps-role-readonly">{roleName(assignment())}</span>}>
             <div class="ps-member-actions">
               <label class="sr-only" for={`project-role-${member}`}>Role for {nameOf(member)}</label>
-              <select id={`project-role-${member}`} disabled={busy() === member} value={assignment()?.role_id ?? ""} onChange={event => void setRole(member, event.currentTarget.value)}>
+              <select ref={element => pickers.set(member, element)} id={`project-role-${member}`} disabled={busy() === member} value={assignment()?.role_id ?? ""} onChange={event => void setRole(member, event.currentTarget.value)}>
                 <option value="">Member (no extra role)</option>
                 <For each={assignableRoles()}>{role => <option value={role.id}>{role.name}</option>}</For>
               </select>

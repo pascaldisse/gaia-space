@@ -11,6 +11,7 @@ import { platformApi, type Project } from "../api/platform";
 import { planningApi } from "../api/issues";
 import { personalApi } from "../api/personal";
 import { chatApi } from "../api/chat";
+import { prefixedId } from "../api/ids";
 import { currentUser, humanError, isWeb, profileId, profiles, reloadProfiles, setProjectId } from "../session";
 import { linkProps, navigate, type Route } from "../router";
 import { bandTone, deadlineBand, deadlineTone, metricTone } from "../statusTone";
@@ -45,7 +46,7 @@ import "./Portfolio.css";
  *  unreachable from the keyboard, so it cannot be the only way into the main object
  *  of the page. */
 
-const newId = () => `project-${crypto.randomUUID()}`;
+const newId = () => prefixedId("project");
 const empty = () => ({ name: "", description: "", deadline: "" });
 /** ── THE KEY IS A FACT, NOT A QUESTION ────────────────────────────────────────
  *  Nothing in the product identifies anything BY the key: a ticket reads `#42`

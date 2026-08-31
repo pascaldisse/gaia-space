@@ -2,9 +2,10 @@
 // src-tauri/src/pipelines.rs. Kept standalone from ../api.ts (owned by another lane): types +
 // calls needed by views/Packages.tsx + views/Pipelines.tsx + their .css only.
 import { invoke } from "@tauri-apps/api/core";
+import { newId as rawId } from "./ids";
 
 export function newId(prefix: string): string {
-  return `${prefix}-${crypto.randomUUID()}`;
+  return `${prefix}-${rawId()}`;
 }
 
 // ---------- Space's real Automation limits (docs/space-knowledge-base/03-packages-cicd.md) ----------

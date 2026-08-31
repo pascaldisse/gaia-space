@@ -4,6 +4,7 @@ import ContentHead from "../components/ContentHead";
 import { api } from "../api";
 import { currentUser } from "../session";
 import { devenvApi, type DevEnvironment } from "../api/devenv";
+import { prefixedId } from "../api/ids";
 import EmptyState from "../components/EmptyState";
 import { Icon } from "../components/Icon";
 import { GhostPill, IconButton, PillSelect } from "../components/controls";
@@ -11,7 +12,7 @@ import "./operatorForm.css";
 import "./devCards.css";
 import "./DevEnvironments.css";
 
-const newId = (prefix: string) => `${prefix}-${crypto.randomUUID()}`;
+const newId = prefixedId;
 const minutesAgo = (at: number) => Math.max(0, Math.round(Date.now() / 1000 - at) / 60);
 
 /** Cloud dev environments: lifecycle only — no machine is provisioned from this view. */

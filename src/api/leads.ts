@@ -13,4 +13,8 @@ export type Lead = {
 };
 
 /** Administrator-only; contact PII is never fetched directly from Quest by a browser. */
-export const leadsApi = { list: () => invoke<Lead[]>("list_leads") };
+export const leadsApi = {
+  list: () => invoke<Lead[]>("list_leads"),
+  /** Administrator-only erasure; the server is the sole gate. */
+  delete: (id: string) => invoke<void>("delete_lead", { id }),
+};
