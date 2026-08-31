@@ -49,7 +49,7 @@ import { platformApi } from "../api/platform";
 import { applyCommand, COMMAND_FANOUT_LIMIT, mapWithLimit, mergeCommandListings, slashPrefix, type CommandEntry } from "../chatCommands";
 import { canSendDraft, uploadableAttachments } from "../chatAttachments";
 import { captureScroll, isNearBottom, restorePrependedScroll, scrollTargetFor, shouldAutoScroll, type ScrollAnchor, type ScrollMetrics } from "../chatScroll";
-import { COMPOSER_MAX_ROWS, COMPOSER_MIN_ROWS, composerRows } from "../chatComposer";
+import { COMPOSER_MAX_ROWS, COMPOSER_MIN_ROWS, composerRows, composerRowsForHeight } from "../chatComposer";
 import { insertMention, mentionCandidates as candidatesFor, survivingMentions as survivorsOf, type MentionTarget, type MentionTargetRef } from "../chatMentions";
 import { UI_LOCALE } from "../calendar";
 import { isGrouped } from "../messageGrouping";
@@ -423,6 +423,7 @@ export default function Chat(props: { embedded?: boolean } = {}) {
   // rejected by the backend) must not discard the ones that are fine.
   type PendingAttachment = NewMessageAttachment & { state: "loading" | "uploading" | "completed" | "failed"; error?: string };
   const [draft, setDraft] = createSignal("");
+  const [draftRows, setDraftRows] = createSignal(COMPOSER_MIN_ROWS);
   const [draftAttachments, setDraftAttachments] = createSignal<PendingAttachment[]>([]);
 
   // ---- draft persistence + typing presence ----
@@ -453,8 +454,9 @@ export default function Chat(props: { embedded?: boolean } = {}) {
       .finally(() => { restoring = false; });
   });
 
-  function onDraftInput(value: string) {
+  function onDraftInput(value: string, scrollHeight?: number, lineHeight?: number) {
     setDraft(value);
+    setDraftRows(composerRowsForHeight(value, COMPOSER_MIN_ROWS, COMPOSER_MAX_ROWS, scrollHeight ?? 0, lineHeight ?? 0));
     const ch = activeChannelId();
     const p = actingProfileId();
     if (!ch || !p || restoring) return;
@@ -822,7 +824,7 @@ export default function Chat(props: { embedded?: boolean } = {}) {
       });
       const ok = await saveAttachments(message.id, attachments, setDraftAttachments);
       setDraftMessageId(ok ? null : message.id);
-      setDraft(""); setDraftMentionIds([]);
+      setDraft(""); setDraftRows(COMPOSER_MIN_ROWS); setDraftMentionIds([]);
       clearDraftState();
       refetchMessages();
       refetchChannels();
@@ -1487,8 +1489,11 @@ export default function Chat(props: { embedded?: boolean } = {}) {
             <textarea
               placeholder="Message…"
               value={draft()}
-              rows={composerRows(draft(), COMPOSER_MIN_ROWS, COMPOSER_MAX_ROWS)}
-              onInput={(e) => onDraftInput(e.currentTarget.value)}
+              rows={draftRows()}
+              onInput={(e) => {
+                const style = getComputedStyle(e.currentTarget);
+                onDraftInput(e.currentTarget.value, e.currentTarget.scrollHeight, Number.parseFloat(style.lineHeight));
+              }}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
