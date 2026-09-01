@@ -33,3 +33,9 @@ src-tauri/target/
 # Legacy Flutter tree keeps its own .gitignore (legacy/flutter/.gitignore)
 .scratch/
 .work/
+
+# Real financial data never enters this repository — see docs/finance-plan-format.md.
+# The plan is imported at runtime; the numbers live outside the tree.
+reports/finance/
+docs/finance/
+*finanzplan*

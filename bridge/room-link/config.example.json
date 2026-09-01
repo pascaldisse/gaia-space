@@ -1,5 +1,26 @@
 {
-  "mappings": [{ "spaceChannelId": "your-space-channel", "roomId": "your-gaia-room" }],
+  "mode": "whole-space",
+  "wholeSpace": {
+    "hubRoomId": "your-gaia-hub-room",
+    "roomIdPrefix": "space-",
+    "roomTitlePrefix": "#",
+    "mappingStatePath": "bridge/room-link/state/whole-space-map.json",
+    "discoveryIntervalMs": 60000,
+    "filter": {
+      "includeArchived": false,
+      "includeChannelIds": [],
+      "excludeChannelIds": [],
+      "projectIds": [],
+      "contentTypes": []
+    },
+    "hub": {
+      "digestEnabled": false,
+      "digestIntervalMs": 900000,
+      "commandsEnabled": false,
+      "commandPrefix": "!bridge"
+    }
+  },
+  "mappings": [],
   "space": {
     "baseUrl": "http://127.0.0.1:8090",
     "username": "bridge-user",

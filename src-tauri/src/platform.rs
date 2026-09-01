@@ -1423,6 +1423,9 @@ pub struct Project {
     pub created_by: Option<String>,
     pub archived: bool,
     pub deadline: Option<String>,
+    /// Lifecycle is separate from archival: done work remains visible and reversible.
+    #[serde(default = "default_project_status")]
+    pub status: String,
     /// The one person mainly responsible for the project.
     ///
     /// LAW: `lead_id` is PURELY INFORMATIONAL. It is never an authorization input —
@@ -1441,9 +1444,15 @@ pub fn list_projects() -> Result<Vec<Project>> {
     let c = db::conn()?;
     list_projects_on(&c)
 }
+fn default_project_status() -> String { "open".into() }
+
+fn project_status(value: &str) -> Result<&str> {
+    match value { "open" | "done" => Ok(value), _ => Err("project status must be open or done".into()) }
+}
+
 pub fn list_projects_on(c: &Connection) -> Result<Vec<Project>> {
     let mut s = c
-        .prepare("SELECT id,name,key,description,created_by,archived,deadline,lead_id FROM projects ORDER BY archived,name")
+        .prepare("SELECT id,name,key,description,created_by,archived,deadline,lead_id,status FROM projects ORDER BY archived,status,name")
         .map_err(|e| e.to_string())?;
     let rows = s
         .query_map([], read_project)
@@ -1452,7 +1461,7 @@ pub fn list_projects_on(c: &Connection) -> Result<Vec<Project>> {
         .map_err(|e| e.to_string());
     rows
 }
-/// Single row shape for every project read: id,name,key,description,created_by,archived,deadline,lead_id.
+/// Single row shape for every project read: id,name,key,description,created_by,archived,deadline,lead_id,status.
 fn read_project(r: &rusqlite::Row<'_>) -> rusqlite::Result<Project> {
     Ok(Project {
         id: r.get(0)?,
@@ -1463,6 +1472,7 @@ fn read_project(r: &rusqlite::Row<'_>) -> rusqlite::Result<Project> {
         archived: r.get(5)?,
         deadline: r.get(6)?,
         lead_id: r.get(7)?,
+        status: r.get(8)?,
     })
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
@@ -1491,7 +1501,8 @@ pub fn create_project_on(c: &Connection, project: Project) -> Result<()> {
         created_by: Some(owner),
         ..project
     };
-    c.execute("INSERT INTO projects(id,name,key,description,created_by,archived,deadline,lead_id,created_at)VALUES(?1,?2,?3,?4,?5,?6,?7,?8,unixepoch())",rusqlite::params![project.id,project.name,project.key,project.description,project.created_by,project.archived,project.deadline.clone().filter(|date| !date.trim().is_empty()),normalized_lead(project.lead_id.clone())]).map_err(|e|e.to_string())?;
+    let status = project_status(&project.status)?;
+    c.execute("INSERT INTO projects(id,name,key,description,created_by,archived,deadline,lead_id,status,created_at)VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,unixepoch())",rusqlite::params![project.id,project.name,project.key,project.description,project.created_by,project.archived,project.deadline.clone().filter(|date| !date.trim().is_empty()),normalized_lead(project.lead_id.clone()),status]).map_err(|e|e.to_string())?;
     // After the row is durable. A new project is ORGANISATION NEWS: it is
     // announced to the workspace, it is nobody's task, and it is never counted.
     if let Err(error) = emit_project_created_on(c, &project) {
@@ -1544,8 +1555,9 @@ pub fn update_project(project: Project) -> Result<()> {
     update_project_on(&c, project)
 }
 pub fn update_project_on(c: &Connection, project: Project) -> Result<()> {
+    let status = project_status(&project.status)?;
     c.execute(
-        "UPDATE projects SET name=?2,key=?3,description=?4,created_by=?5,archived=?6,deadline=?7,lead_id=?8 WHERE id=?1",
+        "UPDATE projects SET name=?2,key=?3,description=?4,created_by=?5,archived=?6,deadline=?7,lead_id=?8,status=?9 WHERE id=?1",
         rusqlite::params![
             project.id,
             project.name,
@@ -1554,7 +1566,8 @@ pub fn update_project_on(c: &Connection, project: Project) -> Result<()> {
             project.created_by,
             project.archived,
             project.deadline.filter(|date| !date.trim().is_empty()),
-            normalized_lead(project.lead_id)
+            normalized_lead(project.lead_id),
+            status
         ],
     )
     .map_err(|e| e.to_string())?;
@@ -2002,7 +2015,7 @@ pub fn set_project_lead_on(
 
 pub fn project_on(c: &Connection, project_id: &str) -> Result<Option<Project>> {
     c.query_row(
-        "SELECT id,name,key,description,created_by,archived,deadline,lead_id FROM projects WHERE id=?1",
+        "SELECT id,name,key,description,created_by,archived,deadline,lead_id,status FROM projects WHERE id=?1",
         [project_id],
         read_project,
     )
@@ -3072,6 +3085,7 @@ mod tests {
             created_by: Some("p".into()),
             archived: false,
             deadline: None,
+            status: "open".into(),
             lead_id: lead.map(str::to_owned),
         };
         // Create persists the lead; the owner is a member by construction.
@@ -3175,6 +3189,22 @@ mod tests {
     }
 
     #[test]
+    fn project_status_round_trips_and_rejects_unknown_values() {
+        let c = conn();
+        c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('p','person','Person',1)", []).unwrap();
+        let project = Project { id:"pr".into(), name:"Project".into(), key:"PR".into(), description:None, created_by:Some("p".into()), archived:false, deadline:None, status:"open".into(), lead_id:None };
+        create_project_on(&c, project).unwrap();
+        let mut project = project_on(&c, "pr").unwrap().unwrap();
+        project.status = "done".into();
+        update_project_on(&c, project).unwrap();
+        assert_eq!(project_on(&c, "pr").unwrap().unwrap().status, "done");
+        assert_eq!(list_projects_on(&c).unwrap()[0].status, "done");
+        let mut invalid = project_on(&c, "pr").unwrap().unwrap();
+        invalid.status = "paused".into();
+        assert!(update_project_on(&c, invalid).unwrap_err().contains("status"));
+    }
+
+    #[test]
     fn desktop_project_creation_is_never_ownerless() {
         let c = conn();
         c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('p','person','Person',1),('q','other','Other',1)", []).unwrap();
@@ -3186,6 +3216,7 @@ mod tests {
             created_by: owner.map(str::to_owned),
             archived: false,
             deadline: None,
+            status: "open".into(),
             lead_id: None,
         };
         // Desktop used to send no owner at all: the row landed with NULL `created_by`
@@ -3504,14 +3535,34 @@ mod tests {
         c.execute("INSERT INTO project_members(project_id,profile_id) VALUES('pr','member'),('pr','archived')", []).unwrap();
         let chosen = set_project_lead_on(&c, "pr", Some("member")).unwrap();
         assert_eq!(chosen.lead_id.as_deref(), Some("member"));
-        let untouched: (String, Option<String>, Option<String>) = c.query_row("SELECT name,description,deadline FROM projects WHERE id='pr'", [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))).unwrap();
-        assert_eq!(untouched, ("Project".into(), Some("Original".into()), Some("2030-03-10".into())));
+        let untouched: (String, Option<String>, Option<String>) = c
+            .query_row(
+                "SELECT name,description,deadline FROM projects WHERE id='pr'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            untouched,
+            (
+                "Project".into(),
+                Some("Original".into()),
+                Some("2030-03-10".into())
+            )
+        );
         // master's requirement, kept: a lead must be an ACTIVE MEMBER. Our wording splits
         // the two reasons — a stranger to the project vs a profile that no longer exists —
         // so the assertions name our messages while testing master's guarantee.
-        assert!(set_project_lead_on(&c, "pr", Some("outside")).unwrap_err().contains("must be a project member"));
-        assert!(set_project_lead_on(&c, "pr", Some("archived")).unwrap_err().contains("does not exist"));
-        assert_eq!(set_project_lead_on(&c, "pr", Some("  ")).unwrap().lead_id, None);
+        assert!(set_project_lead_on(&c, "pr", Some("outside"))
+            .unwrap_err()
+            .contains("must be a project member"));
+        assert!(set_project_lead_on(&c, "pr", Some("archived"))
+            .unwrap_err()
+            .contains("does not exist"));
+        assert_eq!(
+            set_project_lead_on(&c, "pr", Some("  ")).unwrap().lead_id,
+            None
+        );
     }
 
     #[test]
@@ -3621,7 +3672,6 @@ mod tests {
     }
 }
 
-
 #[cfg(test)]
 mod delete_project_tests {
     use super::*;
@@ -3644,19 +3694,51 @@ mod delete_project_tests {
         )
         .unwrap();
         c.execute("INSERT INTO project_roles(id,project_id,name,role_kind,archived) VALUES('role','pr','Dev','member',0)", []).unwrap();
-        c.execute("INSERT INTO boards(id,project_id,name) VALUES('bo','pr','Board')", []).unwrap();
-        c.execute("INSERT INTO board_columns(id,board_id,name,ordering) VALUES('col','bo','Todo',0)", []).unwrap();
-        c.execute("INSERT INTO issue_statuses(id,project_id,name) VALUES('st','pr','Open')", []).unwrap();
-        c.execute("INSERT INTO column_statuses(column_id,status_id) VALUES('col','st')", []).unwrap();
+        c.execute(
+            "INSERT INTO boards(id,project_id,name) VALUES('bo','pr','Board')",
+            [],
+        )
+        .unwrap();
+        c.execute(
+            "INSERT INTO board_columns(id,board_id,name,ordering) VALUES('col','bo','Todo',0)",
+            [],
+        )
+        .unwrap();
+        c.execute(
+            "INSERT INTO issue_statuses(id,project_id,name) VALUES('st','pr','Open')",
+            [],
+        )
+        .unwrap();
+        c.execute(
+            "INSERT INTO column_statuses(column_id,status_id) VALUES('col','st')",
+            [],
+        )
+        .unwrap();
         c.execute("INSERT INTO issues(id,project_id,number,title,status_id) VALUES('is','pr',1,'Issue','st')", []).unwrap();
         c.execute("INSERT INTO issue_comments(id,issue_id,author_id,body,created_at) VALUES('ic','is','own','Comment',1)", []).unwrap();
-        c.execute("INSERT INTO todos(id,profile_id,content,project_id) VALUES('td','own','Task','pr')", []).unwrap();
-        c.execute("INSERT INTO todo_assignees(todo_id,profile_id) VALUES('td','other')", []).unwrap();
+        c.execute(
+            "INSERT INTO todos(id,profile_id,content,project_id) VALUES('td','own','Task','pr')",
+            [],
+        )
+        .unwrap();
+        c.execute(
+            "INSERT INTO todo_assignees(todo_id,profile_id) VALUES('td','other')",
+            [],
+        )
+        .unwrap();
         c.execute("INSERT INTO document_folders(id,container_type,container_id,parent_id,name,archived) VALUES('root','project','pr',NULL,'Documents',0),('sub','project','pr','root','Sub',0)", []).unwrap();
         c.execute("INSERT INTO documents(id,container_type,container_id,folder_id,doc_type,title,created_by) VALUES('doc','project','pr','sub','text','Spec','own')", []).unwrap();
-        c.execute("INSERT INTO doc_versions(id,document_id,version,body) VALUES('dv','doc',1,'text')", []).unwrap();
+        c.execute(
+            "INSERT INTO doc_versions(id,document_id,version,body) VALUES('dv','doc',1,'text')",
+            [],
+        )
+        .unwrap();
         c.execute("INSERT INTO reviews(id,project_id,number,kind,state,title) VALUES('rv','pr',1,'MR','Opened','Review')", []).unwrap();
-        c.execute("INSERT INTO pipeline_scripts(id,project_id,source) VALUES('ps','pr','job')", []).unwrap();
+        c.execute(
+            "INSERT INTO pipeline_scripts(id,project_id,source) VALUES('ps','pr','job')",
+            [],
+        )
+        .unwrap();
         c.execute("INSERT INTO devfiles(id,project_id,path,name,content) VALUES('df','pr','.space/dev.yaml','Dev','x')", []).unwrap();
         c.execute("INSERT INTO notifications(id,recipient_id,event_type,title,entity_type,entity_id,created_at) VALUES('nt','other','issue.created','Issue','issue','is',1)", []).unwrap();
         // Rows that carry their own meaning: the conversation and the article survive.
@@ -3704,7 +3786,10 @@ mod delete_project_tests {
 
         // The conversation outlives the project it was filed under.
         assert_eq!(
-            count(&c, "SELECT count(*) FROM channels WHERE id='ch' AND project_id IS NULL"),
+            count(
+                &c,
+                "SELECT count(*) FROM channels WHERE id='ch' AND project_id IS NULL"
+            ),
             1
         );
         assert_eq!(
@@ -3712,9 +3797,15 @@ mod delete_project_tests {
             1
         );
         // A second project is untouched.
-        assert_eq!(count(&c, "SELECT count(*) FROM projects WHERE id='keep'"), 1);
         assert_eq!(
-            count(&c, "SELECT count(*) FROM project_members WHERE project_id='keep'"),
+            count(&c, "SELECT count(*) FROM projects WHERE id='keep'"),
+            1
+        );
+        assert_eq!(
+            count(
+                &c,
+                "SELECT count(*) FROM project_members WHERE project_id='keep'"
+            ),
             1
         );
     }
@@ -3742,7 +3833,10 @@ mod delete_project_tests {
             "a refused delete must not touch a single row"
         );
         assert_eq!(
-            count(&c, "SELECT count(*) FROM channels WHERE id='ch' AND project_id='pr'"),
+            count(
+                &c,
+                "SELECT count(*) FROM channels WHERE id='ch' AND project_id='pr'"
+            ),
             1
         );
     }

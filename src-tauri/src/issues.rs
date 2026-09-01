@@ -35,10 +35,19 @@ fn issue_event(event_type: &str, issue: &Issue) {
     }
     let result = crate::db::conn().and_then(|c| {
         let recipients = involved_recipients_on(&c, issue)?;
-        crate::personal::fan_out_notification_on(&c, crate::personal::NotificationFanout {
-            recipients, event_type, title: &issue.title, body: issue.description.as_deref(),
-            entity_type: "issue", entity_id: &issue.id, target_type: Some("project"), target_id: Some(&issue.project_id),
-        })
+        crate::personal::fan_out_notification_on(
+            &c,
+            crate::personal::NotificationFanout {
+                recipients,
+                event_type,
+                title: &issue.title,
+                body: issue.description.as_deref(),
+                entity_type: "issue",
+                entity_id: &issue.id,
+                target_type: Some("project"),
+                target_id: Some(&issue.project_id),
+            },
+        )
     });
     if let Err(e) = result {
         eprintln!("personal feed fan-out for {event_type} failed: {e}");
@@ -94,8 +103,10 @@ pub(crate) fn mention_handles(text: &str) -> Vec<String> {
 /// Reads the involvement facts for `issue` and resolves them into feed recipients.
 fn involved_recipients_on(c: &Connection, issue: &Issue) -> Result<Vec<String>> {
     let mut statement = err(c.prepare("SELECT profile_id FROM subscription_scopes WHERE target_type='entity' AND target_id=?1 AND enabled=1"))?;
-    let mut subscriber_ids = err(err(statement.query_map([&issue.id], |row| row.get::<_, String>(0)))?
-        .collect::<rusqlite::Result<Vec<_>>>())?;
+    let mut subscriber_ids = err(err(
+        statement.query_map([&issue.id], |row| row.get::<_, String>(0))
+    )?
+    .collect::<rusqlite::Result<Vec<_>>>())?;
     subscriber_ids.sort();
     let text = match &issue.description {
         Some(description) => format!("{} {description}", issue.title),
@@ -2139,7 +2150,10 @@ mod tests {
         issue.description = Some("please review @bob".into());
         let recipients = involved_recipients_on(&c, &issue).unwrap();
         assert_eq!(recipients, vec!["pa", "pb", "pc"]);
-        assert!(!recipients.contains(&"pd".to_string()), "bystander stays out");
+        assert!(
+            !recipients.contains(&"pd".to_string()),
+            "bystander stays out"
+        );
     }
 
     #[test]

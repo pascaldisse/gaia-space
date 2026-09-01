@@ -12,6 +12,24 @@
 //! appends an immutable `doc_versions` row. Restoring an old version does not rewrite
 //! history — it copies the old body forward as a new latest version, so the version list
 //! only ever grows.
+//!
+//! Document kind (`documents.kind`, default `'markdown'`):
+//! - `markdown` — the body is text, exactly as before this column existed.
+//! - `sheet`    — the body is a JSON string holding a grid:
+//!
+//! ```json
+//! {
+//!   "columns": [{ "id": "c-a1", "label": "Name", "type": "text" }],
+//!   "rows":    [{ "id": "r-b2", "cells": { "c-a1": "Ada" } }]
+//! }
+//! ```
+//!
+//! `type` is one of `text | number | date`; every cell value is a JSON string. Column and
+//! row ids are stable and never reused, so two versions of the same sheet diff cell by
+//! cell instead of line by line. The body is validated server-side on every write
+//! (`validate_sheet_body`): a malformed grid is refused, never stored, and never versioned.
+//! Sheets inherit folders, permissions, versions and search from ordinary documents —
+//! their searchable text is the flattened labels + cell values (`sheet_search_text`).
 use crate::db;
 use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
@@ -47,6 +65,9 @@ pub struct Document {
     pub doc_type: String,
     #[serde(default = "default_body_format")]
     pub body_format: String,
+    /// `markdown` (default, the historic behaviour) or `sheet` — see the module header.
+    #[serde(default = "default_kind")]
+    pub kind: String,
     pub title: String,
     pub body: Option<String>,
     pub version: i64,
@@ -98,6 +119,208 @@ pub struct DocumentSearchResult {
 fn default_body_format() -> String {
     "text".into()
 }
+pub const KIND_MARKDOWN: &str = "markdown";
+pub const KIND_SHEET: &str = "sheet";
+fn default_kind() -> String {
+    KIND_MARKDOWN.into()
+}
+
+/// The `kind` column is added here rather than in the shared migration ladder so this
+/// domain can grow a column without contending for a global schema version. Additive,
+/// idempotent and table-guarded: an existing row keeps its body and becomes `markdown`.
+fn ensure_sheet_schema(c: &rusqlite::Connection) -> Result<()> {
+    let has_table: bool = c
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='documents')",
+            [],
+            |r| r.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    if !has_table {
+        return Ok(());
+    }
+    let mut stmt = c
+        .prepare("PRAGMA table_info(documents)")
+        .map_err(|e| e.to_string())?;
+    let present = stmt
+        .query_map([], |row| row.get::<_, String>(1))
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?
+        .iter()
+        .any(|name| name == "kind");
+    drop(stmt);
+    if !present {
+        // No CHECK constraint: SQLite cannot add one by ALTER, and the allowed set is
+        // enforced in Rust (`validate_kind`) on every write path anyway.
+        c.execute_batch("ALTER TABLE documents ADD COLUMN kind TEXT NOT NULL DEFAULT 'markdown'")
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// Every connection this module opens carries the sheet column.
+fn conn() -> Result<rusqlite::Connection> {
+    let c = db::conn()?;
+    ensure_sheet_schema(&c)?;
+    Ok(c)
+}
+
+fn validate_kind(kind: &str) -> Result<()> {
+    match kind {
+        KIND_MARKDOWN | KIND_SHEET => Ok(()),
+        other => Err(format!(
+            "unknown document kind '{other}' (expected 'markdown' or 'sheet')"
+        )),
+    }
+}
+
+/// Refuses anything that is not a well-formed grid: broken JSON, an unknown column type,
+/// duplicate or empty ids, or a cell addressed to a column that does not exist. Callers
+/// treat an `Err` as "nothing was written" — validation runs before the UPDATE.
+pub fn validate_sheet_body(body: &str) -> Result<()> {
+    let value: serde_json::Value =
+        serde_json::from_str(body).map_err(|e| format!("sheet body is not valid JSON: {e}"))?;
+    let columns = value
+        .get("columns")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| "sheet body needs a 'columns' array".to_string())?;
+    let rows = value
+        .get("rows")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| "sheet body needs a 'rows' array".to_string())?;
+    let mut column_ids: Vec<&str> = Vec::with_capacity(columns.len());
+    for column in columns {
+        let id = column
+            .get("id")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+            .ok_or_else(|| "every sheet column needs a non-empty id".to_string())?;
+        if column_ids.contains(&id) {
+            return Err(format!("duplicate sheet column id '{id}'"));
+        }
+        column
+            .get("label")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| format!("sheet column '{id}' needs a label"))?;
+        match column.get("type").and_then(|v| v.as_str()) {
+            Some("text") | Some("number") | Some("date") => {}
+            Some(other) => {
+                return Err(format!(
+                    "sheet column '{id}' has unknown type '{other}' (expected text, number or date)"
+                ))
+            }
+            None => return Err(format!("sheet column '{id}' needs a type")),
+        }
+        column_ids.push(id);
+    }
+    let mut row_ids: Vec<&str> = Vec::with_capacity(rows.len());
+    for row in rows {
+        let id = row
+            .get("id")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+            .ok_or_else(|| "every sheet row needs a non-empty id".to_string())?;
+        if row_ids.contains(&id) {
+            return Err(format!("duplicate sheet row id '{id}'"));
+        }
+        row_ids.push(id);
+        let cells = row
+            .get("cells")
+            .and_then(|v| v.as_object())
+            .ok_or_else(|| format!("sheet row '{id}' needs a 'cells' object"))?;
+        for (column_id, cell) in cells {
+            if !column_ids.contains(&column_id.as_str()) {
+                return Err(format!(
+                    "sheet row '{id}' addresses unknown column '{column_id}'"
+                ));
+            }
+            if !cell.is_string() {
+                return Err(format!(
+                    "sheet cell '{id}'.'{column_id}' must be a string value"
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// What a sheet says in plain words: column labels and every cell value, so full-text
+/// search finds a sheet by its content and not by its JSON punctuation.
+pub fn sheet_search_text(body: &str) -> String {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(body) else {
+        return String::new();
+    };
+    let mut parts: Vec<String> = Vec::new();
+    if let Some(columns) = value.get("columns").and_then(|v| v.as_array()) {
+        for column in columns {
+            if let Some(label) = column.get("label").and_then(|v| v.as_str()) {
+                if !label.trim().is_empty() {
+                    parts.push(label.trim().to_string());
+                }
+            }
+        }
+    }
+    if let Some(rows) = value.get("rows").and_then(|v| v.as_array()) {
+        for row in rows {
+            if let Some(cells) = row.get("cells").and_then(|v| v.as_object()) {
+                for cell in cells.values() {
+                    if let Some(text) = cell.as_str() {
+                        if !text.trim().is_empty() {
+                            parts.push(text.trim().to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+    parts.join(" ")
+}
+
+/// The FTS triggers index `documents.body` verbatim; for a sheet that would be JSON.
+/// After a sheet write the row is replaced by its flattened text. Best effort: a
+/// database without the search table (older fixtures) simply has nothing to reindex.
+fn reindex_sheet(c: &rusqlite::Connection, id: &str, body: Option<&str>) {
+    let has_index: bool = c
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='search_index')",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(false);
+    if !has_index {
+        return;
+    }
+    let row: Option<(String, String, bool)> = c
+        .query_row(
+            "SELECT title,container_type,archived FROM documents WHERE id=?1",
+            [id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .optional()
+        .unwrap_or(None);
+    let Some((title, container_type, archived)) = row else {
+        return;
+    };
+    let _ = c.execute(
+        "DELETE FROM search_index WHERE entity_type='document' AND entity_id=?1",
+        [id],
+    );
+    if archived {
+        return;
+    }
+    let _ = c.execute(
+        "INSERT INTO search_index(entity_type,entity_id,title,body,breadcrumb) VALUES('document',?1,?2,?3,?4)",
+        rusqlite::params![
+            id,
+            title,
+            body.map(sheet_search_text).unwrap_or_default(),
+            format!("Document · {container_type}")
+        ],
+    );
+}
 fn row_to_document(r: &rusqlite::Row) -> rusqlite::Result<Document> {
     Ok(Document {
         id: r.get(0)?,
@@ -113,15 +336,20 @@ fn row_to_document(r: &rusqlite::Row) -> rusqlite::Result<Document> {
         created_by: r.get(10)?,
         source_entity_type: r.get(11)?,
         source_entity_id: r.get(12)?,
+        kind: r.get(13)?,
     })
 }
 
 const DOC_COLUMNS: &str =
-    "id,container_type,container_id,folder_id,doc_type,body_format,title,body,version,archived,created_by,source_entity_type,source_entity_id";
+    "id,container_type,container_id,folder_id,doc_type,body_format,title,body,version,archived,created_by,source_entity_type,source_entity_id,kind";
 
 /// SQL scope used by the web gateway. Personal/unattached documents never inherit
 /// access from a container: only `created_by` may read them. A project document is
 /// readable by its creator or any member of the attached project.
+/// The organization has one shared root. It is a normal KB book, so document and
+/// folder grants remain the single write-permission model; active organization members
+/// additionally receive its read baseline.
+pub const ORGANIZATION_LIBRARY_ID: &str = "organization-library";
 const DOCUMENT_EXPLICIT_READ_SCOPE: &str = "EXISTS(SELECT 1 FROM document_permissions dp WHERE dp.document_id=d.id AND ((dp.recipient_type='profile' AND dp.recipient_id=?1) OR (dp.recipient_type='team' AND EXISTS(SELECT 1 FROM team_memberships tm WHERE tm.team_id=dp.recipient_id AND tm.profile_id=?1 AND tm.archived=0))))";
 const DOCUMENT_EXPLICIT_WRITE_SCOPE: &str = "EXISTS(SELECT 1 FROM document_permissions dp WHERE dp.document_id=d.id AND dp.access_level='editor' AND ((dp.recipient_type='profile' AND dp.recipient_id=?1) OR (dp.recipient_type='team' AND EXISTS(SELECT 1 FROM team_memberships tm WHERE tm.team_id=dp.recipient_id AND tm.profile_id=?1 AND tm.archived=0))))";
 /// The web gateway embeds these predicates into every document read/write query.
@@ -130,7 +358,7 @@ const DOCUMENT_EXPLICIT_WRITE_SCOPE: &str = "EXISTS(SELECT 1 FROM document_permi
 /// A KB document carries its book id in `container_id`, so a grant on the book folder
 /// is the whole enforcement surface for "editor teams" on a book (§2.3).
 /// A book owner is implicit reader/editor; grants can name profiles or teams.
-const BOOK_READER: &str = "(EXISTS(SELECT 1 FROM kb_book_owners bo WHERE bo.book_id=d.container_id AND bo.profile_id=?1) OR EXISTS(SELECT 1 FROM document_folder_permissions bp WHERE bp.folder_id=d.container_id AND ((bp.recipient_type='profile' AND bp.recipient_id=?1) OR (bp.recipient_type='team' AND EXISTS(SELECT 1 FROM team_memberships tm WHERE tm.team_id=bp.recipient_id AND tm.profile_id=?1 AND tm.archived=0)))))";
+const BOOK_READER: &str = "((d.container_id='organization-library' AND EXISTS(SELECT 1 FROM profiles p WHERE p.id=?1 AND p.archived=0)) OR EXISTS(SELECT 1 FROM kb_book_owners bo WHERE bo.book_id=d.container_id AND bo.profile_id=?1) OR EXISTS(SELECT 1 FROM document_folder_permissions bp WHERE bp.folder_id=d.container_id AND ((bp.recipient_type='profile' AND bp.recipient_id=?1) OR (bp.recipient_type='team' AND EXISTS(SELECT 1 FROM team_memberships tm WHERE tm.team_id=bp.recipient_id AND tm.profile_id=?1 AND tm.archived=0)))))";
 const BOOK_EDITOR: &str = "(EXISTS(SELECT 1 FROM kb_book_owners bo WHERE bo.book_id=d.container_id AND bo.profile_id=?1) OR EXISTS(SELECT 1 FROM document_folder_permissions bp WHERE bp.folder_id=d.container_id AND bp.access_level='editor' AND ((bp.recipient_type='profile' AND bp.recipient_id=?1) OR (bp.recipient_type='team' AND EXISTS(SELECT 1 FROM team_memberships tm WHERE tm.team_id=bp.recipient_id AND tm.profile_id=?1 AND tm.archived=0)))))";
 const BOOK_READ_SCOPE: &str = "(d.container_type='kb' AND ";
 const BOOK_WRITE_SCOPE: &str = "(d.container_type='kb' AND ";
@@ -151,7 +379,7 @@ fn document_write_scope() -> String {
 }
 
 pub fn document_readable_by(id: &str, profile_id: &str) -> Result<bool> {
-    document_readable_by_on(&db::conn()?, id, profile_id)
+    document_readable_by_on(&conn()?, id, profile_id)
 }
 
 pub(crate) fn document_readable_by_on(
@@ -171,7 +399,7 @@ pub(crate) fn document_readable_by_on(
 }
 
 pub fn document_writable_by(id: &str, profile_id: &str, is_admin: bool) -> Result<bool> {
-    let c = db::conn()?;
+    let c = conn()?;
     c.query_row(
         &format!(
             "SELECT EXISTS(SELECT 1 FROM documents d WHERE d.id=?3 AND {})",
@@ -184,7 +412,7 @@ pub fn document_writable_by(id: &str, profile_id: &str, is_admin: bool) -> Resul
 }
 
 pub fn list_documents_scoped(profile_id: String) -> Result<Vec<Document>> {
-    let c = db::conn()?;
+    let c = conn()?;
     let mut s = c
         .prepare(&format!(
             "SELECT {DOC_COLUMNS} FROM documents d WHERE {} ORDER BY d.updated_at DESC",
@@ -207,7 +435,7 @@ pub fn search_book_documents(book_id: String, query: String) -> Result<Vec<Docum
     if term.is_empty() {
         return Ok(Vec::new());
     }
-    let c = db::conn()?;
+    let c = conn()?;
     let pattern = format!("%{}%", term.replace('%', "\\%").replace('_', "\\_"));
     let mut s = c.prepare("SELECT id,title,substr(coalesce(body,''),1,180) FROM documents WHERE container_type='kb' AND container_id=?1 AND archived=0 AND (title LIKE ?2 ESCAPE '\\' OR coalesce(body,'') LIKE ?2 ESCAPE '\\') ORDER BY updated_at DESC LIMIT 50").map_err(|e| e.to_string())?;
     let rows = s
@@ -224,7 +452,7 @@ pub fn search_book_documents(book_id: String, query: String) -> Result<Vec<Docum
     Ok(rows)
 }
 pub fn get_document_scoped(id: String, profile_id: String) -> Result<Option<Document>> {
-    let c = db::conn()?;
+    let c = conn()?;
     c.query_row(
         &format!(
             "SELECT {DOC_COLUMNS} FROM documents d WHERE d.id=?2 AND {}",
@@ -241,7 +469,7 @@ pub fn get_document_scoped(id: String, profile_id: String) -> Result<Option<Docu
 /// the owner (or the project owner/admin). A shared document can never be moved or
 /// archived by the person it was shared with.
 pub fn document_owner_writable_by(id: &str, profile_id: &str, is_admin: bool) -> Result<bool> {
-    let c = db::conn()?;
+    let c = conn()?;
     c.query_row(
         &format!("SELECT EXISTS(SELECT 1 FROM documents d WHERE d.id=?3 AND {DOCUMENT_OWNER_WRITE_SCOPE})"),
         rusqlite::params![profile_id, is_admin, id],
@@ -254,7 +482,7 @@ pub fn document_access_manageable_by(id: &str, profile_id: &str, is_admin: bool)
     if is_admin {
         return Ok(true);
     }
-    let c = db::conn()?;
+    let c = conn()?;
     c.query_row(
         "SELECT EXISTS(SELECT 1 FROM documents WHERE id=?1 AND created_by=?2)",
         rusqlite::params![id, profile_id],
@@ -265,7 +493,7 @@ pub fn document_access_manageable_by(id: &str, profile_id: &str, is_admin: bool)
 
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_document_access(document_id: String) -> Result<Vec<DocumentAccessRecipient>> {
-    let c = db::conn()?;
+    let c = conn()?;
     let mut s = c
         .prepare("SELECT recipient_type,recipient_id,access_level FROM document_permissions WHERE document_id=?1 ORDER BY recipient_type,recipient_id")
         .map_err(|e| e.to_string())?;
@@ -299,7 +527,7 @@ pub fn update_document_access(
             return Err("invalid document access recipient".into());
         }
     }
-    let mut c = db::conn()?;
+    let mut c = conn()?;
     let tx = c.transaction().map_err(|e| e.to_string())?;
     let private: bool = tx
         .query_row(
@@ -330,7 +558,7 @@ pub fn update_document_access(
 
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_documents() -> Result<Vec<Document>> {
-    let c = db::conn()?;
+    let c = conn()?;
     let mut s = c
         .prepare(&format!(
             "SELECT {DOC_COLUMNS} FROM documents ORDER BY updated_at DESC"
@@ -356,13 +584,14 @@ pub fn get_document(id: String) -> Result<Option<Document>> {
 
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_favorite_documents(profile_id: String) -> Result<Vec<FavoriteDocument>> {
-    list_favorite_documents_on(&db::conn()?, profile_id)
+    list_favorite_documents_on(&conn()?, profile_id)
 }
 
 pub(crate) fn list_favorite_documents_on(
     c: &rusqlite::Connection,
     profile_id: String,
 ) -> Result<Vec<FavoriteDocument>> {
+    ensure_sheet_schema(c)?;
     // Ordered by shelf, then by the position the owner chose. Unfiled favourites
     // (`group_name IS NULL`) come first: they are the ones nobody has sorted yet.
     let mut s = c
@@ -399,7 +628,7 @@ pub fn move_favorite_document(
     group_name: Option<String>,
     position: i64,
 ) -> Result<()> {
-    move_favorite_document_on(&db::conn()?, profile_id, document_id, group_name, position)
+    move_favorite_document_on(&conn()?, profile_id, document_id, group_name, position)
 }
 
 pub(crate) fn move_favorite_document_on(
@@ -482,7 +711,7 @@ pub fn set_document_favorite(
     document_id: String,
     favorite: bool,
 ) -> Result<()> {
-    set_document_favorite_on(&db::conn()?, profile_id, document_id, favorite)
+    set_document_favorite_on(&conn()?, profile_id, document_id, favorite)
 }
 
 pub(crate) fn set_document_favorite_on(
@@ -517,6 +746,29 @@ pub(crate) fn set_document_favorite_on(
         .map_err(|e| e.to_string())?;
     }
     Ok(())
+}
+
+/// Creates the organization-wide shared library on first navigation. This is a
+/// regular KB root, not a parallel store: writes and access grants use the existing
+/// book owner/permission records. `default-org` is the durable administrative owner.
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn ensure_organization_library_root() -> Result<DocumentFolder> {
+    let c = db::conn()?;
+    ensure_organization_library_root_on(&c)
+}
+pub(crate) fn ensure_organization_library_root_on(c: &rusqlite::Connection) -> Result<DocumentFolder> {
+    c.execute(
+        "INSERT OR IGNORE INTO document_folders(id,container_type,container_id,parent_id,name,description,archived) VALUES(?1,'kb',?1,NULL,'Library',NULL,0)",
+        [ORGANIZATION_LIBRARY_ID],
+    ).map_err(|e| e.to_string())?;
+    c.execute(
+        "INSERT OR IGNORE INTO kb_book_owners(book_id,profile_id) VALUES(?1,'default-org')",
+        [ORGANIZATION_LIBRARY_ID],
+    ).map_err(|e| e.to_string())?;
+    c.query_row(
+        "SELECT id,container_type,container_id,parent_id,name,description,archived FROM document_folders WHERE id=?1",
+        [ORGANIZATION_LIBRARY_ID], row_to_folder,
+    ).map_err(|e| e.to_string())
 }
 
 /// The one canonical root per project. It is deterministic, so concurrent first
@@ -593,13 +845,13 @@ rusqlite::params![root_id, project_id],
 /// Creates/selects the project's required root folder and repairs legacy direct rows.
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn ensure_project_document_root(project_id: String) -> Result<DocumentFolder> {
-    let mut c = db::conn()?;
+    let mut c = conn()?;
     ensure_project_document_root_tx(&mut c, &project_id)
 }
 
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn create_document(mut document: Document) -> Result<()> {
-    let mut c = db::conn()?;
+    let mut c = conn()?;
     // Callers from an older client may still submit `folder_id = null`. The row never
     // stays direct: select/create the project root first, then persist into that folder.
     if document.container_type == "project" && document.folder_id.is_none() {
@@ -615,10 +867,19 @@ pub fn create_document(mut document: Document) -> Result<()> {
         document.container_id.as_deref(),
         document.folder_id.as_deref(),
     )?;
+    validate_kind(&document.kind)?;
+    if document.kind == KIND_SHEET {
+        if let Some(body) = document.body.as_deref() {
+            validate_sheet_body(body)?;
+        }
+    }
     c.execute(
-"INSERT INTO documents(id,container_type,container_id,folder_id,doc_type,body_format,title,body,version,archived,created_by,source_entity_type,source_entity_id)VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",
-rusqlite::params![&document.id, &document.container_type, &document.container_id, &document.folder_id, &document.doc_type, &document.body_format, &document.title, &document.body, document.version, document.archived, &document.created_by, &document.source_entity_type, &document.source_entity_id],
+"INSERT INTO documents(id,container_type,container_id,folder_id,doc_type,body_format,title,body,version,archived,created_by,source_entity_type,source_entity_id,kind)VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)",
+rusqlite::params![&document.id, &document.container_type, &document.container_id, &document.folder_id, &document.doc_type, &document.body_format, &document.title, &document.body, document.version, document.archived, &document.created_by, &document.source_entity_type, &document.source_entity_id, &document.kind],
 ).map_err(|e| e.to_string())?;
+    if document.kind == KIND_SHEET {
+        reindex_sheet(&c, &document.id, document.body.as_deref());
+    }
     c.execute(
         "INSERT INTO doc_versions(id,document_id,version,body,created_by) VALUES(?1,?2,?3,?4,?5)",
         rusqlite::params![
@@ -637,15 +898,16 @@ rusqlite::params![&document.id, &document.container_type, &document.container_id
 /// content change is versioned.
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn update_document(document: Document) -> Result<()> {
-    let c = db::conn()?;
+    let c = conn()?;
     validate_document_placement(
         &c,
         &document.container_type,
         document.container_id.as_deref(),
         document.folder_id.as_deref(),
     )?;
+    validate_kind(&document.kind)?;
     c.execute(
-        "UPDATE documents SET container_type=?2,container_id=?3,folder_id=?4,doc_type=?5,body_format=?6,title=?7,archived=?8,updated_at=unixepoch() WHERE id=?1",
+        "UPDATE documents SET container_type=?2,container_id=?3,folder_id=?4,doc_type=?5,body_format=?6,title=?7,archived=?8,kind=?9,updated_at=unixepoch() WHERE id=?1",
         rusqlite::params![
             document.id,
             document.container_type,
@@ -654,7 +916,8 @@ pub fn update_document(document: Document) -> Result<()> {
             document.doc_type,
             document.body_format,
             document.title,
-            document.archived
+            document.archived,
+            document.kind
         ],
     )
     .map_err(|e| e.to_string())?;
@@ -669,7 +932,7 @@ pub fn move_document(
     container_id: Option<String>,
     folder_id: Option<String>,
 ) -> Result<()> {
-    let c = db::conn()?;
+    let c = conn()?;
     validate_document_placement(
         &c,
         &container_type,
@@ -686,7 +949,7 @@ pub fn move_document(
 
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn archive_document(id: String, archived: bool) -> Result<()> {
-    let c = db::conn()?;
+    let c = conn()?;
     c.execute(
         "UPDATE documents SET archived=?2,updated_at=unixepoch() WHERE id=?1",
         rusqlite::params![id, archived],
@@ -723,12 +986,12 @@ pub(crate) fn document_deletable_by_on(
 }
 
 pub fn document_deletable_by(id: &str, actor_id: &str) -> Result<bool> {
-    document_deletable_by_on(&db::conn()?, id, actor_id)
+    document_deletable_by_on(&conn()?, id, actor_id)
 }
 
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn delete_document(id: String, actor_id: String) -> Result<()> {
-    let mut c = db::conn()?;
+    let mut c = conn()?;
     delete_document_on(&mut c, &id, &actor_id)
 }
 fn delete_document_on(c: &mut rusqlite::Connection, id: &str, actor_id: &str) -> Result<()> {
@@ -766,13 +1029,19 @@ pub fn save_document(
     body: Option<String>,
     actor: Option<String>,
 ) -> Result<Document> {
-    let mut c = db::conn()?;
+    let mut c = conn()?;
     let tx = c.transaction().map_err(|e| e.to_string())?;
-    let current_version: i64 = tx
-        .query_row("SELECT version FROM documents WHERE id=?1", [&id], |r| {
-            r.get(0)
-        })
+    let (current_version, kind): (i64, String) = tx
+        .query_row(
+            "SELECT version,kind FROM documents WHERE id=?1",
+            [&id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
         .map_err(|e| e.to_string())?;
+    // A broken grid is refused before anything is written: no body change, no version.
+    if kind == KIND_SHEET {
+        validate_sheet_body(body.as_deref().unwrap_or(""))?;
+    }
     let next_version = current_version + 1;
     tx.execute(
         "UPDATE documents SET title=?2,body=?3,version=?4,updated_at=unixepoch() WHERE id=?1",
@@ -791,6 +1060,9 @@ pub fn save_document(
     )
     .map_err(|e| e.to_string())?;
     tx.commit().map_err(|e| e.to_string())?;
+    if kind == KIND_SHEET {
+        reindex_sheet(&c, &id, body.as_deref());
+    }
     let doc = get_document(id)?.ok_or_else(|| "document vanished after save".to_string())?;
     // Taxonomy name first; the pre-taxonomy alias is re-emitted so subscriptions
     // stored before `events.rs` existed keep firing.
@@ -887,11 +1159,11 @@ pub fn attach_document_discussion(
     document_id: String,
     meeting_id: Option<String>,
 ) -> Result<DocumentDiscussion> {
-    attach_document_discussion_on(&db::conn()?, &document_id, meeting_id.as_deref())
+    attach_document_discussion_on(&conn()?, &document_id, meeting_id.as_deref())
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn get_document_discussion(document_id: String) -> Result<Option<DocumentDiscussion>> {
-    document_discussion_on(&db::conn()?, &document_id)
+    document_discussion_on(&conn()?, &document_id)
 }
 
 fn row_to_doc_version(r: &rusqlite::Row) -> rusqlite::Result<DocVersion> {
@@ -909,7 +1181,7 @@ pub fn list_doc_versions_scoped(
     document_id: String,
     profile_id: String,
 ) -> Result<Vec<DocVersion>> {
-    let c = db::conn()?;
+    let c = conn()?;
     let mut s = c.prepare(&format!("SELECT v.id,v.document_id,v.version,v.body,v.created_by,v.created_at FROM doc_versions v JOIN documents d ON d.id=v.document_id WHERE v.document_id=?2 AND {DOCUMENT_READ_SCOPE} ORDER BY v.version DESC")).map_err(|e| e.to_string())?;
     let rows = s
         .query_map(
@@ -924,7 +1196,7 @@ pub fn list_doc_versions_scoped(
 
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_doc_versions(document_id: String) -> Result<Vec<DocVersion>> {
-    let c = db::conn()?;
+    let c = conn()?;
     let mut s = c.prepare("SELECT id,document_id,version,body,created_by,created_at FROM doc_versions WHERE document_id=?1 ORDER BY version DESC").map_err(|e| e.to_string())?;
     let rows = s
         .query_map([document_id], row_to_doc_version)
@@ -943,7 +1215,7 @@ pub fn restore_doc_version(
     actor: Option<String>,
 ) -> Result<Document> {
     let restored_body: Option<String> = {
-        let c = db::conn()?;
+        let c = conn()?;
         c.query_row(
             "SELECT body FROM doc_versions WHERE document_id=?1 AND version=?2",
             rusqlite::params![document_id, version],
@@ -952,7 +1224,7 @@ pub fn restore_doc_version(
         .map_err(|e| e.to_string())?
     };
     let title: String = {
-        let c = db::conn()?;
+        let c = conn()?;
         c.query_row(
             "SELECT title FROM documents WHERE id=?1",
             [&document_id],
@@ -969,7 +1241,7 @@ pub fn restore_doc_version(
 /// (`DOCUMENT_READ_SCOPE` admits `created_by`). This closes the invisibility defect
 /// -- a creator could read their own kb article but never see its container -- without
 /// widening anything: a profile with no readable document in the book still sees nothing.
-const FOLDER_READ_SCOPE: &str = "((f.container_type='my-docs' AND f.container_id=?1) OR (f.container_type='project' AND f.container_id IS NOT NULL AND EXISTS(SELECT 1 FROM projects p WHERE p.id=f.container_id AND (p.created_by=?1 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?1)))) OR (f.container_type='kb' AND (EXISTS(SELECT 1 FROM kb_book_owners bo WHERE bo.book_id=f.container_id AND bo.profile_id=?1) OR EXISTS(SELECT 1 FROM document_folder_permissions bp WHERE bp.folder_id=f.container_id AND ((bp.recipient_type='profile' AND bp.recipient_id=?1) OR (bp.recipient_type='team' AND EXISTS(SELECT 1 FROM team_memberships tm WHERE tm.team_id=bp.recipient_id AND tm.profile_id=?1 AND tm.archived=0)))) OR EXISTS(SELECT 1 FROM documents d WHERE d.container_type='kb' AND d.created_by=?1 AND (d.folder_id=f.id OR d.container_id=f.id)))))";
+const FOLDER_READ_SCOPE: &str = "((f.container_type='my-docs' AND f.container_id=?1) OR (f.container_type='project' AND f.container_id IS NOT NULL AND EXISTS(SELECT 1 FROM projects p WHERE p.id=f.container_id AND (p.created_by=?1 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?1)))) OR (f.container_type='kb' AND ((f.container_id='organization-library' AND EXISTS(SELECT 1 FROM profiles p WHERE p.id=?1 AND p.archived=0)) OR EXISTS(SELECT 1 FROM kb_book_owners bo WHERE bo.book_id=f.container_id AND bo.profile_id=?1) OR EXISTS(SELECT 1 FROM document_folder_permissions bp WHERE bp.folder_id=f.container_id AND ((bp.recipient_type='profile' AND bp.recipient_id=?1) OR (bp.recipient_type='team' AND EXISTS(SELECT 1 FROM team_memberships tm WHERE tm.team_id=bp.recipient_id AND tm.profile_id=?1 AND tm.archived=0)))) OR EXISTS(SELECT 1 FROM documents d WHERE d.container_type='kb' AND d.created_by=?1 AND (d.folder_id=f.id OR d.container_id=f.id)))))";
 const FOLDER_WRITE_SCOPE: &str = "((f.container_type='my-docs' AND f.container_id=?1) OR (f.container_type='project' AND f.container_id IS NOT NULL AND (EXISTS(SELECT 1 FROM projects p WHERE p.id=f.container_id AND p.created_by=?1) OR ?2=1)) OR (f.container_type='kb' AND (EXISTS(SELECT 1 FROM kb_book_owners bo WHERE bo.book_id=f.container_id AND bo.profile_id=?1) OR EXISTS(SELECT 1 FROM document_folder_permissions bp WHERE bp.folder_id=f.container_id AND bp.access_level='editor' AND ((bp.recipient_type='profile' AND bp.recipient_id=?1) OR (bp.recipient_type='team' AND EXISTS(SELECT 1 FROM team_memberships tm WHERE tm.team_id=bp.recipient_id AND tm.profile_id=?1 AND tm.archived=0)))))))";
 fn row_to_folder(r: &rusqlite::Row) -> rusqlite::Result<DocumentFolder> {
     Ok(DocumentFolder {
@@ -984,7 +1256,7 @@ fn row_to_folder(r: &rusqlite::Row) -> rusqlite::Result<DocumentFolder> {
 }
 
 pub fn document_folder_readable_by(id: &str, profile_id: &str) -> Result<bool> {
-    let c = db::conn()?;
+    let c = conn()?;
     c.query_row(
         &format!(
             "SELECT EXISTS(SELECT 1 FROM document_folders f WHERE f.id=?2 AND {FOLDER_READ_SCOPE})"
@@ -996,15 +1268,17 @@ pub fn document_folder_readable_by(id: &str, profile_id: &str) -> Result<bool> {
 }
 
 pub fn document_folder_writable_by(id: &str, profile_id: &str, is_admin: bool) -> Result<bool> {
-    let c = db::conn()?;
+    let c = conn()?;
     c.query_row(&format!("SELECT EXISTS(SELECT 1 FROM document_folders f WHERE f.id=?3 AND {FOLDER_WRITE_SCOPE})"), rusqlite::params![profile_id, is_admin, id], |row| row.get(0)).map_err(|e| e.to_string())
 }
 
 pub fn list_document_folders_scoped(profile_id: String) -> Result<Vec<DocumentFolder>> {
     let c = db::conn()?;
+    list_document_folders_scoped_on(&c, &profile_id)
+}
+pub(crate) fn list_document_folders_scoped_on(c: &rusqlite::Connection, profile_id: &str) -> Result<Vec<DocumentFolder>> {
     let mut s = c.prepare(&format!("SELECT id,container_type,container_id,parent_id,name,description,archived FROM document_folders f WHERE {FOLDER_READ_SCOPE} ORDER BY name")).map_err(|e|e.to_string())?;
-    let rows = s
-        .query_map([profile_id], row_to_folder)
+    let rows = s.query_map([profile_id], row_to_folder)
         .map_err(|e| e.to_string())?
         .collect::<std::result::Result<_, _>>()
         .map_err(|e| e.to_string());
@@ -1013,7 +1287,7 @@ pub fn list_document_folders_scoped(profile_id: String) -> Result<Vec<DocumentFo
 
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_document_folders() -> Result<Vec<DocumentFolder>> {
-    let c = db::conn()?;
+    let c = conn()?;
     let mut s=c.prepare("SELECT id,container_type,container_id,parent_id,name,description,archived FROM document_folders ORDER BY name").map_err(|e|e.to_string())?;
     let rows = s
         .query_map([], row_to_folder)
@@ -1066,7 +1340,7 @@ fn publication_row(c: &rusqlite::Connection, document_id: &str) -> Result<Docume
 
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn get_document_publication(document_id: String) -> Result<DocumentPublication> {
-    let c = db::conn()?;
+    let c = conn()?;
     publication_row(&c, &document_id)
 }
 
@@ -1078,7 +1352,7 @@ pub fn publish_document(
     published: bool,
     slug: Option<String>,
 ) -> Result<DocumentPublication> {
-    let c = db::conn()?;
+    let c = conn()?;
     publish_document_tx(&c, document_id, published, slug)
 }
 
@@ -1138,11 +1412,12 @@ fn publish_document_tx(
 /// Resolves a public link. Archived or unpublished documents are not public.
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn get_public_document(slug: String) -> Result<Option<Document>> {
-    let c = db::conn()?;
+    let c = conn()?;
     get_public_document_tx(&c, slug)
 }
 
 fn get_public_document_tx(c: &rusqlite::Connection, slug: String) -> Result<Option<Document>> {
+    ensure_sheet_schema(c)?;
     c.query_row(
         &format!("SELECT {DOC_COLUMNS} FROM documents d WHERE d.public_slug=?1 AND d.published=1 AND d.archived=0"),
         [slug],
@@ -1157,7 +1432,7 @@ pub fn book_manageable_by(book_id: &str, profile_id: &str, is_admin: bool) -> Re
     if is_admin {
         return Ok(true);
     }
-    let c = db::conn()?;
+    let c = conn()?;
     c.query_row(
         "SELECT EXISTS(SELECT 1 FROM kb_book_owners WHERE book_id=?1 AND profile_id=?2)",
         rusqlite::params![book_id, profile_id],
@@ -1166,14 +1441,14 @@ pub fn book_manageable_by(book_id: &str, profile_id: &str, is_admin: bool) -> Re
     .map_err(|e| e.to_string())
 }
 pub fn book_readable_by(book_id: &str, profile_id: &str) -> Result<bool> {
-    let c = db::conn()?;
+    let c = conn()?;
     c.query_row("SELECT EXISTS(SELECT 1 FROM document_folders f WHERE f.id=?1 AND f.container_type='kb' AND f.parent_id IS NULL AND (EXISTS(SELECT 1 FROM kb_book_owners bo WHERE bo.book_id=f.id AND bo.profile_id=?2) OR EXISTS(SELECT 1 FROM document_folder_permissions bp WHERE bp.folder_id=f.id AND ((bp.recipient_type='profile' AND bp.recipient_id=?2) OR (bp.recipient_type='team' AND EXISTS(SELECT 1 FROM team_memberships tm WHERE tm.team_id=bp.recipient_id AND tm.profile_id=?2 AND tm.archived=0)))) OR EXISTS(SELECT 1 FROM documents d WHERE d.container_type='kb' AND d.container_id=f.id AND d.created_by=?2)))", rusqlite::params![book_id, profile_id], |row| row.get(0)).map_err(|e| e.to_string())
 }
 pub fn book_writable_by(book_id: &str, profile_id: &str, is_admin: bool) -> Result<bool> {
     if is_admin {
         return Ok(true);
     }
-    let c = db::conn()?;
+    let c = conn()?;
     // Pre-owner legacy books were historically open to authors. Keep them writable until
     // a first owner/grant is recorded; newly created books always have an owner row.
     c.query_row(&format!("SELECT EXISTS(SELECT 1 FROM document_folders f WHERE f.id=?3 AND f.container_type='kb' AND f.parent_id IS NULL AND ({FOLDER_WRITE_SCOPE} OR (NOT EXISTS(SELECT 1 FROM kb_book_owners bo WHERE bo.book_id=f.id) AND NOT EXISTS(SELECT 1 FROM document_folder_permissions bp WHERE bp.folder_id=f.id))))"), rusqlite::params![profile_id, false, book_id], |row| row.get(0)).map_err(|e| e.to_string())
@@ -1182,7 +1457,7 @@ pub fn book_writable_by(book_id: &str, profile_id: &str, is_admin: bool) -> Resu
 /// of discovering the rule by being refused. Names only — no grants, no book contents.
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_book_owners(book_id: String) -> Result<Vec<String>> {
-    list_book_owners_on(&db::conn()?, &book_id)
+    list_book_owners_on(&conn()?, &book_id)
 }
 pub(crate) fn list_book_owners_on(c: &rusqlite::Connection, book_id: &str) -> Result<Vec<String>> {
     let mut s = c
@@ -1196,10 +1471,9 @@ pub(crate) fn list_book_owners_on(c: &rusqlite::Connection, book_id: &str) -> Re
     Ok(rows)
 }
 
-
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_book_access(book_id: String) -> Result<Vec<DocumentAccessRecipient>> {
-    let c = db::conn()?;
+    let c = conn()?;
     let mut s = c
         .prepare("SELECT recipient_type,recipient_id,access_level FROM document_folder_permissions WHERE folder_id=?1 ORDER BY recipient_type,recipient_id")
         .map_err(|e| e.to_string())?;
@@ -1231,7 +1505,7 @@ pub fn update_book_access(
             return Err("invalid book access recipient".into());
         }
     }
-    let mut c = db::conn()?;
+    let mut c = conn()?;
     let tx = c.transaction().map_err(|e| e.to_string())?;
     let is_book: bool = tx
         .query_row(
@@ -1408,7 +1682,7 @@ fn imported_title(raw: &str, text: &str, stem: &str) -> String {
 /// Imports a directory tree: Markdown and plain-text pages stay editable; all other files stay files.
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn import_document_folder(request: DocumentImportRequest) -> Result<DocumentImportSummary> {
-    let c = db::conn()?;
+    let c = conn()?;
     import_document_folder_tx(&c, request)
 }
 
@@ -1534,7 +1808,7 @@ fn import_document_folder_tx(
 
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn create_document_folder(folder: DocumentFolder, owner_id: Option<String>) -> Result<()> {
-    let c = db::conn()?;
+    let c = conn()?;
     let is_book = folder.container_type == "kb"
         && folder.parent_id.is_none()
         && folder.container_id.as_deref() == Some(&folder.id);
@@ -1563,7 +1837,7 @@ pub fn create_document_folder(folder: DocumentFolder, owner_id: Option<String>) 
 /// automatically since they merely reference this folder's id), toggle archived.
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn update_document_folder(folder: DocumentFolder) -> Result<()> {
-    let c = db::conn()?;
+    let c = conn()?;
     c.execute(
         "UPDATE document_folders SET container_type=?2,container_id=?3,parent_id=?4,name=?5,description=?6,archived=?7 WHERE id=?1",
         rusqlite::params![
@@ -1586,7 +1860,7 @@ pub fn update_document_folder(folder: DocumentFolder) -> Result<()> {
 /// alone. Archived children still count as content; they are hidden, not gone.
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn delete_document_folder(id: String, actor_id: String) -> Result<()> {
-    delete_document_folder_on(&db::conn()?, &id, &actor_id)
+    delete_document_folder_on(&conn()?, &id, &actor_id)
 }
 /// Same ownership rule as a document, read off the folder's container: your own
 /// `my-docs` shelf, the owner of the project the folder belongs to, or an owner of the
@@ -1615,7 +1889,7 @@ pub(crate) fn document_folder_deletable_by_on(
     .map_err(|e| e.to_string())
 }
 pub fn document_folder_deletable_by(id: &str, actor_id: &str) -> Result<bool> {
-    document_folder_deletable_by_on(&db::conn()?, id, actor_id)
+    document_folder_deletable_by_on(&conn()?, id, actor_id)
 }
 fn delete_document_folder_on(c: &rusqlite::Connection, id: &str, actor_id: &str) -> Result<()> {
     let exists: bool = c
@@ -1653,7 +1927,7 @@ fn delete_document_folder_on(c: &rusqlite::Connection, id: &str, actor_id: &str)
 /// referencing this folder's id, so they move along transparently.
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn move_document_folder(id: String, parent_id: Option<String>) -> Result<()> {
-    let c = db::conn()?;
+    let c = conn()?;
     c.execute(
         "UPDATE document_folders SET parent_id=?2 WHERE id=?1",
         rusqlite::params![id, parent_id],
@@ -1778,7 +2052,7 @@ fn stored_name(document_id: &str, filename: &str) -> String {
 
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn upload_document_file(request: UploadDocumentFileRequest) -> Result<DocumentFile> {
-    let c = db::conn()?;
+    let c = conn()?;
     upload_document_file_tx(&c, &upload_dir()?, request)
 }
 
@@ -1803,7 +2077,7 @@ pub fn upload_document_file_bytes(
         .map(|name| name.to_string_lossy().to_string())
         .filter(|name| !name.is_empty())
         .ok_or_else(|| "filename must be a plain file name".to_string())?;
-    let c = db::conn()?;
+    let c = conn()?;
     validate_document_placement(
         &c,
         &request.container_type,
@@ -1981,12 +2255,7 @@ rusqlite::params![shelf_id, filing.project_id, root_id, shelf_name],
     }
     c.execute(
         "INSERT INTO doc_versions(id,document_id,version,body,created_by) VALUES(?1,?2,1,?3,?4)",
-        rusqlite::params![
-            generated_id("docver"),
-            document_id,
-            body,
-            filing.created_by
-        ],
+        rusqlite::params![generated_id("docver"), document_id, body, filing.created_by],
     )
     .map_err(|e| e.to_string())?;
     c.execute(
@@ -2005,7 +2274,7 @@ rusqlite::params![shelf_id, filing.project_id, root_id, shelf_name],
 }
 
 pub fn read_document_file_bytes(document_id: &str) -> Result<(DocumentFile, Vec<u8>)> {
-    let c = db::conn()?;
+    let c = conn()?;
     let file = get_document_file_tx(&c, document_id)?
         .ok_or_else(|| "uploaded file not found".to_string())?;
     let stored_path: String = c
@@ -2120,7 +2389,7 @@ pub(crate) fn upload_document_file_tx(
 
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn get_document_file(document_id: String) -> Result<Option<DocumentFile>> {
-    let c = db::conn()?;
+    let c = conn()?;
     get_document_file_tx(&c, &document_id)
 }
 
@@ -2151,7 +2420,7 @@ pub fn read_document_file(
     document_id: String,
     max_bytes: Option<u64>,
 ) -> Result<DocumentFilePreview> {
-    let c = db::conn()?;
+    let c = conn()?;
     read_document_file_tx(
         &c,
         &document_id,
@@ -2211,7 +2480,24 @@ mod tests {
             n
         ));
         let _ = std::fs::remove_file(&path);
-        db::migrate_path(&path).expect("migration")
+        let c = db::migrate_path(&path).expect("migration");
+        // Mirrors the real `conn()`: this module's additive column is always present.
+        ensure_sheet_schema(&c).expect("sheet schema");
+        c
+    }
+
+    /// A database exactly as it was before the sheet column existed.
+    fn legacy_conn() -> rusqlite::Connection {
+        let n = COUNTER.fetch_add(1, Ordering::SeqCst);
+        let path = std::env::temp_dir().join(format!(
+            "gaia-space-documents-legacy-{}-{}.sqlite",
+            std::process::id(),
+            n
+        ));
+        let _ = std::fs::remove_file(&path);
+        let c = db::migrate_path(&path).expect("migration");
+        let _ = c.execute_batch("ALTER TABLE documents DROP COLUMN kind");
+        c
     }
 
     /// Throwaway import source under src-tauri/target/, never a user directory.
@@ -2921,6 +3207,21 @@ mod tests {
         );
     }
 
+    #[test]
+    fn organization_library_root_exists_once_and_every_active_member_can_list_it() {
+        let c = test_conn();
+        c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('member-a','a','A',1),('member-b','b','B',1),('former','f','Former',1)", []).unwrap();
+        c.execute("UPDATE profiles SET archived=1 WHERE id='former'", []).unwrap();
+        let root = ensure_organization_library_root_on(&c).unwrap();
+        assert_eq!(root.id, ORGANIZATION_LIBRARY_ID);
+        assert_eq!(root.name, "Library");
+        assert_eq!(ensure_organization_library_root_on(&c).unwrap().id, root.id);
+        for member in ["member-a", "member-b"] {
+            assert!(list_document_folders_scoped_on(&c, member).unwrap().iter().any(|folder| folder.id == ORGANIZATION_LIBRARY_ID));
+        }
+        assert!(!list_document_folders_scoped_on(&c, "former").unwrap().iter().any(|folder| folder.id == ORGANIZATION_LIBRARY_ID));
+    }
+
     /// A knowledge-base book is navigable to the profile that owns an article inside it,
     /// and to nobody else. Guards both halves of the contract at once: no invisibility for
     /// the owner, no broadening for a stranger.
@@ -3173,9 +3474,17 @@ mod tests {
         let mut c = test_conn();
         c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('ada','ada','Ada',1),('bea','bea','Bea',1),('cid','cid','Cid',1)", []).unwrap();
         c.execute("INSERT INTO projects(id,name,key,created_by,created_at) VALUES('pr','Project','PR','ada',1)", []).unwrap();
-        c.execute("INSERT INTO project_members(project_id,profile_id) VALUES('pr','bea')", []).unwrap();
+        c.execute(
+            "INSERT INTO project_members(project_id,profile_id) VALUES('pr','bea')",
+            [],
+        )
+        .unwrap();
         c.execute("INSERT INTO document_folders(id,container_type,container_id,parent_id,name,archived) VALUES('root','project','pr',NULL,'Documents',0),('book','kb',NULL,NULL,'Handbook',0)", []).unwrap();
-        c.execute("INSERT INTO kb_book_owners(book_id,profile_id) VALUES('book','ada')", []).unwrap();
+        c.execute(
+            "INSERT INTO kb_book_owners(book_id,profile_id) VALUES('book','ada')",
+            [],
+        )
+        .unwrap();
         c.execute("INSERT INTO document_folder_permissions(folder_id,recipient_type,recipient_id,access_level) VALUES('book','profile','bea','editor')", []).unwrap();
         c.execute("INSERT INTO documents(id,container_type,container_id,folder_id,doc_type,title,created_by) VALUES \
                    ('mine','my-docs','ada',NULL,'text','Private','ada'), \
@@ -3214,10 +3523,18 @@ mod tests {
         let c = test_conn();
         c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('ada','ada','Ada',1),('bea','bea','Bea',1)", []).unwrap();
         c.execute("INSERT INTO projects(id,name,key,created_by,created_at) VALUES('pr','Project','PR','ada',1)", []).unwrap();
-        c.execute("INSERT INTO project_members(project_id,profile_id) VALUES('pr','bea')", []).unwrap();
+        c.execute(
+            "INSERT INTO project_members(project_id,profile_id) VALUES('pr','bea')",
+            [],
+        )
+        .unwrap();
         c.execute("INSERT INTO document_folders(id,container_type,container_id,parent_id,name,archived) VALUES \
                    ('mine','my-docs','ada',NULL,'Shelf',0),('sub','project','pr',NULL,'Notes',0),('book','kb',NULL,NULL,'Handbook',0)", []).unwrap();
-        c.execute("INSERT INTO kb_book_owners(book_id,profile_id) VALUES('book','ada')", []).unwrap();
+        c.execute(
+            "INSERT INTO kb_book_owners(book_id,profile_id) VALUES('book','ada')",
+            [],
+        )
+        .unwrap();
         c.execute("INSERT INTO document_folder_permissions(folder_id,recipient_type,recipient_id,access_level) VALUES('book','profile','bea','editor')", []).unwrap();
 
         for (folder, stranger) in [("mine", "bea"), ("sub", "bea"), ("book", "bea")] {
@@ -3237,7 +3554,11 @@ mod tests {
         let c = test_conn();
         c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('ada','ada','Ada',1),('bea','bea','Bea',1)", []).unwrap();
         c.execute("INSERT INTO document_folders(id,container_type,container_id,parent_id,name,archived) VALUES('book','kb',NULL,NULL,'Handbook',0),('other','kb',NULL,NULL,'Other',0)", []).unwrap();
-        c.execute("INSERT INTO kb_book_owners(book_id,profile_id) VALUES('book','ada'),('other','bea')", []).unwrap();
+        c.execute(
+            "INSERT INTO kb_book_owners(book_id,profile_id) VALUES('book','ada'),('other','bea')",
+            [],
+        )
+        .unwrap();
         c.execute("INSERT INTO document_folder_permissions(folder_id,recipient_type,recipient_id,access_level) VALUES('book','profile','bea','editor')", []).unwrap();
 
         assert_eq!(
@@ -3248,12 +3569,171 @@ mod tests {
         assert!(list_book_owners_on(&c, "no-such-book").unwrap().is_empty());
     }
 
+    // ---- sheets ---------------------------------------------------------------
+
+    const GRID: &str = r#"{"columns":[{"id":"c1","label":"Vendor","type":"text"},{"id":"c2","label":"Amount","type":"number"}],"rows":[{"id":"r1","cells":{"c1":"Contoso","c2":"120"}}]}"#;
+
+    #[test]
+    fn a_database_written_before_sheets_keeps_its_documents_and_gains_markdown() {
+        let c = legacy_conn();
+        c.execute("INSERT INTO documents(id,container_type,container_id,doc_type,title,body) VALUES('old','my-docs','p1','text','Old note','still here')", []).unwrap();
+        let column_before: i64 = c
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('documents') WHERE name='kind'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(column_before, 0, "fixture must predate the column");
+
+        ensure_sheet_schema(&c).expect("additive migration");
+        ensure_sheet_schema(&c).expect("idempotent");
+
+        let (kind, body): (String, String) = c
+            .query_row("SELECT kind,body FROM documents WHERE id='old'", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .unwrap();
+        assert_eq!(kind, "markdown", "an existing document is markdown");
+        assert_eq!(body, "still here", "no data was moved");
+    }
+
+    #[test]
+    fn a_sheet_is_versioned_exactly_like_a_markdown_document() {
+        let _serial = crate::db::test_serial();
+        let temp = crate::db::TempDb::new("documents-sheet-versions");
+        let c = crate::db::migrate_path(&temp).expect("migration");
+        ensure_sheet_schema(&c).unwrap();
+        std::env::set_var("SPACE_DB", temp.path());
+        c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('ada','ada','Ada',unixepoch())", []).unwrap();
+        c.execute(
+            "INSERT INTO documents(id,container_type,container_id,doc_type,title,body,version,kind) \
+             VALUES('s1','my-docs','ada','text','Budget',?1,1,'sheet')",
+            [GRID],
+        )
+        .unwrap();
+
+        let next = GRID.replace("Contoso", "Fabrikam");
+        let saved = save_document(
+            "s1".into(),
+            "Budget".into(),
+            Some(next.clone()),
+            Some("ada".into()),
+        )
+        .expect("sheet save");
+        assert_eq!(saved.version, 2);
+        assert_eq!(saved.kind, "sheet");
+        assert_eq!(saved.body.as_deref(), Some(next.as_str()));
+
+        let versions = list_doc_versions("s1".into()).expect("versions");
+        assert_eq!(versions.len(), 1, "the save appended its snapshot");
+        assert_eq!(versions[0].version, 2);
+    }
+
+    #[test]
+    fn a_broken_grid_is_refused_and_leaves_body_and_version_untouched() {
+        let _serial = crate::db::test_serial();
+        let temp = crate::db::TempDb::new("documents-sheet-refusal");
+        let c = crate::db::migrate_path(&temp).expect("migration");
+        ensure_sheet_schema(&c).unwrap();
+        std::env::set_var("SPACE_DB", temp.path());
+        c.execute(
+            "INSERT INTO documents(id,container_type,container_id,doc_type,title,body,version,kind) \
+             VALUES('s2','my-docs','ada','text','Budget',?1,1,'sheet')",
+            [GRID],
+        )
+        .unwrap();
+
+        for bad in [
+            "{not json",
+            r#"{"columns":[],"rows":[{"id":"r1","cells":{"ghost":"x"}}]}"#,
+            r#"{"columns":[{"id":"c1","label":"A","type":"text"}],"rows":[{"id":"r1","cells":{}},{"id":"r1","cells":{}}]}"#,
+            r#"{"columns":[{"id":"c1","label":"A","type":"colour"}],"rows":[]}"#,
+        ] {
+            let refused = save_document(
+                "s2".into(),
+                "Budget".into(),
+                Some(bad.to_string()),
+                Some("ada".into()),
+            );
+            assert!(refused.is_err(), "accepted a broken sheet: {bad}");
+        }
+
+        let (body, version): (String, i64) = c
+            .query_row(
+                "SELECT body,version FROM documents WHERE id='s2'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(body, GRID, "nothing was written");
+        assert_eq!(version, 1, "a refusal does not mint a version");
+        assert_eq!(count(&c, "SELECT COUNT(*) FROM doc_versions"), 0);
+    }
+
+    #[test]
+    fn a_markdown_document_still_saves_any_text() {
+        let _serial = crate::db::test_serial();
+        let temp = crate::db::TempDb::new("documents-markdown-untouched");
+        let c = crate::db::migrate_path(&temp).expect("migration");
+        ensure_sheet_schema(&c).unwrap();
+        std::env::set_var("SPACE_DB", temp.path());
+        c.execute("INSERT INTO documents(id,container_type,container_id,doc_type,title,body,version) VALUES('m1','my-docs','ada','text','Note','hello',1)", []).unwrap();
+        let saved = save_document("m1".into(), "Note".into(), Some("{not json".into()), None)
+            .expect("markdown accepts anything");
+        assert_eq!(saved.kind, "markdown");
+        assert_eq!(saved.version, 2);
+    }
+
+    #[test]
+    fn a_sheet_is_found_by_its_cell_values_not_by_its_json() {
+        let _serial = crate::db::test_serial();
+        let temp = crate::db::TempDb::new("documents-sheet-search");
+        let c = crate::db::migrate_path(&temp).expect("migration");
+        ensure_sheet_schema(&c).unwrap();
+        std::env::set_var("SPACE_DB", temp.path());
+        c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('ada','ada','Ada',unixepoch())", []).unwrap();
+        c.execute("INSERT INTO document_folders(id,container_type,container_id,parent_id,name) VALUES('book','kb',NULL,NULL,'Book')", []).unwrap();
+        c.execute(
+            "INSERT INTO documents(id,container_type,container_id,folder_id,doc_type,title,body,version,kind) \
+             VALUES('s3','kb','book','book','text','Budget',?1,1,'sheet')",
+            [GRID],
+        )
+        .unwrap();
+        save_document(
+            "s3".into(),
+            "Budget".into(),
+            Some(GRID.to_string()),
+            Some("ada".into()),
+        )
+        .expect("save");
+
+        assert_eq!(sheet_search_text(GRID), "Vendor Amount Contoso 120");
+        let indexed: String = c
+            .query_row(
+                "SELECT body FROM search_index WHERE entity_type='document' AND entity_id='s3'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            indexed, "Vendor Amount Contoso 120",
+            "the index holds plain cell text, not JSON"
+        );
+        let hits = search_book_documents("book".into(), "Contoso".into()).expect("search");
+        assert_eq!(hits.len(), 1, "a cell value finds its sheet");
+        assert_eq!(hits[0].id, "s3");
+    }
+
     fn count(c: &rusqlite::Connection, sql: &str) -> i64 {
         c.query_row(sql, [], |r| r.get(0)).unwrap()
     }
     fn document_writable_by_on(c: &rusqlite::Connection, id: &str, profile_id: &str) -> bool {
         c.query_row(
-            &format!("SELECT EXISTS(SELECT 1 FROM documents d WHERE d.id=?3 AND {})", document_write_scope()),
+            &format!(
+                "SELECT EXISTS(SELECT 1 FROM documents d WHERE d.id=?3 AND {})",
+                document_write_scope()
+            ),
             rusqlite::params![profile_id, false, id],
             |row| row.get(0),
         )

@@ -59,6 +59,14 @@
   white-space: nowrap;
 }
 .cw-pill strong { color: var(--ink); font-weight: 700; }
+/* The members chip of a project channel is a LINK to where membership is decided. */
+.cw-pill-link { text-decoration: none; cursor: pointer; }
+.cw-pill-link:hover { border-color: var(--ink); color: var(--ink); }
+/* A FREE channel owns its roster, so its chip is a BUTTON that opens the Team panel.
+   Same shape as the other chips — the act is the count, not a second control beside it. */
+.cw-pill-button { cursor: pointer; font: inherit; font-size: 13px; }
+.cw-pill-button:hover { border-color: var(--ink); color: var(--ink); }
+.cw-pill-button[aria-expanded="true"] { border-color: var(--ink); color: var(--ink); }
 
 .cw-error { margin: 8px 0 0; color: var(--danger, #c2384a); font-size: 0.9rem; }
 
@@ -88,7 +96,7 @@
   grid-template-columns: minmax(0, 1fr);
   overflow: hidden;
 }
-.cw-body.with-rail { grid-template-columns: minmax(0, 1fr) 308px; }
+.cw-body.with-rail { grid-template-columns: minmax(0, 1fr) var(--cw-rail-width, 308px); }
 .cw-panel { min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: auto; }
 .cw-panel.cw-chat { overflow: hidden; }
 
@@ -163,6 +171,25 @@
   color: var(--muted);
   font-size: 13.5px;
 }
+.cw-card-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.cw-card-head h2 { margin: 0 0 12px; }
+.cw-card-close {
+  border: 0; background: none; cursor: pointer;
+  color: var(--muted); font-size: 18px; line-height: 1;
+  padding: 0 2px; margin-bottom: 12px;
+}
+.cw-card-close:hover { color: var(--ink); }
+.cw-person-row { min-height: 34px; }
+.cw-person-name { color: var(--ink); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cw-person-remove {
+  border: 0; background: none; cursor: pointer;
+  color: var(--muted); font-size: 12.5px; font-weight: 650; padding: 0 2px;
+}
+.cw-person-remove:hover:not(:disabled) { color: var(--red-ink, var(--danger, #c2384a)); }
+.cw-person-remove:disabled { opacity: .5; cursor: default; }
+.cw-team-add { margin-top: 12px; }
+.cw-team .cw-quiet + .cw-person { margin-top: 8px; }
+
 .cw-mini {
   width: 26px; height: 26px;
   border-radius: 9px;
@@ -202,3 +229,5 @@ cursor: pointer;
 .cw-rail-toggle:hover,
 .cw-rail-toggle.active { color: var(--ink); }
 .cw-rail-toggle.active { border-color: var(--teal); }
+.cw-dm-title { display: flex; align-items: center; gap: 9px; }
+.cw-presence { width: 8px; height: 8px; border-radius: 50%; background: var(--teal); }

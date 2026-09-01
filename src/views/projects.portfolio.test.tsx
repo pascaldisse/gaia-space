@@ -165,6 +165,17 @@ describe("portfolio summary and open-issue counts", () => {
       .toEqual(["All projects", "Needs attention", "Due soon"]);
   });
 
+  test("done projects stay out of the running list until requested, then carry their own section and badge", async () => {
+    stubTauriIpc(); setProfileId("p-owner");
+    reply = (cmd) => cmd === "list_projects" ? [project(), project({ id: "done", name: "Shipped", status: "done" })] : [];
+    const host = await mount();
+    expect(host.querySelectorAll(".project-card")).toHaveLength(1);
+    (host.querySelector<HTMLButtonElement>(".portfolio-archive-toggle")!).click();
+    await settle();
+    expect(host.querySelector(".project-list-section")?.textContent).toBe("Done");
+    expect([...host.querySelectorAll(".project-card")].find(card => card.textContent?.includes("Shipped"))?.querySelector(".project-done-badge")?.textContent).toBe("Done");
+  });
+
   test("a refused issue read is an error on screen, never a silent zero", async () => {
     stubTauriIpc();
     setProfileId("p-owner");

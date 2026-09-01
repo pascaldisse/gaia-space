@@ -224,3 +224,6 @@
 .theme-space-light .pw-channel-count { background: var(--teal-soft); color: var(--teal-ink, #0d6e63); }
 .theme-space-light .pw-channel-tools { background: var(--paper); border-bottom: 1px solid var(--line); }
 .theme-space-light .pw-channel-title { color: var(--ink); }
+
+.pw-done { white-space: nowrap; }
+.pw-status-done { margin-left: 8px; vertical-align: middle; }

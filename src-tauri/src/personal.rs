@@ -387,9 +387,11 @@ fn emit_todo_activity_on(c: &Connection, todo: &Todo, event_type: &str) -> Resul
     let actor = display_name_on(c, &todo.profile_id)?;
     let context = match todo.project_id.as_deref() {
         Some(project_id) => err(c
-            .query_row("SELECT name FROM projects WHERE id=?1", [project_id], |row| {
-                row.get::<_, String>(0)
-            })
+            .query_row(
+                "SELECT name FROM projects WHERE id=?1",
+                [project_id],
+                |row| row.get::<_, String>(0),
+            )
             .optional())?,
         None => None,
     };
@@ -2455,7 +2457,10 @@ mod tests {
             rows
         }
         // The project's people hear it; the person who acted never notifies herself.
-        assert_eq!(recipients(&c, "todo.created"), vec!["q".to_string(), "r".to_string()]);
+        assert_eq!(
+            recipients(&c, "todo.created"),
+            vec!["q".to_string(), "r".to_string()]
+        );
         // The actor is stated, by the documented convention, never guessed.
         let body: Option<String> = c
             .query_row(
@@ -2469,7 +2474,10 @@ mod tests {
         // Completion is the 0 → 1 EDGE: announced once, not on every re-tick.
         set_todo_completion_on(&mut c, &todo.id, true).unwrap();
         set_todo_completion_on(&mut c, &todo.id, true).unwrap();
-        assert_eq!(recipients(&c, "todo.completed"), vec!["q".to_string(), "r".to_string()]);
+        assert_eq!(
+            recipients(&c, "todo.completed"),
+            vec!["q".to_string(), "r".to_string()]
+        );
     }
 
     /// A private to-do has no audience, so it makes no noise: news needs someone
@@ -3035,7 +3043,10 @@ mod tests {
 
         // The assignee is refused, and the refusal leaves the task and its junction rows.
         let refused = delete_todo_on(&mut c, "shared".into(), "r").unwrap_err();
-        assert!(refused.contains("author, the project owner or an admin"), "{refused}");
+        assert!(
+            refused.contains("author, the project owner or an admin"),
+            "{refused}"
+        );
         assert!(todo_on(&c, "shared").unwrap().is_some());
         assert_eq!(
             c.query_row::<i64, _, _>(
@@ -3328,5 +3339,4 @@ mod dashboard_preference_tests {
             "Vacation"
         );
     }
-
 }

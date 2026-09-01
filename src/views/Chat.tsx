@@ -1,6 +1,6 @@
 import { createResource, createSignal, createEffect, onCleanup, For, Show } from "solid-js";
 import { useDeepLink, linkProps, route } from "../router";
-import { currentUser, isWeb, setProjectId } from "../session";
+import { currentUser, isWeb, projects, reloadProjects, setProjectId } from "../session";
 import { navLayout } from "../nav";
 import { actingProfileId, bumpChannels, setActingProfileId } from "../chatIdentity";
 import { chatHeaderLabel } from "../chatPartition";
@@ -62,12 +62,7 @@ const GROUP_ORDER: { key: ChannelContentType; label: string }[] = [
 ];
 
 const QUICK_EMOJI = ["👍", "❤️", "😂", "🎉", "👀"];
-const POLL_OPTIONS = [
-  { label: "2s", ms: 2000 },
-  { label: "5s", ms: 5000 },
-  { label: "10s", ms: 10000 },
-  { label: "off", ms: 0 },
-];
+const CHAT_POLL_MS = Number(import.meta.env.VITE_CHAT_POLL_MS) || 5000;
 
 /** Two-letter monogram for the message avatar (light shell only). */
 
@@ -112,7 +107,7 @@ export default function Chat(props: { embedded?: boolean } = {}) {
   });
 
   // polling
-  const [pollMs, setPollMs] = createSignal(5000);
+  const pollMs = CHAT_POLL_MS;
 
   // channels (sidebar), grouped by content_type, with unread + member meta
   const [channels, { refetch: refetchChannels }] = createResource(actingProfileId, (id) =>
@@ -386,11 +381,20 @@ const [showJumpToLatest, setShowJumpToLatest] = createSignal(false);
   );
   const memberIds = () => new Set((members() ?? []).map((m) => m.profile_id));
   const [showMembers, setShowMembers] = createSignal(false);
+  /** A project-bound channel does not own its membership: the project's people ARE the
+   *  channel's people (backend `EFFECTIVE_MEMBERS_SQL`). So this panel must not offer
+   *  add/remove/join/leave there — the acts would be refused — and says where they live. */
+  const inheritsMembers = () => !!activeChannel()?.project_id;
+  const memberProject = () => {
+    const owner = activeChannel()?.project_id;
+    if (!owner) return undefined;
+    if (!projects()) void reloadProjects().catch(() => undefined);
+    return projects()?.find((p) => p.id === owner);
+  };
 
   // polling loop — refreshes whatever is currently on screen
   createEffect(() => {
-    const ms = pollMs();
-    if (!ms) return;
+    const ms = pollMs;
     const t = setInterval(() => {
       refetchChannels();
       refetchMessages();
@@ -1301,21 +1305,6 @@ const [showJumpToLatest, setShowJumpToLatest] = createSignal(false);
             {newChannelType() === "dm" ? "Start chat" : "Create"}
           </button>
         </div>
-
-        <div class="poll-picker">
-          Refresh:
-          <For each={POLL_OPTIONS}>
-            {(opt) => (
-              <button
-                class="ghost small"
-                classList={{ active: pollMs() === opt.ms }}
-                onClick={() => setPollMs(opt.ms)}
-              >
-                {opt.label}
-              </button>
-            )}
-          </For>
-        </div>
       </aside>
       </Show>
 
@@ -1360,20 +1349,6 @@ const [showJumpToLatest, setShowJumpToLatest] = createSignal(false);
                 </button>
               )}</For>
             </Show>
-          </div>
-        </Show>
-
-        {/* Without the legacy sidebar the refresh cadence would be unreachable, so it
-            rides here as a compact control next to the channel's messages. Polling still
-            runs by itself; this only says how often, plus one immediate refresh. */}
-        <Show when={!showLegacySidebar()}>
-          <div class="chat-pane-tools" aria-label="Message refresh">
-            <button class="chat-tool-btn" type="button" title="Refresh now" aria-label="Refresh now" onClick={() => { void refetchMessages(); void refetchChannels(); }}>⟳</button>
-            <For each={POLL_OPTIONS}>
-              {(opt) => (
-                <button class="chat-tool-btn" type="button" classList={{ active: pollMs() === opt.ms }} onClick={() => setPollMs(opt.ms)}>{opt.label}</button>
-              )}
-            </For>
           </div>
         </Show>
 
@@ -1535,7 +1510,7 @@ const [showJumpToLatest, setShowJumpToLatest] = createSignal(false);
         <Show when={showMembers()}>
           <div class="members-panel">
             <div class="section-label" style="padding:0 0 0.4em">
-              Members
+              Members ({members()?.length ?? 0})
             </div>
             <ul>
               <For each={members()}>
@@ -1544,33 +1519,49 @@ const [showJumpToLatest, setShowJumpToLatest] = createSignal(false);
                     <span>
                       {profileName(m.profile_id)} {m.administrator ? "★" : ""}
                     </span>
-                    <button class="ghost small" onClick={() => removeMember(m.profile_id)}>
-                      ×
-                    </button>
+                    <Show when={!inheritsMembers()}>
+                      <button class="ghost small" onClick={() => removeMember(m.profile_id)}>
+                        ×
+                      </button>
+                    </Show>
                   </li>
                 )}
               </For>
             </ul>
-            <select onChange={(e) => e.currentTarget.value && addMember(e.currentTarget.value)}>
-              <option value="">+ add member…</option>
-              <For each={profiles()?.filter((p) => !memberIds().has(p.id))}>
-                {(p) => <option value={p.id}>{p.display_name}</option>}
-              </For>
-            </select>
-            <div class="row-actions">
-              <Show
-                when={actingProfileId() && memberIds().has(actingProfileId()!)}
-                fallback={
-                  <button class="ghost small" onClick={joinActive}>
-                    Join
+            {/* INHERITED, and it says so — with the one link that can actually change it. */}
+            <Show when={inheritsMembers()} fallback={<>
+              <select onChange={(e) => e.currentTarget.value && addMember(e.currentTarget.value)}>
+                <option value="">+ add member…</option>
+                <For each={profiles()?.filter((p) => !memberIds().has(p.id))}>
+                  {(p) => <option value={p.id}>{p.display_name}</option>}
+                </For>
+              </select>
+              <div class="row-actions">
+                <Show
+                  when={actingProfileId() && memberIds().has(actingProfileId()!)}
+                  fallback={
+                    <button class="ghost small" onClick={joinActive}>
+                      Join
+                    </button>
+                  }
+                >
+                  <button class="ghost small" onClick={leaveActive}>
+                    Leave
                   </button>
-                }
+                </Show>
+              </div>
+            </>}>
+              <p class="hint members-inherited">
+                Everyone in {memberProject()?.name ?? "this project"} is in this channel.
+                Membership is managed with the project.
+              </p>
+              <a
+                class="row-link members-manage"
+                {...linkProps({ view: "Project Settings", projectId: activeChannel()!.project_id! })}
               >
-                <button class="ghost small" onClick={leaveActive}>
-                  Leave
-                </button>
-              </Show>
-            </div>
+                Manage project members →
+              </a>
+            </Show>
           </div>
         </Show>
 

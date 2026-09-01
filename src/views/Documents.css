@@ -615,9 +615,16 @@ a.documents-library-card { cursor: grab; }
   border-bottom: var(--dk-hairline) solid var(--dk-line);
   flex-wrap: wrap;
 }
+/* A DOCUMENT'S NAME IS NOT A CHIP. With `flex-basis: 0` the title was the first thing
+   the toolbar squeezed, so a sheet head read "Sheet roundtri" while the same head in
+   the markdown editor read differently — one page, one measure. The title still claims
+   the leftover room (`flex-grow: 1`), but its BASIS is the width a name actually needs:
+   at 24em the sheet head demanded a whole line for itself and pushed "Save version"
+   alone onto a second one. A head is one line — title and action together. */
 .editor-title {
-  flex: 1;
-  min-width: var(--dk-title-min-w);
+  flex: 1 1 14em;
+  min-width: min(100%, var(--dk-title-min-w));
+  text-overflow: ellipsis;
   background: var(--dk-field-bg);
   color: inherit;
   border: var(--dk-hairline) solid var(--dk-field-border);

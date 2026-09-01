@@ -39,15 +39,17 @@ pub mod documents;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod events;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
+pub mod finance;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod git;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod ics;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod issues;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
-pub mod meetings;
-#[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod leads;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+pub mod meetings;
 
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod auth_modules;
@@ -470,6 +472,7 @@ pub fn run() {
             documents::set_document_favorite,
             documents::move_favorite_document,
             documents::ensure_project_document_root,
+            documents::ensure_organization_library_root,
             documents::create_document,
             documents::update_document,
             documents::move_document,
@@ -593,6 +596,20 @@ pub fn run() {
             channel_notes::create_channel_note,
             channel_notes::update_channel_note,
             channel_notes::delete_channel_note,
+            finance::finance_access_check,
+            finance::list_finance_access,
+            finance::grant_finance_access,
+            finance::revoke_finance_access,
+            finance::list_finance_entries,
+            finance::create_finance_entry,
+            finance::update_finance_entry,
+            finance::delete_finance_entry,
+            finance::list_finance_plan,
+            finance::upsert_finance_plan,
+            finance::delete_finance_plan,
+            finance::seed_finance_plan,
+            finance::import_finance_plan,
+            finance::import_splitwise_csv,
             personal::list_absences,
             personal::create_absence,
             personal::update_absence,
@@ -727,7 +744,9 @@ mod command_registration_tests {
         for entry in std::fs::read_dir(&dir).expect("src") {
             let path = entry.expect("entry").path();
             let stem = match path.file_stem().and_then(|s| s.to_str()) {
-                Some(stem) if path.extension().and_then(|e| e.to_str()) == Some("rs") => stem.to_string(),
+                Some(stem) if path.extension().and_then(|e| e.to_str()) == Some("rs") => {
+                    stem.to_string()
+                }
                 _ => continue,
             };
             if stem == "lib" || stem == "main" {
@@ -736,7 +755,10 @@ mod command_registration_tests {
             let source = std::fs::read_to_string(&path).expect("module source");
             let mut lines = source.lines().peekable();
             while let Some(line) = lines.next() {
-                if !line.trim_start().starts_with("#[cfg_attr(feature = \"desktop\", tauri::command)]") {
+                if !line
+                    .trim_start()
+                    .starts_with("#[cfg_attr(feature = \"desktop\", tauri::command)]")
+                {
                     continue;
                 }
                 // Skip doc comments and attributes between the marker and the fn.

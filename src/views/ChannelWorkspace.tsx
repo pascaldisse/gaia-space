@@ -1,5 +1,8 @@
 import { For, Show, createEffect, createMemo, createResource, createSignal, type JSX } from "solid-js";
 import { chatApi, type Channel } from "../api/chat";
+import { selectedChannel } from "../chatChannelSelection";
+import { isDirectMessage, dmLabel } from "../chatPartition";
+import { Avatar } from "../components/Avatar";
 import { bumpChannels } from "../chatIdentity";
 import { meetingsApi } from "../api/meetings";
 import { personalApi } from "../api/personal";
@@ -78,20 +81,32 @@ export default function ChannelWorkspace(): JSX.Element {
   // Identity: web is bound to the authenticated profile, desktop to the acting one.
   const actingProfileId = () => currentUser()?.profile_id ?? profileId();
 
-  const [channel, { refetch: refetchChannel }] = createResource(channelId, (id) =>
+  const [loadedChannel, { refetch: refetchChannel }] = createResource(channelId, (id) =>
     id ? chatApi.getChannel(id) : Promise.resolve<Channel | null>(null),
   );
+  const channel = () => loadedChannel()?.id === channelId()
+    ? loadedChannel()
+    : selectedChannel()?.id === channelId() ? selectedChannel() : null;
+  const channelProjectId = () => channel()?.project_id ?? "";
+  const seededHeader = () => selectedChannel()?.id === channelId() ? selectedChannel()?.headerLabel : undefined;
+  const channelTitle = () => {
+    const current = channel();
+    if (!current) return "";
+    return seededHeader() ?? (isDirectMessage(current) ? dmLabel(current, actingProfileId()) : current.name ?? current.content_type);
+  };
   void reloadProjects().catch(() => undefined);
   void reloadProfiles().catch(() => undefined);
 
   const project = createMemo(() => {
-    const projectIdOfChannel = channel()?.project_id;
+    const projectIdOfChannel = channelProjectId();
     return projectIdOfChannel ? projects()?.find((item) => item.id === projectIdOfChannel) : undefined;
   });
   const projectIdOf = () => project()?.id ?? "";
 
   // --- real sources only. A chip without a source is omitted, never faked. -------------
-  const [members] = createResource(channelId, (id) => (id ? chatApi.listChannelMembers(id) : Promise.resolve([])));
+  const [members, { refetch: refetchMembers }] = createResource(channelId, (id) =>
+    id ? chatApi.listChannelMembers(id) : Promise.resolve([]),
+  );
   const [mentions] = createResource(actingProfileId, (id) =>
     id ? chatApi.listMentionsForProfile(id, true) : Promise.resolve([]),
   );
@@ -124,6 +139,45 @@ export default function ChannelWorkspace(): JSX.Element {
     return person?.display_name || person?.username || id;
   };
   const roleOf = (id: string) => (project()?.lead_id === id ? "Responsible" : "Member");
+
+  /* ── WHO IS IN A PROJECT-LESS CONVERSATION ────────────────────────────────
+     A channel with a project inherits its people and the backend REFUSES edits to
+     that roster (chat::guard_inherited_membership), so this surface only ever offers
+     the controls where they can succeed: a free channel, which owns its own roster.
+     The affordance is the members chip itself — it opens the Team panel in the rail,
+     the same rail a project channel already has. One place, two sources of truth
+     never. DMs are excluded: their two people ARE the conversation's identity. */
+  const ownsMembership = () => !!channel() && !project() && channel()?.content_type !== "dm";
+  const [memberBusy, setMemberBusy] = createSignal(false);
+  const [memberError, setMemberError] = createSignal("");
+  const memberIdSet = () => new Set((members() ?? []).map((entry) => entry.profile_id));
+  /** Candidates are real profiles only, minus the people already in — a name can
+      never be offered twice, and nobody outside the profile list can be added. */
+  const addable = () =>
+    (profiles() ?? []).filter((person) => !person.archived && !memberIdSet().has(person.id));
+
+  const runMemberAction = async (action: () => Promise<void>) => {
+    setMemberError("");
+    setMemberBusy(true);
+    try {
+      await action();
+      await refetchMembers();
+    } catch (reason) {
+      setMemberError(humanError(reason));
+    } finally {
+      setMemberBusy(false);
+    }
+  };
+  const addMember = (personId: string) => {
+    const id = channelId();
+    if (!id || !personId || !ownsMembership()) return;
+    void runMemberAction(() => chatApi.addChannelMember(id, personId, false));
+  };
+  const removeMember = (personId: string) => {
+    const id = channelId();
+    if (!id || !personId || !ownsMembership()) return;
+    void runMemberAction(() => chatApi.removeChannelMember(id, personId));
+  };
 
   /* THE REDIRECT. A shipped `/channel/<id>/tasks` link must still land on the tasks
      of that channel's project — it just lands there in the ONE place those tasks
@@ -213,7 +267,9 @@ export default function ChannelWorkspace(): JSX.Element {
         <div class="cw-title-row">
           <div class="cw-title">
             <Show when={project()}>{(value) => <div class="cw-kicker">{value().name}</div>}</Show>
-            <h1># {channel()?.name ?? "Channel"}</h1>
+            <Show when={channel()?.content_type === "dm"} fallback={<h1># {channelTitle()}</h1>}>
+            <div class="cw-dm-title"><Avatar name={channelTitle()} avatarUrl={selectedChannel()?.avatarUrl} size={30} /><h1>{channelTitle()}</h1><span class="cw-presence" aria-label="Available" /></div>
+          </Show>
             <Show when={channel()?.description}>{(text) => <p class="cw-subtitle">{text()}</p>}</Show>
             {/* A FACT IS NOT A LABEL ON A CONTROL. "Not part of a project yet" used to
                 be glued to the left of the picker in a row of its own; it belongs with
@@ -224,8 +280,44 @@ export default function ChannelWorkspace(): JSX.Element {
             </Show>
           </div>
           <div class="cw-metrics">
+            {/* THE COUNT AND THE TEAM RAIL ARE NOW THE SAME PEOPLE. `list_channel_members`
+                returns the effective membership — a project channel inherits the project's
+                people — so the header can no longer say "1 members" over a rail of four.
+                And the number is an ACT: it leads to the place membership is decided,
+                which for a project channel is the project's settings, never here. */}
             <Show when={memberCount() > 0}>
-              <span class="cw-pill"><strong>{memberCount()}</strong> members</span>
+              <Show
+                when={project()}
+                fallback={
+                  <Show
+                    when={ownsMembership()}
+                    fallback={<span class="cw-pill"><strong>{memberCount()}</strong> members</span>}
+                  >
+                    {/* THE CHIP IS THE DOOR. A free channel's roster is editable, so its
+                        count is a control, not a caption: it opens the Team panel where
+                        people are added and removed. */}
+                    <button
+                      type="button"
+                      class="cw-pill cw-pill-button"
+                      aria-expanded={teamOpen()}
+                      title="Add or remove people in this conversation"
+                      onClick={() => setTeamOpen((open) => !open)}
+                    >
+                      <strong>{memberCount()}</strong> members · manage
+                    </button>
+                  </Show>
+                }
+              >
+                {(owner) => (
+                  <a
+                    class="cw-pill cw-pill-link"
+                    title={`Members come from ${owner().name}. Manage them in the project's settings.`}
+                    {...linkProps({ view: "Project Settings", projectId: owner().id })}
+                  >
+                    <strong>{memberCount()}</strong> members · from {owner().name}
+                  </a>
+                )}
+              </Show>
             </Show>
             {/* Waiting on me -> amber, but ONLY when there is something to wait for:
                 `metricTone` refuses a tone to zero, so this chip can never become a
@@ -287,7 +379,7 @@ export default function ChannelWorkspace(): JSX.Element {
         </Show>
       </header>
 
-      <div class="cw-body" classList={{ "with-rail": !!project() }}>
+      <div class="cw-body" classList={{ "with-rail": !!channelProjectId() || teamOpen() }}>
         <section class="cw-panel cw-chat">
           {/* THE ONLY BODY THIS SURFACE HAS NOW: the messages. The five guest views
               that used to be mounted here are mounted by views/ProjectWorkspace.tsx
@@ -296,8 +388,60 @@ export default function ChannelWorkspace(): JSX.Element {
           <Chat embedded />
         </section>
 
-        <Show when={project()}>
-          {(value) => (
+        {/* THE FREE CHANNEL'S TEAM PANEL. Same rail, same card language as the project
+            channel's — it just holds the controls the project channel is refused. */}
+        <Show when={ownsMembership() && teamOpen()}>
+          <aside class="cw-rail" aria-label="Channel members">
+            <section class="cw-card cw-team">
+              <div class="cw-card-head">
+                <h2>Team</h2>
+                <button type="button" class="cw-card-close" aria-label="Close members" onClick={() => setTeamOpen(false)}>×</button>
+              </div>
+              <p class="cw-quiet">Everyone here can read and write in #{channel()?.name}.</p>
+              <For each={members()}>
+                {(entry) => (
+                  <div class="cw-person cw-person-row">
+                    <span class="cw-mini" aria-hidden="true">{initials(nameOf(entry.profile_id))}</span>
+                    <span class="cw-person-name">{nameOf(entry.profile_id)}</span>
+                    <button
+                      type="button"
+                      class="cw-person-remove"
+                      disabled={memberBusy()}
+                      aria-label={`Remove ${nameOf(entry.profile_id)}`}
+                      onClick={() => removeMember(entry.profile_id)}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                )}
+              </For>
+              <div class="cw-team-add">
+                <PillMenu
+                  label="Add member"
+                  value=""
+                  placeholder="Add person…"
+                  disabled={memberBusy() || !addable().length}
+                  onChange={(id) => addMember(id)}
+                  options={[
+                    { value: "", label: "Add person…", disabled: true },
+                    ...addable().map((person) => ({
+                      value: person.id,
+                      label: person.display_name || person.username,
+                    })),
+                  ]}
+                />
+              </div>
+              <Show when={!addable().length}>
+                <p class="cw-quiet">Everyone with a profile is already in this conversation.</p>
+              </Show>
+              <Show when={memberError()}>
+                <p class="cw-error" role="alert">{memberError()}</p>
+              </Show>
+            </section>
+          </aside>
+        </Show>
+
+        <Show when={channelProjectId()}>
             <aside class="cw-rail" aria-label="Project details">
               <div class="cw-rail-tabs" role="group" aria-label="Project details">
                 <button type="button" class="cw-rail-toggle" classList={{ active: statusOpen() }} aria-controls="cw-project-status" aria-expanded={statusOpen()} onClick={() => setStatusOpen((open) => !open)}>
@@ -309,7 +453,7 @@ export default function ChannelWorkspace(): JSX.Element {
               </div>
               <Show when={statusOpen()}>
                 <section id="cw-project-status" class="cw-card">
-                  <h2>{value().name} · Project status</h2>
+                  <h2>{project()?.name ?? "Project"} · Project status</h2>
                   <div class="cw-stat"><span>Open tasks</span><strong>{dashboard()?.open_todos ?? "—"}</strong></div>
                   <div class="cw-stat"><span>Tickets</span><strong>{dashboard()?.open_issues ?? "—"}</strong></div>
                   <div class="cw-stat"><span>Next meeting</span><strong>{nextMeeting() ? hhmm(nextMeeting()!.starts_at) : "—"}</strong></div>
@@ -319,7 +463,7 @@ export default function ChannelWorkspace(): JSX.Element {
               <Show when={teamOpen()}>
                 <section id="cw-project-team" class="cw-card">
                   <h2>Team</h2>
-                  <Show when={(memberIds() ?? []).length} fallback={<EmptyState title="Nobody is in this project yet" actions={<GhostPill {...linkProps({ view: "Members" })}>Add people</GhostPill>} />}>
+                  <Show when={(memberIds() ?? []).length} fallback={<EmptyState title="Nobody is in this project yet" actions={<GhostPill {...linkProps({ view: "Project Settings", projectId: project()?.id ?? "" })}>Add people</GhostPill>} />}>
                     <For each={memberIds()}>
                       {(id) => <div class="cw-person"><span class="cw-mini" aria-hidden="true">{initials(nameOf(id))}</span><span>{nameOf(id)} · {roleOf(id)}</span></div>}
                     </For>
@@ -327,7 +471,6 @@ export default function ChannelWorkspace(): JSX.Element {
                 </section>
               </Show>
             </aside>
-          )}
         </Show>
       </div>
     </div>

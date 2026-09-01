@@ -1,6 +1,12 @@
-/** Space chat ↔ GAIA room bridge. All endpoints and timing are configurable. */
+/** Space chat ↔ GAIA room bridge. All endpoints and timing are configurable.
+ *  Two modes: `mappings` (an explicit routing table) and `whole-space` (every discovered
+ *  Space channel gets its own GAIA room, plus a hub room — see whole-space.ts). */
+import { channelDiscoveryOn, createWholeSpace, digestDue, digestText, FileMappingStore, HttpGaiaProvisioning, mappingsOf, parseWholeSpace, type WholeSpaceConfig } from "./whole-space.ts";
+
 export type Mapping = { spaceChannelId: string; roomId: string };
 export type Config = {
+  mode: "mappings" | "whole-space";
+  wholeSpace?: WholeSpaceConfig;
   mappings: Mapping[];
   space: { baseUrl: string; username?: string; password?: string; sessionCookie?: string; pollIntervalMs: number; requestTimeoutMs: number };
   gaia: { baseUrl: string; workspaceId: string; replyTimeoutMs: number; pollIntervalMs: number; requestTimeoutMs: number };
@@ -8,7 +14,7 @@ export type Config = {
 export type SpaceMessage = { id: string; channel_id: string; author_id: string | null; text: string; created_at: number; thread_of: string | null; archived: boolean };
 export type GaiaEvent = { id: string; author: string; text: string };
 
-const defaults: Omit<Config, "mappings"> = {
+const defaults: Omit<Config, "mappings" | "mode" | "wholeSpace"> = {
   space: { baseUrl: "http://127.0.0.1:8090", pollIntervalMs: 1_000, requestTimeoutMs: 15_000 },
   gaia: { baseUrl: "http://127.0.0.1:8787", workspaceId: "", replyTimeoutMs: 120_000, pollIntervalMs: 1_000, requestTimeoutMs: 15_000 },
 };
@@ -24,8 +30,13 @@ const positive = (value: unknown, name: string, fallback: number) => {
 export function parseConfig(raw: unknown): Config {
   if (!raw || typeof raw !== "object") throw new Error("config must be an object");
   const input = raw as Record<string, unknown>;
-  if (!Array.isArray(input.mappings)) throw new Error("config mappings must be an array");
-  const mappings = input.mappings.map((item, index) => {
+  const wholeSpace = parseWholeSpace(input.wholeSpace);
+  const mode = input.mode === undefined ? (wholeSpace ? "whole-space" : "mappings") : input.mode;
+  if (mode !== "mappings" && mode !== "whole-space") throw new Error('config mode must be "mappings" or "whole-space"');
+  if (mode === "whole-space" && !wholeSpace) throw new Error("config wholeSpace is required in whole-space mode");
+  // In whole-space mode the routing table is derived and persisted, so `mappings` is optional.
+  if (!Array.isArray(input.mappings) && mode === "mappings") throw new Error("config mappings must be an array");
+  const mappings = (Array.isArray(input.mappings) ? input.mappings : []).map((item, index) => {
     if (!item || typeof item !== "object") throw new Error(`config mappings[${index}] must be an object`);
     const mapping = item as Record<string, unknown>;
     return { spaceChannelId: requiredString(mapping.spaceChannelId, `mappings[${index}].spaceChannelId`), roomId: requiredString(mapping.roomId, `mappings[${index}].roomId`) };
@@ -41,7 +52,7 @@ export function parseConfig(raw: unknown): Config {
     requestTimeoutMs: positive(spaceInput.requestTimeoutMs, "space.requestTimeoutMs", defaults.space.requestTimeoutMs),
   };
   if (!space.sessionCookie && (!space.username || !space.password)) throw new Error("config space requires sessionCookie or username and password");
-  return { mappings, space, gaia: {
+  return { mode, wholeSpace, mappings, space, gaia: {
     baseUrl: typeof gaiaInput.baseUrl === "string" ? requiredString(gaiaInput.baseUrl, "gaia.baseUrl") : defaults.gaia.baseUrl,
     workspaceId: requiredString(gaiaInput.workspaceId, "gaia.workspaceId"),
     replyTimeoutMs: positive(gaiaInput.replyTimeoutMs, "gaia.replyTimeoutMs", defaults.gaia.replyTimeoutMs),
@@ -59,14 +70,18 @@ export const sleep = (milliseconds: number) => new Promise<void>(resolve => setT
 
 export class RoomLink {
   private readonly seen = new Set<string>();
-  private primed = false;
-  constructor(private readonly mappings: Mapping[], private readonly space: SpaceTransport, private readonly gaia: GaiaTransport, private readonly replyTimeoutMs: number, private readonly replyPollIntervalMs: number) {}
+  // Priming is PER CHANNEL: a channel linked later (whole-space discovery) primes its own
+  // history instead of replaying it, and already-linked channels keep forwarding uninterrupted.
+  private readonly primed = new Set<string>();
+  constructor(private mappings: Mapping[], private readonly space: SpaceTransport, private readonly gaia: GaiaTransport, private readonly replyTimeoutMs: number, private readonly replyPollIntervalMs: number) {}
+  /** Replace the routing table in place, keeping seen/primed state (used after re-discovery). */
+  setMappings(mappings: Mapping[]): void { this.mappings = mappings; }
   async pollOnce(): Promise<number> {
     const bridgeAuthorId = await this.space.bridgeAuthorId();
     let forwarded = 0;
     for (const mapping of this.mappings) {
       const messages = await this.space.listMessages(mapping.spaceChannelId);
-      if (!this.primed) { for (const message of messages) this.seen.add(message.id); continue; }
+      if (!this.primed.has(mapping.spaceChannelId)) { for (const message of messages) this.seen.add(message.id); this.primed.add(mapping.spaceChannelId); continue; }
       for (const message of messages.filter(item => isForwardable(item, bridgeAuthorId, this.seen))) {
         const before = new Set((await this.gaia.events(mapping.roomId)).map(event => event.id));
         await this.gaia.send(mapping.roomId, inboundText(message));
@@ -76,7 +91,6 @@ export class RoomLink {
         forwarded++;
       }
     }
-    this.primed = true;
     return forwarded;
   }
   private async waitForReply(roomId: string, before: ReadonlySet<string>): Promise<GaiaEvent> {
@@ -99,6 +113,10 @@ export class HttpSpaceTransport implements SpaceTransport {
   private cookie: string | undefined;
   private authorId: string | undefined;
   constructor(private readonly config: Config["space"]) { this.cookie = config.sessionCookie; }
+  /** Public JSON command helper so discovery (whole-space.ts) reuses this session, never a second login. */
+  async authenticatedJson(path: string, body: unknown): Promise<unknown> {
+    return (await this.authenticated(path, { method: "POST", body: JSON.stringify(body) })).json();
+  }
   private async authenticated(path: string, init: RequestInit = {}): Promise<Response> {
     if (!this.cookie) await this.login();
     return request(`${this.config.baseUrl.replace(/\/$/, "")}${path}`, { ...init, headers: { "content-type": "application/json", cookie: this.cookie!, ...(init.headers ?? {}) } }, this.config.requestTimeoutMs);
@@ -138,8 +156,42 @@ export class HttpGaiaTransport implements GaiaTransport {
 
 if (import.meta.main) {
   const path = Bun.argv[2] ?? "config.json";
+  const provisionOnly = Bun.argv.includes("--provision-only");
   const config = await loadConfig(path);
-  const link = new RoomLink(config.mappings, new HttpSpaceTransport(config.space), new HttpGaiaTransport(config.gaia), config.gaia.replyTimeoutMs, config.gaia.pollIntervalMs);
-  console.log(`room-link started: ${config.mappings.length} mapping(s)`);
-  for (;;) { try { await link.pollOnce(); } catch (error) { console.error("room-link poll failed:", error); } await sleep(config.space.pollIntervalMs); }
+  const space = new HttpSpaceTransport(config.space);
+  const gaiaTransport = new HttpGaiaTransport(config.gaia);
+
+  if (config.mode === "mappings") {
+    const link = new RoomLink(config.mappings, space, gaiaTransport, config.gaia.replyTimeoutMs, config.gaia.pollIntervalMs);
+    console.log(`room-link started: ${config.mappings.length} mapping(s)`);
+    for (;;) { try { await link.pollOnce(); } catch (error) { console.error("room-link poll failed:", error); } await sleep(config.space.pollIntervalMs); }
+  }
+
+  const wholeSpace = config.wholeSpace!;
+  const gaia = new HttpGaiaProvisioning(config.gaia, gaiaTransport);
+  const runner = createWholeSpace(channelDiscoveryOn(space), gaia, new FileMappingStore(wholeSpace.mappingStatePath), wholeSpace);
+  let result = await runner.provision();
+  console.log(`whole-space started: hub ${wholeSpace.hubRoomId}; linked ${result.created.length + result.existing.length} channel(s) (${result.created.length} new, ${result.skipped.length} filtered out)`);
+  if (provisionOnly) { console.log(JSON.stringify(await runner.store.load(), null, 2)); process.exit(0); }
+
+  const link = new RoomLink(mappingsOf(await runner.store.load()), space, gaiaTransport, config.gaia.replyTimeoutMs, config.gaia.pollIntervalMs);
+  let lastDiscovery = Date.now(), lastDigest = 0;
+  for (;;) {
+    try {
+      const now = Date.now();
+      if (now - lastDiscovery >= wholeSpace.discoveryIntervalMs) {
+        lastDiscovery = now;
+        const next = await runner.provision();
+        if (next.created.length) link.setMappings(mappingsOf(await runner.store.load()));
+        result = next;
+      }
+      if (wholeSpace.hub.digestEnabled && digestDue(lastDigest, now, wholeSpace.hub.digestIntervalMs)) {
+        lastDigest = now;
+        await gaia.send(wholeSpace.hubRoomId, digestText(result, wholeSpace.hubRoomId));
+      }
+      await runner.hub.pollOnce();
+      await link.pollOnce();
+    } catch (error) { console.error("whole-space poll failed:", error); }
+    await sleep(config.space.pollIntervalMs);
+  }
 }

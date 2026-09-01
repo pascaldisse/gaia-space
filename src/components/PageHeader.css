@@ -227,11 +227,17 @@
   padding-right: var(--view-pad-x);
 }
 /* Everything that changes the view rather than the content sits at the far end. */
+/* The controls group wraps like the bar around it: a row that cannot wrap pushes its
+   last button ("Refresh") off the right edge, and an action you cannot reach is not
+   an action. */
 .page-actionbar > .actionbar-view-controls {
   margin-left: auto;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--dk-space-sm, 8px);
+  max-width: 100%;
+  min-width: 0;
 }
 
 
