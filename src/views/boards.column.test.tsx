@@ -19,7 +19,7 @@ afterEach(() => { dispose?.(); dispose = undefined; document.body.innerHTML = ""
 
 const open = { id: "c-open", board_id: "b1", name: "open", ordering: 0, status_ids: ["s-open"] };
 const progress = { id: "c-prog", board_id: "b1", name: "in progress", ordering: 1, status_ids: [] as string[] };
-const issue = { id: "i1", project_id: "p1", number: 3, title: "test issue", description: null, status_id: "s-open", assignee_id: null, assignee_ids: [], created_by: null, due_date: null, priority: null, archived: false };
+const issue = { id: "i1", project_id: "p1", number: 3, title: "test issue", description: null, status_id: "s-open", assignee_id: null, assignee_ids: [] as string[], created_by: null, due_date: null, priority: null, archived: false };
 
 const serve = (boardIssues = [issue]) => {
   globalThis.fetch = (async (url: any, init: any) => {

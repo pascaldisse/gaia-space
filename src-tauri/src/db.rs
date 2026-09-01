@@ -2557,7 +2557,7 @@ mod tests {
         }
         assert!(table_exists(&conn, "channel_notes").expect("channel_notes"));
         migrate(&conn).expect("migrate() is idempotent at head");
-        assert_eq!(head("after second run at head"), 139);
+        assert_eq!(head("after second run at head"), 140);
     }
 
     #[test]
@@ -3550,7 +3550,7 @@ mod v133_contract_tests {
         assert_eq!(
             conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
                 .unwrap(),
-            139
+            140
         );
         let before: String = conn.query_row("SELECT group_concat(sql, '\n') FROM sqlite_master WHERE type IN ('index','trigger') ORDER BY name", [], |r| r.get(0)).unwrap();
         migrate(&conn).unwrap();
