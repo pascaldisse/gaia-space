@@ -71,7 +71,7 @@ test("the matrix carries one column per month and one row per category", async (
   const headers = [...host.querySelectorAll(".finance-matrix thead th")].map(node => node.textContent?.trim());
   expect(headers[0]).toContain("Kategorie");
   expect(headers.length).toBe(10); // Aug 2026 … Mär 2027 plus the name column and Σ
-  expect(headers.at(-1)).toBe("Σ");
+  expect(headers[headers.length-1]).toBe("Σ");
   const categories = [...host.querySelectorAll(".finance-category")].map(row => row.getAttribute("data-category"));
   expect(categories).toContain("Beispielkosten");
   expect(categories).toContain("Beispielumsatz");
