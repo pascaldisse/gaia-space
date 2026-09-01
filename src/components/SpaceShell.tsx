@@ -13,7 +13,7 @@ import { dmLabel, partitionChannels } from "../chatPartition";
 import { chatApi, newId as newMessageId, type ChannelSummary } from "../api/chat";
 import { setSelectedChannel } from "../chatChannelSelection";
 import { personalApi } from "../api/personal";
-import { documentsApi } from "../api/documents";
+import { documentsApi, ORGANIZATION_LIBRARY_ID } from "../api/documents";
 import { platformApi } from "../api/platform";
 import { currentUser, isWeb, profileId, profiles, reloadProfiles, projects, reloadProjects, workspaceId, workspaces } from "../session";
 import { attentionCount, attentionFilterCount, asActivityFilter, setAttentionProfile, unreadChannelTotal, type ActivityFilter } from "../attention";
@@ -43,7 +43,7 @@ const RAIL: { mode: RailMode; label: string; landing: string; icon: IconName; ba
   { mode: "tasks", label: "Tasks", landing: "To-Do", icon: "check" },
   { mode: "projects", label: "Projects", landing: "Projects", icon: "layers" },
   { mode: "calendar", label: "Calendar", landing: "Calendar", icon: "calendar" },
-  { mode: "knowledge", label: "Knowledge", landing: "Documents", icon: "book-nav" },
+  { mode: "knowledge", label: "Library", landing: "Documents", icon: "book-nav" },
   { mode: "development", label: "Development", landing: "Development", icon: "target" },
 ];
 
@@ -339,10 +339,11 @@ export default function SpaceShell(props: {
   /** Knowledge's objects: the organization's books (kb container roots) and, beside them,
    *  one library per project. Read once here so the sidebar can list them; the Documents
    *  view keeps its own reads for the tree it draws. */
-  const [documentFolders] = createResource(() => documentsApi.listDocumentFolders().catch(() => []));
+  const [organizationLibrary] = createResource(() => documentsApi.ensureOrganizationLibraryRoot().catch(() => undefined));
+  const [documentFolders] = createResource(organizationLibrary, () => documentsApi.listDocumentFolders().catch(() => []));
   const orgLibraries = () =>
     (documentFolders() ?? [])
-      .filter((folder) => folder.container_type === "kb" && folder.parent_id === null && !folder.archived)
+      .filter((folder) => folder.container_type === "kb" && folder.parent_id === null && !folder.archived && folder.id !== ORGANIZATION_LIBRARY_ID)
       .filter((folder) => matches(folder.name ?? ""))
       .sort((a, b) => (a.name ?? "").localeCompare(b.name ?? ""));
   const workspaceName = () =>
@@ -704,14 +705,14 @@ export default function SpaceShell(props: {
               link: arriving from a project library must actually switch the source. */}
           <a
             class="side-link strong"
-            classList={{ active: (route().containerType ?? "my-docs") === "my-docs" }}
-            {...navLink(() => ({ view: "Documents", containerType: "my-docs", containerId: actingProfileId() ?? undefined }))}
+            classList={{ active: route().containerType === "kb" && route().containerId === ORGANIZATION_LIBRARY_ID }}
+            {...navLink(() => ({ view: "Documents", containerType: "kb", containerId: ORGANIZATION_LIBRARY_ID }))}
           >
             <span class="side-icon" aria-hidden="true"><Icon name="book-nav" size={15} /></span>
-            My Documents
+            Library
           </a>
           <div class="section">
-            <div class="section-head"><span>Organization library</span></div>
+            <div class="section-head"><span>Other organization libraries</span></div>
             <For each={orgLibraries()}>
               {(book) => (
                 <a

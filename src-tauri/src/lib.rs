@@ -472,6 +472,7 @@ pub fn run() {
             documents::set_document_favorite,
             documents::move_favorite_document,
             documents::ensure_project_document_root,
+            documents::ensure_organization_library_root,
             documents::create_document,
             documents::update_document,
             documents::move_document,

@@ -346,6 +346,10 @@ const DOC_COLUMNS: &str =
 /// SQL scope used by the web gateway. Personal/unattached documents never inherit
 /// access from a container: only `created_by` may read them. A project document is
 /// readable by its creator or any member of the attached project.
+/// The organization has one shared root. It is a normal KB book, so document and
+/// folder grants remain the single write-permission model; active organization members
+/// additionally receive its read baseline.
+pub const ORGANIZATION_LIBRARY_ID: &str = "organization-library";
 const DOCUMENT_EXPLICIT_READ_SCOPE: &str = "EXISTS(SELECT 1 FROM document_permissions dp WHERE dp.document_id=d.id AND ((dp.recipient_type='profile' AND dp.recipient_id=?1) OR (dp.recipient_type='team' AND EXISTS(SELECT 1 FROM team_memberships tm WHERE tm.team_id=dp.recipient_id AND tm.profile_id=?1 AND tm.archived=0))))";
 const DOCUMENT_EXPLICIT_WRITE_SCOPE: &str = "EXISTS(SELECT 1 FROM document_permissions dp WHERE dp.document_id=d.id AND dp.access_level='editor' AND ((dp.recipient_type='profile' AND dp.recipient_id=?1) OR (dp.recipient_type='team' AND EXISTS(SELECT 1 FROM team_memberships tm WHERE tm.team_id=dp.recipient_id AND tm.profile_id=?1 AND tm.archived=0))))";
 /// The web gateway embeds these predicates into every document read/write query.
@@ -354,7 +358,7 @@ const DOCUMENT_EXPLICIT_WRITE_SCOPE: &str = "EXISTS(SELECT 1 FROM document_permi
 /// A KB document carries its book id in `container_id`, so a grant on the book folder
 /// is the whole enforcement surface for "editor teams" on a book (§2.3).
 /// A book owner is implicit reader/editor; grants can name profiles or teams.
-const BOOK_READER: &str = "(EXISTS(SELECT 1 FROM kb_book_owners bo WHERE bo.book_id=d.container_id AND bo.profile_id=?1) OR EXISTS(SELECT 1 FROM document_folder_permissions bp WHERE bp.folder_id=d.container_id AND ((bp.recipient_type='profile' AND bp.recipient_id=?1) OR (bp.recipient_type='team' AND EXISTS(SELECT 1 FROM team_memberships tm WHERE tm.team_id=bp.recipient_id AND tm.profile_id=?1 AND tm.archived=0)))))";
+const BOOK_READER: &str = "((d.container_id='organization-library' AND EXISTS(SELECT 1 FROM profiles p WHERE p.id=?1 AND p.archived=0)) OR EXISTS(SELECT 1 FROM kb_book_owners bo WHERE bo.book_id=d.container_id AND bo.profile_id=?1) OR EXISTS(SELECT 1 FROM document_folder_permissions bp WHERE bp.folder_id=d.container_id AND ((bp.recipient_type='profile' AND bp.recipient_id=?1) OR (bp.recipient_type='team' AND EXISTS(SELECT 1 FROM team_memberships tm WHERE tm.team_id=bp.recipient_id AND tm.profile_id=?1 AND tm.archived=0)))))";
 const BOOK_EDITOR: &str = "(EXISTS(SELECT 1 FROM kb_book_owners bo WHERE bo.book_id=d.container_id AND bo.profile_id=?1) OR EXISTS(SELECT 1 FROM document_folder_permissions bp WHERE bp.folder_id=d.container_id AND bp.access_level='editor' AND ((bp.recipient_type='profile' AND bp.recipient_id=?1) OR (bp.recipient_type='team' AND EXISTS(SELECT 1 FROM team_memberships tm WHERE tm.team_id=bp.recipient_id AND tm.profile_id=?1 AND tm.archived=0)))))";
 const BOOK_READ_SCOPE: &str = "(d.container_type='kb' AND ";
 const BOOK_WRITE_SCOPE: &str = "(d.container_type='kb' AND ";
@@ -742,6 +746,29 @@ pub(crate) fn set_document_favorite_on(
         .map_err(|e| e.to_string())?;
     }
     Ok(())
+}
+
+/// Creates the organization-wide shared library on first navigation. This is a
+/// regular KB root, not a parallel store: writes and access grants use the existing
+/// book owner/permission records. `default-org` is the durable administrative owner.
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn ensure_organization_library_root() -> Result<DocumentFolder> {
+    let c = db::conn()?;
+    ensure_organization_library_root_on(&c)
+}
+pub(crate) fn ensure_organization_library_root_on(c: &rusqlite::Connection) -> Result<DocumentFolder> {
+    c.execute(
+        "INSERT OR IGNORE INTO document_folders(id,container_type,container_id,parent_id,name,description,archived) VALUES(?1,'kb',?1,NULL,'Library',NULL,0)",
+        [ORGANIZATION_LIBRARY_ID],
+    ).map_err(|e| e.to_string())?;
+    c.execute(
+        "INSERT OR IGNORE INTO kb_book_owners(book_id,profile_id) VALUES(?1,'default-org')",
+        [ORGANIZATION_LIBRARY_ID],
+    ).map_err(|e| e.to_string())?;
+    c.query_row(
+        "SELECT id,container_type,container_id,parent_id,name,description,archived FROM document_folders WHERE id=?1",
+        [ORGANIZATION_LIBRARY_ID], row_to_folder,
+    ).map_err(|e| e.to_string())
 }
 
 /// The one canonical root per project. It is deterministic, so concurrent first
@@ -1214,7 +1241,7 @@ pub fn restore_doc_version(
 /// (`DOCUMENT_READ_SCOPE` admits `created_by`). This closes the invisibility defect
 /// -- a creator could read their own kb article but never see its container -- without
 /// widening anything: a profile with no readable document in the book still sees nothing.
-const FOLDER_READ_SCOPE: &str = "((f.container_type='my-docs' AND f.container_id=?1) OR (f.container_type='project' AND f.container_id IS NOT NULL AND EXISTS(SELECT 1 FROM projects p WHERE p.id=f.container_id AND (p.created_by=?1 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?1)))) OR (f.container_type='kb' AND (EXISTS(SELECT 1 FROM kb_book_owners bo WHERE bo.book_id=f.container_id AND bo.profile_id=?1) OR EXISTS(SELECT 1 FROM document_folder_permissions bp WHERE bp.folder_id=f.container_id AND ((bp.recipient_type='profile' AND bp.recipient_id=?1) OR (bp.recipient_type='team' AND EXISTS(SELECT 1 FROM team_memberships tm WHERE tm.team_id=bp.recipient_id AND tm.profile_id=?1 AND tm.archived=0)))) OR EXISTS(SELECT 1 FROM documents d WHERE d.container_type='kb' AND d.created_by=?1 AND (d.folder_id=f.id OR d.container_id=f.id)))))";
+const FOLDER_READ_SCOPE: &str = "((f.container_type='my-docs' AND f.container_id=?1) OR (f.container_type='project' AND f.container_id IS NOT NULL AND EXISTS(SELECT 1 FROM projects p WHERE p.id=f.container_id AND (p.created_by=?1 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?1)))) OR (f.container_type='kb' AND ((f.container_id='organization-library' AND EXISTS(SELECT 1 FROM profiles p WHERE p.id=?1 AND p.archived=0)) OR EXISTS(SELECT 1 FROM kb_book_owners bo WHERE bo.book_id=f.container_id AND bo.profile_id=?1) OR EXISTS(SELECT 1 FROM document_folder_permissions bp WHERE bp.folder_id=f.container_id AND ((bp.recipient_type='profile' AND bp.recipient_id=?1) OR (bp.recipient_type='team' AND EXISTS(SELECT 1 FROM team_memberships tm WHERE tm.team_id=bp.recipient_id AND tm.profile_id=?1 AND tm.archived=0)))) OR EXISTS(SELECT 1 FROM documents d WHERE d.container_type='kb' AND d.created_by=?1 AND (d.folder_id=f.id OR d.container_id=f.id)))))";
 const FOLDER_WRITE_SCOPE: &str = "((f.container_type='my-docs' AND f.container_id=?1) OR (f.container_type='project' AND f.container_id IS NOT NULL AND (EXISTS(SELECT 1 FROM projects p WHERE p.id=f.container_id AND p.created_by=?1) OR ?2=1)) OR (f.container_type='kb' AND (EXISTS(SELECT 1 FROM kb_book_owners bo WHERE bo.book_id=f.container_id AND bo.profile_id=?1) OR EXISTS(SELECT 1 FROM document_folder_permissions bp WHERE bp.folder_id=f.container_id AND bp.access_level='editor' AND ((bp.recipient_type='profile' AND bp.recipient_id=?1) OR (bp.recipient_type='team' AND EXISTS(SELECT 1 FROM team_memberships tm WHERE tm.team_id=bp.recipient_id AND tm.profile_id=?1 AND tm.archived=0)))))))";
 fn row_to_folder(r: &rusqlite::Row) -> rusqlite::Result<DocumentFolder> {
     Ok(DocumentFolder {
@@ -1246,10 +1273,12 @@ pub fn document_folder_writable_by(id: &str, profile_id: &str, is_admin: bool) -
 }
 
 pub fn list_document_folders_scoped(profile_id: String) -> Result<Vec<DocumentFolder>> {
-    let c = conn()?;
+    let c = db::conn()?;
+    list_document_folders_scoped_on(&c, &profile_id)
+}
+pub(crate) fn list_document_folders_scoped_on(c: &rusqlite::Connection, profile_id: &str) -> Result<Vec<DocumentFolder>> {
     let mut s = c.prepare(&format!("SELECT id,container_type,container_id,parent_id,name,description,archived FROM document_folders f WHERE {FOLDER_READ_SCOPE} ORDER BY name")).map_err(|e|e.to_string())?;
-    let rows = s
-        .query_map([profile_id], row_to_folder)
+    let rows = s.query_map([profile_id], row_to_folder)
         .map_err(|e| e.to_string())?
         .collect::<std::result::Result<_, _>>()
         .map_err(|e| e.to_string());
@@ -3176,6 +3205,21 @@ mod tests {
             scoped_doc_ids(&c, "stranger", false).is_empty(),
             "ungranted profiles see nothing"
         );
+    }
+
+    #[test]
+    fn organization_library_root_exists_once_and_every_active_member_can_list_it() {
+        let c = test_conn();
+        c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('member-a','a','A',1),('member-b','b','B',1),('former','f','Former',1)", []).unwrap();
+        c.execute("UPDATE profiles SET archived=1 WHERE id='former'", []).unwrap();
+        let root = ensure_organization_library_root_on(&c).unwrap();
+        assert_eq!(root.id, ORGANIZATION_LIBRARY_ID);
+        assert_eq!(root.name, "Library");
+        assert_eq!(ensure_organization_library_root_on(&c).unwrap().id, root.id);
+        for member in ["member-a", "member-b"] {
+            assert!(list_document_folders_scoped_on(&c, member).unwrap().iter().any(|folder| folder.id == ORGANIZATION_LIBRARY_ID));
+        }
+        assert!(!list_document_folders_scoped_on(&c, "former").unwrap().iter().any(|folder| folder.id == ORGANIZATION_LIBRARY_ID));
     }
 
     /// A knowledge-base book is navigable to the profile that owns an article inside it,

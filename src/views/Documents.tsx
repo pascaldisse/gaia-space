@@ -757,7 +757,7 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
       });
       if (batch.successes.length) {
         await refetchDocuments();
-        const last = batch.successes.at(-1);
+        const last = batch.successes[batch.successes.length - 1];
         if (last) setSelectedDocumentId(documentIds.get(last) ?? null);
       }
       if (batch.failures.length) fail(new Error(batch.failures.map(({ item, error }) => `${item.name}: ${String(error)}`).join("; ")));

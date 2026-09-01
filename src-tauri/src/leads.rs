@@ -3,7 +3,11 @@
 //! path. The browser never learns the storage path and ordinary Space members
 //! never receive personal contact data.
 use serde::{Deserialize, Serialize};
-use std::{env, fs, path::Path};
+use std::{
+    env, fs,
+    io::{Seek, SeekFrom, Write},
+    path::{Path, PathBuf},
+};
 
 type Result<T> = std::result::Result<T, String>;
 
@@ -31,20 +35,38 @@ fn read_from(path: &Path) -> Result<Vec<Lead>> {
     Ok(leads)
 }
 
-/// Read the Quest-managed lead store. Production supplies `SPACE_LEADS_PATH`;
-/// requiring it means a desktop/local build cannot accidentally read an
-/// unrelated developer file.
+/// Deployment may override this path for a shared Quest store. The default sits next
+/// to the Space database, where the service account already owns both the file and its
+/// containing directory.
+const DEFAULT_LEADS_PATH: &str = "/var/lib/gaia-space/leads.json";
+
+fn lead_store_path(path: Option<PathBuf>) -> PathBuf {
+    path.or_else(|| env::var_os("SPACE_LEADS_PATH").map(PathBuf::from))
+        .unwrap_or_else(|| PathBuf::from(DEFAULT_LEADS_PATH))
+}
+
 pub fn list_leads() -> Result<Vec<Lead>> {
-    let path = env::var("SPACE_LEADS_PATH").map_err(|_| "lead store unavailable".to_string())?;
-    read_from(Path::new(&path))
+    list_leads_from(None)
+}
+
+fn list_leads_from(path: Option<PathBuf>) -> Result<Vec<Lead>> {
+    read_from(&lead_store_path(path))
 }
 
 /// Remove one entry from the Quest-managed store. Records are rewritten as raw
 /// JSON values so fields Space does not model (consent, future columns) survive
-/// the delete untouched. The write is staged next to the store and renamed, so a
-/// crash can never leave a half-written lead file behind.
+/// the delete untouched. This rewrites the writable store handle itself, matching the
+/// writer used to create leads; it does not require a second writable directory entry
+/// for a staged rename.
 fn delete_from(path: &Path, id: &str) -> Result<()> {
-    let bytes = fs::read(path).map_err(|_| "lead store unavailable".to_string())?;
+    let mut store = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(path)
+        .map_err(|_| "lead store is not writable".to_string())?;
+    let mut bytes = Vec::new();
+    std::io::Read::read_to_end(&mut store, &mut bytes)
+        .map_err(|_| "lead store unavailable".to_string())?;
     let entries: Vec<serde_json::Value> =
         serde_json::from_slice(&bytes).map_err(|_| "lead store is invalid".to_string())?;
     let kept: Vec<serde_json::Value> = entries
@@ -55,15 +77,27 @@ fn delete_from(path: &Path, id: &str) -> Result<()> {
     if kept.len() == entries.len() {
         return Err("lead not found".to_string());
     }
-    let staged = path.with_extension("tmp");
     let encoded = serde_json::to_vec(&kept).map_err(|_| "lead store is invalid".to_string())?;
-    fs::write(&staged, encoded).map_err(|_| "lead store is not writable".to_string())?;
-    fs::rename(&staged, path).map_err(|_| "lead store is not writable".to_string())
+    store
+        .seek(SeekFrom::Start(0))
+        .map_err(|_| "lead store is not writable".to_string())?;
+    store
+        .set_len(0)
+        .map_err(|_| "lead store is not writable".to_string())?;
+    store
+        .write_all(&encoded)
+        .map_err(|_| "lead store is not writable".to_string())?;
+    store
+        .sync_all()
+        .map_err(|_| "lead store is not writable".to_string())
 }
 
 pub fn delete_lead(id: String) -> Result<()> {
-    let path = env::var("SPACE_LEADS_PATH").map_err(|_| "lead store unavailable".to_string())?;
-    delete_from(Path::new(&path), &id)
+    delete_lead_from(None, &id)
+}
+
+fn delete_lead_from(path: Option<PathBuf>, id: &str) -> Result<()> {
+    delete_from(&lead_store_path(path), id)
 }
 
 #[cfg(test)]
@@ -101,7 +135,7 @@ mod tests {
           {"id":"drop","bereich":"software","interesse":"vormerken","name":"Drop","business":"Drop GmbH","address":"B","phone":"2","email":"drop@example.test","consent":true,"createdAt":"2026-08-02T00:00:00.000Z"}
         ]"#).unwrap();
 
-        delete_from(&path, "drop").unwrap();
+        delete_lead_from(Some(path.clone()), "drop").unwrap();
 
         let raw: Vec<serde_json::Value> =
             serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
@@ -111,9 +145,9 @@ mod tests {
             raw[0]["consent"], true,
             "fields Space does not model must survive"
         );
-        assert_eq!(read_from(&path).unwrap()[0].id, "keep");
+        assert_eq!(list_leads_from(Some(path.clone())).unwrap()[0].id, "keep");
         assert_eq!(
-            delete_from(&path, "drop"),
+            delete_lead_from(Some(path.clone()), "drop"),
             Err("lead not found".to_string())
         );
         let _ = fs::remove_file(path);

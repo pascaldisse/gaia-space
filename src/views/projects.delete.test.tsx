@@ -83,7 +83,7 @@ describe("the project list: right-click is the second door", () => {
     const host = await mount(() => <Projects /> as any);
     rightClick(cardOf(host, "Atlas"));
     await settle();
-    expect(menuEntries()).toEqual(["Open", "Set deadline…", "Archive", "Delete project…"]);
+    expect(menuEntries()).toEqual(["Open", "Set deadline…", "Mark done", "Archive", "Delete project…"]);
     expect(menuEntry("Delete project…")?.classList.contains("danger")).toBe(true);
   });
 
@@ -91,7 +91,7 @@ describe("the project list: right-click is the second door", () => {
     const host = await mount(() => <Projects /> as any);
     rightClick(cardOf(host, "Borealis"));
     await settle();
-    expect(menuEntries()).toEqual(["Open", "Archive"]);
+    expect(menuEntries()).toEqual(["Open", "Mark done", "Archive"]);
     expect(document.querySelector(".context-item.disabled")).toBeNull();
   });
 
@@ -149,6 +149,18 @@ describe("the project workspace header: the owner's red button", () => {
     const button = host.querySelector<HTMLButtonElement>(".pw-header-actions .delete-button");
     expect(button).toBeTruthy();
     expect(button!.getAttribute("aria-label")).toBe("Delete project");
+  });
+
+  test("the owner marks the project done from its header", async () => {
+    const host = await mountWorkspace("p-mine");
+    const done = host.querySelector<HTMLButtonElement>(".pw-header-actions .pw-done")!;
+    expect(done.textContent).toBe("Mark done");
+    expect(done.getAttribute("aria-pressed")).toBe("false");
+    done.click();
+    await settle();
+    const writes = calls.filter(call => call.cmd === "update_project");
+    const write = writes[writes.length - 1]!;
+    expect(write.args).toEqual({ project: { ...projects[0], status: "done" } });
   });
 
   test("a non-owner sees NO button — not a disabled one", async () => {

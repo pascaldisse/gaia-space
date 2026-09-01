@@ -32,7 +32,8 @@ export type RoleAssignment = { id: string; role_id: string; profile_id: string |
 /** `lead_id` is the one main responsible person. PURELY INFORMATIONAL: it is never an
  *  authorization input — every project member keeps identical access (all tasks, knowledge,
  *  calendar) and any member may create tasks for themselves and for others. */
-export type Project = { id: string; name: string; key: string; description: string | null; created_by: string | null; archived: boolean; deadline: string | null; lead_id: string | null }; 
+export type ProjectStatus = "open" | "done";
+export type Project = { id: string; name: string; key: string; description: string | null; created_by: string | null; archived: boolean; deadline: string | null; status?: ProjectStatus; lead_id: string | null };
 export type CfType = "text" | "text_list" | "int" | "int_list" | "enum" | "enum_list" | "open_enum" | "open_enum_list" | "bool" | "date" | "datetime" | "percentage" | "fraction" | "profile" | "profile_list" | "team" | "location" | "project" | "url" | "contact" | "contact_list" | "autonumber" | "issue" | "issue_list";
 export type CfDefinition = {
   id: string; entity_type: string; cf_type: CfType; name: string;
