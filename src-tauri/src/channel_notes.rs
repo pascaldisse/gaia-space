@@ -328,14 +328,21 @@ mod tests {
     #[test]
     fn a_written_entry_reads_back_whole_and_newest_first() {
         let c = fixture();
-        let first = create_channel_note_on(&c, input("decision", "  Ship on Friday  ", "pa")).unwrap();
+        let first =
+            create_channel_note_on(&c, input("decision", "  Ship on Friday  ", "pa")).unwrap();
         let second = create_channel_note_on(&c, input("status", "Backend done", "pb")).unwrap();
         // Body is trimmed, never stored with the client's whitespace.
         assert_eq!(first.body, "Ship on Friday");
         assert_eq!(first.kind, "decision");
         assert_eq!(first.author_id, "pa");
-        assert!(first.created_at > 0, "the timestamp is real, not a placeholder");
-        assert_eq!(first.edited_at, None, "an unedited entry carries no edit stamp");
+        assert!(
+            first.created_at > 0,
+            "the timestamp is real, not a placeholder"
+        );
+        assert_eq!(
+            first.edited_at, None,
+            "an unedited entry carries no edit stamp"
+        );
 
         let mut statement = c
             .prepare("SELECT id FROM channel_notes WHERE channel_id='ch1' ORDER BY created_at DESC, id DESC")
@@ -345,11 +352,18 @@ mod tests {
             .unwrap()
             .collect::<rusqlite::Result<_>>()
             .unwrap();
-        assert_eq!(ordered.first().unwrap(), &second.id, "the log is read from its head");
+        assert_eq!(
+            ordered.first().unwrap(),
+            &second.id,
+            "the log is read from its head"
+        );
         assert_eq!(ordered.len(), 2);
         // And the command returns the same order to a member, with the author intact.
         let listed = list_channel_notes_on(&c, "ch1".into(), "pb".into()).unwrap();
-        assert_eq!(listed.iter().map(|n| n.id.clone()).collect::<Vec<_>>(), ordered);
+        assert_eq!(
+            listed.iter().map(|n| n.id.clone()).collect::<Vec<_>>(),
+            ordered
+        );
         assert_eq!(listed[1].author_id, "pa");
     }
 
@@ -357,7 +371,10 @@ mod tests {
     fn only_the_two_kinds_are_storable() {
         let c = fixture();
         assert!(create_channel_note_on(&c, input("decision", "a", "pa")).is_ok());
-        assert!(create_channel_note_on(&c, input("STATUS", "b", "pa")).is_ok(), "case is normalized, not rejected");
+        assert!(
+            create_channel_note_on(&c, input("STATUS", "b", "pa")).is_ok(),
+            "case is normalized, not rejected"
+        );
         let rejected = create_channel_note_on(&c, input("minutes", "c", "pa")).unwrap_err();
         assert!(rejected.contains("Unknown note kind"), "{rejected}");
         // The CHECK constraint is the second lock, not the only one.
@@ -372,7 +389,10 @@ mod tests {
         let mut half = input("decision", "From a message", "pa");
         half.source_entity_type = Some("message".into());
         let rejected = create_channel_note_on(&c, half).unwrap_err();
-        assert!(rejected.contains("both entity type and entity ID"), "{rejected}");
+        assert!(
+            rejected.contains("both entity type and entity ID"),
+            "{rejected}"
+        );
 
         let mut whole = input("decision", "From a message", "pa");
         whole.source_entity_type = Some("message".into());
@@ -397,8 +417,14 @@ mod tests {
         assert!(unreadable.contains("project members only"), "{unreadable}");
         // The read door is the same door.
         assert!(require_member(&c, "pr1", "px").is_err());
-        assert!(require_member(&c, "pr1", "pb").is_ok(), "an explicit member passes");
-        assert!(require_member(&c, "pr1", "pa").is_ok(), "so does the project owner");
+        assert!(
+            require_member(&c, "pr1", "pb").is_ok(),
+            "an explicit member passes"
+        );
+        assert!(
+            require_member(&c, "pr1", "pa").is_ok(),
+            "so does the project owner"
+        );
     }
 
     #[test]
@@ -420,7 +446,10 @@ mod tests {
         let edited = update_channel_note_on(&c, fixed).unwrap();
         assert_eq!(edited.body, "Done");
         assert!(edited.edited_at.is_some(), "an edit is never silent");
-        assert_eq!(edited.created_at, note.created_at, "an edit does not rewrite history's start");
+        assert_eq!(
+            edited.created_at, note.created_at,
+            "an edit does not rewrite history's start"
+        );
     }
 
     #[test]
@@ -455,10 +484,15 @@ mod tests {
         with_file.attachment_document_id = Some("d1".into());
         let note = create_channel_note_on(&c, with_file).unwrap();
         assert_eq!(note.attachment_document_id.as_deref(), Some("d1"));
-        assert_eq!(note.attachment_title.as_deref(), Some("Spec v3"), "the log names its attachment");
+        assert_eq!(
+            note.attachment_title.as_deref(),
+            Some("Spec v3"),
+            "the log names its attachment"
+        );
 
         // Deleting the file must not delete the decision that cited it.
-        c.execute("DELETE FROM documents WHERE id='d1'", []).unwrap();
+        c.execute("DELETE FROM documents WHERE id='d1'", [])
+            .unwrap();
         let survivor = note_on(&c, &note.id).unwrap().unwrap();
         assert_eq!(survivor.body, "Approved per spec");
         assert_eq!(survivor.attachment_document_id, None);

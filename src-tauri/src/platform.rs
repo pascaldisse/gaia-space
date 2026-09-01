@@ -3504,14 +3504,34 @@ mod tests {
         c.execute("INSERT INTO project_members(project_id,profile_id) VALUES('pr','member'),('pr','archived')", []).unwrap();
         let chosen = set_project_lead_on(&c, "pr", Some("member")).unwrap();
         assert_eq!(chosen.lead_id.as_deref(), Some("member"));
-        let untouched: (String, Option<String>, Option<String>) = c.query_row("SELECT name,description,deadline FROM projects WHERE id='pr'", [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))).unwrap();
-        assert_eq!(untouched, ("Project".into(), Some("Original".into()), Some("2030-03-10".into())));
+        let untouched: (String, Option<String>, Option<String>) = c
+            .query_row(
+                "SELECT name,description,deadline FROM projects WHERE id='pr'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            untouched,
+            (
+                "Project".into(),
+                Some("Original".into()),
+                Some("2030-03-10".into())
+            )
+        );
         // master's requirement, kept: a lead must be an ACTIVE MEMBER. Our wording splits
         // the two reasons — a stranger to the project vs a profile that no longer exists —
         // so the assertions name our messages while testing master's guarantee.
-        assert!(set_project_lead_on(&c, "pr", Some("outside")).unwrap_err().contains("must be a project member"));
-        assert!(set_project_lead_on(&c, "pr", Some("archived")).unwrap_err().contains("does not exist"));
-        assert_eq!(set_project_lead_on(&c, "pr", Some("  ")).unwrap().lead_id, None);
+        assert!(set_project_lead_on(&c, "pr", Some("outside"))
+            .unwrap_err()
+            .contains("must be a project member"));
+        assert!(set_project_lead_on(&c, "pr", Some("archived"))
+            .unwrap_err()
+            .contains("does not exist"));
+        assert_eq!(
+            set_project_lead_on(&c, "pr", Some("  ")).unwrap().lead_id,
+            None
+        );
     }
 
     #[test]
@@ -3621,7 +3641,6 @@ mod tests {
     }
 }
 
-
 #[cfg(test)]
 mod delete_project_tests {
     use super::*;
@@ -3644,19 +3663,51 @@ mod delete_project_tests {
         )
         .unwrap();
         c.execute("INSERT INTO project_roles(id,project_id,name,role_kind,archived) VALUES('role','pr','Dev','member',0)", []).unwrap();
-        c.execute("INSERT INTO boards(id,project_id,name) VALUES('bo','pr','Board')", []).unwrap();
-        c.execute("INSERT INTO board_columns(id,board_id,name,ordering) VALUES('col','bo','Todo',0)", []).unwrap();
-        c.execute("INSERT INTO issue_statuses(id,project_id,name) VALUES('st','pr','Open')", []).unwrap();
-        c.execute("INSERT INTO column_statuses(column_id,status_id) VALUES('col','st')", []).unwrap();
+        c.execute(
+            "INSERT INTO boards(id,project_id,name) VALUES('bo','pr','Board')",
+            [],
+        )
+        .unwrap();
+        c.execute(
+            "INSERT INTO board_columns(id,board_id,name,ordering) VALUES('col','bo','Todo',0)",
+            [],
+        )
+        .unwrap();
+        c.execute(
+            "INSERT INTO issue_statuses(id,project_id,name) VALUES('st','pr','Open')",
+            [],
+        )
+        .unwrap();
+        c.execute(
+            "INSERT INTO column_statuses(column_id,status_id) VALUES('col','st')",
+            [],
+        )
+        .unwrap();
         c.execute("INSERT INTO issues(id,project_id,number,title,status_id) VALUES('is','pr',1,'Issue','st')", []).unwrap();
         c.execute("INSERT INTO issue_comments(id,issue_id,author_id,body,created_at) VALUES('ic','is','own','Comment',1)", []).unwrap();
-        c.execute("INSERT INTO todos(id,profile_id,content,project_id) VALUES('td','own','Task','pr')", []).unwrap();
-        c.execute("INSERT INTO todo_assignees(todo_id,profile_id) VALUES('td','other')", []).unwrap();
+        c.execute(
+            "INSERT INTO todos(id,profile_id,content,project_id) VALUES('td','own','Task','pr')",
+            [],
+        )
+        .unwrap();
+        c.execute(
+            "INSERT INTO todo_assignees(todo_id,profile_id) VALUES('td','other')",
+            [],
+        )
+        .unwrap();
         c.execute("INSERT INTO document_folders(id,container_type,container_id,parent_id,name,archived) VALUES('root','project','pr',NULL,'Documents',0),('sub','project','pr','root','Sub',0)", []).unwrap();
         c.execute("INSERT INTO documents(id,container_type,container_id,folder_id,doc_type,title,created_by) VALUES('doc','project','pr','sub','text','Spec','own')", []).unwrap();
-        c.execute("INSERT INTO doc_versions(id,document_id,version,body) VALUES('dv','doc',1,'text')", []).unwrap();
+        c.execute(
+            "INSERT INTO doc_versions(id,document_id,version,body) VALUES('dv','doc',1,'text')",
+            [],
+        )
+        .unwrap();
         c.execute("INSERT INTO reviews(id,project_id,number,kind,state,title) VALUES('rv','pr',1,'MR','Opened','Review')", []).unwrap();
-        c.execute("INSERT INTO pipeline_scripts(id,project_id,source) VALUES('ps','pr','job')", []).unwrap();
+        c.execute(
+            "INSERT INTO pipeline_scripts(id,project_id,source) VALUES('ps','pr','job')",
+            [],
+        )
+        .unwrap();
         c.execute("INSERT INTO devfiles(id,project_id,path,name,content) VALUES('df','pr','.space/dev.yaml','Dev','x')", []).unwrap();
         c.execute("INSERT INTO notifications(id,recipient_id,event_type,title,entity_type,entity_id,created_at) VALUES('nt','other','issue.created','Issue','issue','is',1)", []).unwrap();
         // Rows that carry their own meaning: the conversation and the article survive.
@@ -3704,7 +3755,10 @@ mod delete_project_tests {
 
         // The conversation outlives the project it was filed under.
         assert_eq!(
-            count(&c, "SELECT count(*) FROM channels WHERE id='ch' AND project_id IS NULL"),
+            count(
+                &c,
+                "SELECT count(*) FROM channels WHERE id='ch' AND project_id IS NULL"
+            ),
             1
         );
         assert_eq!(
@@ -3712,9 +3766,15 @@ mod delete_project_tests {
             1
         );
         // A second project is untouched.
-        assert_eq!(count(&c, "SELECT count(*) FROM projects WHERE id='keep'"), 1);
         assert_eq!(
-            count(&c, "SELECT count(*) FROM project_members WHERE project_id='keep'"),
+            count(&c, "SELECT count(*) FROM projects WHERE id='keep'"),
+            1
+        );
+        assert_eq!(
+            count(
+                &c,
+                "SELECT count(*) FROM project_members WHERE project_id='keep'"
+            ),
             1
         );
     }
@@ -3742,7 +3802,10 @@ mod delete_project_tests {
             "a refused delete must not touch a single row"
         );
         assert_eq!(
-            count(&c, "SELECT count(*) FROM channels WHERE id='ch' AND project_id='pr'"),
+            count(
+                &c,
+                "SELECT count(*) FROM channels WHERE id='ch' AND project_id='pr'"
+            ),
             1
         );
     }

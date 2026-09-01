@@ -72,21 +72,30 @@ mod tests {
 
     #[test]
     fn reads_camel_case_dates_and_orders_newest_first() {
-        let path = std::env::temp_dir().join(format!("gaia-space-leads-{}.json", std::process::id()));
+        let path =
+            std::env::temp_dir().join(format!("gaia-space-leads-{}.json", std::process::id()));
         fs::write(&path, r#"[
           {"id":"old","bereich":"academy","interesse":"informationen","name":"Old","business":"Old GmbH","address":"A","phone":"1","email":"old@example.test","consent":true,"createdAt":"2026-08-01T00:00:00.000Z"},
           {"id":"new","bereich":"software","interesse":"vormerken","name":"New","business":"New GmbH","address":"B","phone":"2","email":"new@example.test","consent":true,"createdAt":"2026-08-02T00:00:00.000Z"}
         ]"#).unwrap();
         let leads = read_from(&path).unwrap();
-        assert_eq!(leads.iter().map(|lead| lead.id.as_str()).collect::<Vec<_>>(), ["new", "old"]);
+        assert_eq!(
+            leads
+                .iter()
+                .map(|lead| lead.id.as_str())
+                .collect::<Vec<_>>(),
+            ["new", "old"]
+        );
         assert_eq!(leads[0].created_at, "2026-08-02T00:00:00.000Z");
         let _ = fs::remove_file(path);
     }
 
     #[test]
     fn delete_removes_one_lead_and_preserves_unmodelled_fields() {
-        let path = std::env::temp_dir()
-            .join(format!("gaia-space-leads-delete-{}.json", std::process::id()));
+        let path = std::env::temp_dir().join(format!(
+            "gaia-space-leads-delete-{}.json",
+            std::process::id()
+        ));
         fs::write(&path, r#"[
           {"id":"keep","bereich":"academy","interesse":"informationen","name":"Keep","business":"Keep GmbH","address":"A","phone":"1","email":"keep@example.test","consent":true,"createdAt":"2026-08-01T00:00:00.000Z"},
           {"id":"drop","bereich":"software","interesse":"vormerken","name":"Drop","business":"Drop GmbH","address":"B","phone":"2","email":"drop@example.test","consent":true,"createdAt":"2026-08-02T00:00:00.000Z"}
@@ -98,9 +107,15 @@ mod tests {
             serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
         assert_eq!(raw.len(), 1);
         assert_eq!(raw[0]["id"], "keep");
-        assert_eq!(raw[0]["consent"], true, "fields Space does not model must survive");
+        assert_eq!(
+            raw[0]["consent"], true,
+            "fields Space does not model must survive"
+        );
         assert_eq!(read_from(&path).unwrap()[0].id, "keep");
-        assert_eq!(delete_from(&path, "drop"), Err("lead not found".to_string()));
+        assert_eq!(
+            delete_from(&path, "drop"),
+            Err("lead not found".to_string())
+        );
         let _ = fs::remove_file(path);
     }
 }

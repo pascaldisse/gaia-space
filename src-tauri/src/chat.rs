@@ -300,9 +300,19 @@ pub fn stage_message_attachment(attachment_id: String) -> Result<String> {
     std::fs::create_dir_all(&dir).map_err(|e| format!("create staging directory: {e}"))?;
     let safe: String = file_name
         .chars()
-        .map(|c| if c.is_alphanumeric() || "._- ".contains(c) { c } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() || "._- ".contains(c) {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
-    let safe = if safe.trim().is_empty() { "attachment".to_string() } else { safe };
+    let safe = if safe.trim().is_empty() {
+        "attachment".to_string()
+    } else {
+        safe
+    };
     let target = dir.join(format!("{attachment_id}-{safe}"));
     std::fs::write(&target, bytes).map_err(|e| format!("write attachment: {e}"))?;
     Ok(target.to_string_lossy().to_string())
@@ -590,16 +600,38 @@ fn list_unread_threads_impl(c: &Connection, profile_id: &str) -> Result<Vec<Unre
              JOIN messages m ON m.id=tc.root_message_id AND m.archived=0",
         )
         .map_err(|e| e.to_string())?;
-    let rows: Vec<(String, String, Option<String>, String, String, Option<String>)> = s
+    let rows: Vec<(
+        String,
+        String,
+        Option<String>,
+        String,
+        String,
+        Option<String>,
+    )> = s
         .query_map([], |r| {
-            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?))
+            Ok((
+                r.get(0)?,
+                r.get(1)?,
+                r.get(2)?,
+                r.get(3)?,
+                r.get(4)?,
+                r.get(5)?,
+            ))
         })
         .map_err(|e| e.to_string())?
         .collect::<std::result::Result<_, _>>()
         .map_err(|e| e.to_string())?;
 
     let mut out: Vec<UnreadThread> = Vec::new();
-    for (channel_id, parent_channel_id, parent_channel_name, root_message_id, root_text, root_author) in rows {
+    for (
+        channel_id,
+        parent_channel_id,
+        parent_channel_name,
+        root_message_id,
+        root_text,
+        root_author,
+    ) in rows
+    {
         // (3) first: never compute anything about a thread the caller cannot see.
         if !channel_allows_profile(c, &channel_id, profile_id)? {
             continue;
@@ -3171,7 +3203,10 @@ pub fn create_message(message: Message) -> Result<MessageView> {
 /// Where a channel's uploads belong in the library, if anywhere: the project behind the
 /// message's channel, plus the channel's name for the shelf label. `None` for a channel
 /// with no project — there is no library to file into, so nothing is filed anywhere.
-fn library_target_for_message(c: &Connection, message_id: &str) -> Result<Option<(String, String, String)>> {
+fn library_target_for_message(
+    c: &Connection,
+    message_id: &str,
+) -> Result<Option<(String, String, String)>> {
     c.query_row(
         "SELECT ch.id, ch.project_id, ch.name FROM messages m JOIN channels ch ON ch.id=m.channel_id WHERE m.id=?1",
         [message_id],
@@ -3292,7 +3327,10 @@ fn add_message_attachment_in(
         .find(|item| item.id == attachment.id)
         .ok_or_else(|| "attachment missing".to_string())?;
     if let Err(e) = file_attachment_into_library(c, store, message_id, &stored) {
-        eprintln!("attachment {} not filed into the project library: {e}", stored.id);
+        eprintln!(
+            "attachment {} not filed into the project library: {e}",
+            stored.id
+        );
     }
     Ok(stored)
 }
@@ -5199,7 +5237,12 @@ mod tests {
     fn a_non_participant_of_the_thread_is_not_asked_to_attend_it() {
         let (c, path) = conn();
         seed_profiles(&c, &["asker", "answerer", "bystander"]);
-        let thread = seed_thread(&c, "chan-bystander", &["asker", "answerer", "bystander"], "asker");
+        let thread = seed_thread(
+            &c,
+            "chan-bystander",
+            &["asker", "answerer", "bystander"],
+            "asker",
+        );
         reply_at(&c, &thread, "r1", "answerer", 20, "answer");
 
         assert!(
@@ -5207,7 +5250,9 @@ mod tests {
             "the bystander CAN read the thread — so absence below is the participation \
              rule, not an access failure"
         );
-        assert!(list_unread_threads_impl(&c, "bystander").unwrap().is_empty());
+        assert!(list_unread_threads_impl(&c, "bystander")
+            .unwrap()
+            .is_empty());
         assert_eq!(list_unread_threads_impl(&c, "asker").unwrap().len(), 1);
         drop(c);
         drop(path);

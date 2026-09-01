@@ -2502,7 +2502,8 @@ mod tests {
         migrate(&conn).expect("migrate to head");
         seed(&conn).expect("seed");
         // Stamp the database BELOW every rung the merge touched and climb the whole way.
-        conn.pragma_update(None, "user_version", 100).expect("rewind");
+        conn.pragma_update(None, "user_version", 100)
+            .expect("rewind");
         migrate(&conn).expect("climb from V100");
         let head = |label: &str| {
             let version: i64 = conn
