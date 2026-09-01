@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "start": "bun run src.ts",
+    "provision": "bun run src.ts config.json --provision-only",
     "test": "bun test"
   }
 }
