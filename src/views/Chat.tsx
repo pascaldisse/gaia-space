@@ -62,12 +62,7 @@ const GROUP_ORDER: { key: ChannelContentType; label: string }[] = [
 ];
 
 const QUICK_EMOJI = ["👍", "❤️", "😂", "🎉", "👀"];
-const POLL_OPTIONS = [
-  { label: "2s", ms: 2000 },
-  { label: "5s", ms: 5000 },
-  { label: "10s", ms: 10000 },
-  { label: "off", ms: 0 },
-];
+const CHAT_POLL_MS = Number(import.meta.env.VITE_CHAT_POLL_MS) || 5000;
 
 /** Two-letter monogram for the message avatar (light shell only). */
 
@@ -112,7 +107,7 @@ export default function Chat(props: { embedded?: boolean } = {}) {
   });
 
   // polling
-  const [pollMs, setPollMs] = createSignal(5000);
+  const pollMs = CHAT_POLL_MS;
 
   // channels (sidebar), grouped by content_type, with unread + member meta
   const [channels, { refetch: refetchChannels }] = createResource(actingProfileId, (id) =>
@@ -389,8 +384,7 @@ const [showJumpToLatest, setShowJumpToLatest] = createSignal(false);
 
   // polling loop — refreshes whatever is currently on screen
   createEffect(() => {
-    const ms = pollMs();
-    if (!ms) return;
+    const ms = pollMs;
     const t = setInterval(() => {
       refetchChannels();
       refetchMessages();
@@ -1301,21 +1295,6 @@ const [showJumpToLatest, setShowJumpToLatest] = createSignal(false);
             {newChannelType() === "dm" ? "Start chat" : "Create"}
           </button>
         </div>
-
-        <div class="poll-picker">
-          Refresh:
-          <For each={POLL_OPTIONS}>
-            {(opt) => (
-              <button
-                class="ghost small"
-                classList={{ active: pollMs() === opt.ms }}
-                onClick={() => setPollMs(opt.ms)}
-              >
-                {opt.label}
-              </button>
-            )}
-          </For>
-        </div>
       </aside>
       </Show>
 
@@ -1360,20 +1339,6 @@ const [showJumpToLatest, setShowJumpToLatest] = createSignal(false);
                 </button>
               )}</For>
             </Show>
-          </div>
-        </Show>
-
-        {/* Without the legacy sidebar the refresh cadence would be unreachable, so it
-            rides here as a compact control next to the channel's messages. Polling still
-            runs by itself; this only says how often, plus one immediate refresh. */}
-        <Show when={!showLegacySidebar()}>
-          <div class="chat-pane-tools" aria-label="Message refresh">
-            <button class="chat-tool-btn" type="button" title="Refresh now" aria-label="Refresh now" onClick={() => { void refetchMessages(); void refetchChannels(); }}>⟳</button>
-            <For each={POLL_OPTIONS}>
-              {(opt) => (
-                <button class="chat-tool-btn" type="button" classList={{ active: pollMs() === opt.ms }} onClick={() => setPollMs(opt.ms)}>{opt.label}</button>
-              )}
-            </For>
           </div>
         </Show>
 
