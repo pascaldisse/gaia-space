@@ -2358,8 +2358,13 @@ fn chat_channel_access(profile_id: &str, channel_id: &str) -> bool {
         return true;
     }
     let Ok(c) = db::conn() else { return false };
+    // A project-bound channel inherits the project's people (chat::EFFECTIVE_MEMBERS_SQL):
+    // being in the project IS being in its conversations.
     c.query_row(
-        "SELECT EXISTS(SELECT 1 FROM channel_members WHERE channel_id=?1 AND profile_id=?2)",
+        "SELECT EXISTS(SELECT 1 FROM channel_members WHERE channel_id=?1 AND profile_id=?2) \
+         OR EXISTS(SELECT 1 FROM channels ch JOIN projects p ON p.id=ch.project_id \
+           WHERE ch.id=?1 AND (p.created_by=?2 OR EXISTS(SELECT 1 FROM project_members pm \
+           WHERE pm.project_id=p.id AND pm.profile_id=?2)))",
         params![channel_id, profile_id],
         |r| r.get::<_, bool>(0),
     )
