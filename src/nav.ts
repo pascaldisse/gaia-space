@@ -28,8 +28,26 @@ export const NAV_GROUPS: NavGroup[] = [
   // therefore joins the org group instead of the standalone group master gave it, and in
   // the chat-first rail it falls through `railModeOfView` to "More" — the shell's home
   // for organisation-level views.
-  { id: "org", label: "Organization", icon: "org", views: ["Members", "Locations", "Users", "Admin", "Applications", "Leads", "Settings"] },
+  { id: "org", label: "Organization", icon: "org", views: ["Members", "Locations", "Users", "Admin", "Applications", "Leads", "Finance", "Settings"] },
 ];
+
+// ---------------------------------------------------------------------------
+// FINANCE VISIBILITY — the ONE place the nav entry's condition lives.
+//
+// It is NOT the security boundary: `finance.rs` gates every command against the
+// `finance_access` table and refuses whoever is not in it, so a user who guesses the
+// URL sees a refusal, not numbers. This flag only decides whether the destination is
+// OFFERED, and it believes the server's own answer (`finance_access_check`).
+//
+// TO SHOW FINANCE TO EVERYONE: set `FINANCE_FOR_EVERYONE = true`. One line, here.
+// (The server gate stays in force — opening it for everyone means adding the people
+//  to `finance_access`, which the view itself can do.)
+// ---------------------------------------------------------------------------
+export const FINANCE_FOR_EVERYONE = false;
+const [financeAllowed, setFinanceAllowedSignal] = createSignal(false);
+/** Set from the server's answer; never from a role guess in the page. */
+export function setFinanceAllowed(next: boolean) { setFinanceAllowedSignal(next); }
+export const financeVisible = () => FINANCE_FOR_EVERYONE || financeAllowed();
 
 const LAYOUT_KEY = "space.nav.layout";
 const HIDDEN_KEY = "space.nav.hidden";

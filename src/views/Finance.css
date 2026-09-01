@@ -1,0 +1,114 @@
+/* Finance speaks the redesign's language: page frame and paper come from
+   paper.css / PageHeader.css, so only this surface's own grid lives here.
+   STRUCTURE IS NEVER SCOPED to a theme — the light theme re-inks, it never re-lays-out. */
+.finance-view { height: 100%; overflow: auto; padding: var(--view-pad-y) var(--view-pad-x) var(--view-pad-bottom); max-width: var(--view-canvas); color: var(--text); }
+.finance-month-title { margin: 0 0 12px; font-size: 15px; font-weight: 640; }
+/* The file widget is a mechanism, not a control: the button in the row triggers it. */
+.finance-csv-input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.finance-month { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text-muted); white-space: nowrap; }
+.finance-month input { background: transparent; color: inherit; border: 1px solid var(--surface-border); border-radius: 8px; padding: 3px 6px; font: inherit; }
+
+
+.finance-table { width: 100%; border-collapse: collapse; margin-bottom: 16px; padding: 4px 6px; }
+.finance-table caption { text-align: left; padding: 8px 10px 6px; font-size: 12px; letter-spacing: .3px; text-transform: uppercase; color: var(--text-muted); }
+.finance-table th, .finance-table td { text-align: left; padding: 7px 10px; font-size: 13px; border-bottom: 1px solid var(--surface-border); }
+.finance-table thead th { font-size: 11.5px; text-transform: uppercase; letter-spacing: .4px; color: var(--text-muted); font-weight: 620; }
+.finance-table tbody tr:last-child th, .finance-table tbody tr:last-child td { border-bottom: none; }
+.finance-table td:nth-child(2), .finance-table td:nth-child(3), .finance-deviation, .finance-amount { font-variant-numeric: tabular-nums; }
+.finance-sort { background: none; border: none; padding: 0; font: inherit; color: inherit; cursor: pointer; text-transform: inherit; letter-spacing: inherit; }
+
+/* THE ONLY COLOURED CELLS. No actual in a month → no class at all, so the cell stays
+   ink: green may never mean "nothing booked". */
+.finance-deviation.tone-teal, .finance-matrix td.tone-teal { color: var(--brand-teal); }
+.finance-deviation.tone-amber, .finance-matrix td.tone-amber { color: var(--status-warn-ink, #b7791f); }
+.finance-deviation.tone-red, .finance-matrix td.tone-red { color: var(--status-danger-ink); }
+
+/* ── The month matrix ──────────────────────────────────────────────────────
+   ONE COLUMN AXIS FOR EVERY ROW. `table-layout: fixed` with the colgroup takes the
+   width away from the content: a bold total, an indented position and a category
+   head all measure their months against the same edges. Nothing but the first
+   column may ever be sized by what is written in it. */
+.finance-switch { margin-right: 4px; }
+.finance-scroll { max-height: calc(100vh - 260px); overflow: auto; margin-bottom: 16px; }
+.finance-matrix { table-layout: fixed; width: max-content; min-width: 100%; margin-bottom: 0; }
+.finance-matrix .finance-col-name { width: 300px; }
+.finance-matrix .finance-col-month { width: 108px; }
+.finance-matrix .finance-col-sum { width: 124px; }
+.finance-matrix th[scope="row"] { font-weight: 560; }
+/* THE BUG THAT MADE THE MATRIX RAGGED: `.finance-table td` (class + element) beats a
+   lone `.finance-num`, so every amount was quietly LEFT-aligned inside a correctly
+   sized cell — the columns fitted, the digits did not. The rule that decides the
+   alignment must therefore be at least as specific as the one that set it. */
+.finance-num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.finance-table th.finance-num, .finance-table td.finance-num { text-align: right; }
+.finance-matrix th, .finance-matrix td { font-variant-numeric: tabular-nums; }
+/* The month names stay in sight while the rows scroll, the names while the months
+   do — eight columns without a header is a wall of numbers nobody can read. */
+.finance-matrix caption { position: sticky; left: 0; }
+.finance-matrix thead th { position: sticky; top: 0; z-index: 2; background: var(--surface); }
+.finance-matrix th[scope="row"] { position: sticky; left: 0; z-index: 1; background: var(--surface); }
+.finance-matrix thead th:first-child { z-index: 3; }
+.finance-matrix .finance-sum { font-weight: 680; }
+.finance-hint { text-transform: none; letter-spacing: 0; }
+.finance-block-head th { font-size: 11.5px; text-transform: uppercase; letter-spacing: .4px; color: var(--text-muted); padding-top: 12px; }
+/* The staircase of the matrix: a category reads as a line of its own, its positions
+   sit quietly under it, the sums close the block. Weight does that work, not colour. */
+.finance-category th[scope="row"], .finance-category td { font-weight: 640; }
+.finance-item td, .finance-item .finance-cell-edit { font-weight: 400; }
+.finance-disclose { background: none; border: none; padding: 0; font: inherit; font-weight: inherit; color: inherit; cursor: pointer; text-align: left; }
+.finance-disclose:hover { color: var(--brand-teal); }
+.finance-count { color: var(--text-muted); font-weight: 400; font-size: 12px; }
+/* The indent of a position lives INSIDE the first column — never in the numbers. */
+.finance-item th[scope="row"] { padding-left: 26px; font-weight: 420; }
+.finance-item-name { margin-right: 4px; }
+.finance-origin { display: block; font-size: 11px; color: var(--text-muted); }
+/* One sign instead of three pills: the document's footnotes belong in a tooltip,
+   not in front of the name they describe. */
+.finance-mark { font-size: 11px; color: var(--text-muted); margin-left: 2px; cursor: help; }
+/* Out of the reckoning, still on the page. */
+.finance-excluded th[scope="row"], .finance-excluded td { opacity: .55; }
+.finance-excluded .finance-num { text-decoration: line-through; text-decoration-thickness: 1px; }
+/* A month with no amount has nothing to strike out — a struck „·“ reads as a dash. */
+.finance-excluded .finance-num.finance-cell-empty { text-decoration: none; }
+.finance-total-other th, .finance-total-other td { font-weight: 480; color: var(--text-muted); border-bottom: none; padding-top: 2px; }
+.finance-optional-toggle { background: none; border: 1px solid var(--surface-border); border-radius: 999px; padding: 3px 10px; font: inherit; font-size: 12.5px; color: var(--text-muted); cursor: pointer; white-space: nowrap; }
+.finance-optional-toggle[aria-pressed="true"] { color: var(--text); border-color: var(--brand-teal); }
+.finance-noactual { color: var(--text-muted); }
+.finance-cell-edit { display: block; width: 100%; background: none; border: none; padding: 0; font: inherit; color: inherit; cursor: text; font-variant-numeric: tabular-nums; text-align: right; }
+.finance-cell-edit:hover { text-decoration: underline dotted; }
+.finance-cell-input { width: 8ch; background: transparent; color: inherit; border: 1px solid var(--brand-teal); border-radius: 6px; padding: 1px 4px; font: inherit; text-align: right; }
+.finance-block-total th, .finance-block-total td { font-weight: 660; }
+.finance-grand-total th, .finance-grand-total td { font-weight: 700; border-top: 1px solid var(--surface-border); }
+
+.finance-notice, .finance-refusal { margin: 0 0 12px; font-size: 13px; color: var(--text-muted); }
+/* An error is a sentence, not a container: same line, same margin as the notice. */
+.finance-error { margin: 0 0 12px; font-size: 13px; color: var(--status-danger-ink, var(--red-ink)); }
+
+.finance-owners { margin-top: 20px; }
+.finance-owners h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .4px; color: var(--text-muted); margin: 0 0 8px; font-weight: 620; }
+.finance-owners ul { list-style: none; margin: 0 0 10px; padding: 0; display: grid; gap: 4px; }
+.finance-owners li { display: flex; gap: 12px; align-items: center; font-size: 13px; }
+.finance-revoke { background: none; border: none; padding: 0; font-size: 12px; color: var(--text-muted); cursor: pointer; }
+.finance-revoke:hover { color: var(--status-danger-ink); }
+.finance-owners form { display: flex; gap: 8px; align-items: center; }
+.finance-owners input { background: transparent; color: inherit; border: 1px solid var(--surface-border); border-radius: 8px; padding: 4px 8px; font: inherit; font-size: 12.5px; }
+
+/* ── Space-light ────────────────────────────────────────────────────────────
+   Ink only. Nothing below moves or resizes anything. */
+.theme-space-light .finance-table thead th,
+.theme-space-light .finance-table caption,
+.theme-space-light .finance-notice,
+.theme-space-light .finance-refusal,
+.theme-space-light .finance-owners h2 { color: var(--muted); }
+.theme-space-light .finance-table th, .theme-space-light .finance-table td { border-bottom-color: var(--line); }
+.theme-space-light .finance-deviation.tone-teal, .theme-space-light .finance-matrix td.tone-teal { color: var(--teal-ink); }
+.theme-space-light .finance-deviation.tone-red, .theme-space-light .finance-matrix td.tone-red { color: var(--red-ink); }
+.theme-space-light .finance-origin, .theme-space-light .finance-count,
+.theme-space-light .finance-block-head th, .theme-space-light .finance-mark,
+.theme-space-light .finance-total-other th, .theme-space-light .finance-total-other td,
+.theme-space-light .finance-optional-toggle { color: var(--muted); }
+.theme-space-light .finance-optional-toggle { border-color: var(--line); }
+.theme-space-light .finance-optional-toggle[aria-pressed="true"] { color: var(--ink); border-color: var(--teal); }
+.theme-space-light .finance-matrix thead th,
+.theme-space-light .finance-matrix th[scope="row"] { background: var(--paper); }
+.theme-space-light .finance-error { color: var(--red-ink); }
