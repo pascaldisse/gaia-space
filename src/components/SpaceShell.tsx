@@ -841,7 +841,7 @@ export default function SpaceShell(props: {
                   classList={{ active: activeChannelId() === channel.id, unread: channel.unread_count > 0 }}
                   onContextMenu={(event) => openChannelMenu(event, channel)}
                   onPointerDown={() => setSelectedChannel({ ...channel, headerLabel: labelOfDirect(channel), avatarUrl: profiles()?.find((person) => person.display_name === labelOfDirect(channel))?.avatar_url })}
-                  onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") setSelectedChannel({ ...channel, headerLabel: labelOfDirect(channel), avatarUrl: profiles()?.find((person) => person.display_name === labelOfDirect(channel))?.avatar_url }); }}}
+                  onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") setSelectedChannel({ ...channel, headerLabel: labelOfDirect(channel), avatarUrl: profiles()?.find((person) => person.display_name === labelOfDirect(channel))?.avatar_url }); }}
                   {...navLink(() => ({ view: "Chat", entityType: "channel", entityId: channel.id, tab: "messages" }))}
                 >
                   <span class="hash" aria-hidden="true">@</span>
