@@ -45,6 +45,8 @@ import Applications from "./views/Applications";
 import Users from "./views/Users";
 import Settings from "./views/Settings";
 import Leads from "./views/Leads";
+import Finance from "./views/Finance";
+import { financeApi } from "./api/finance";
 import Goto from "./components/Goto";
 import Login from "./components/Login";
 import AccountFooter from "./components/AccountFooter";
@@ -55,7 +57,7 @@ import { Icon, type IconName } from "./components/Icon";
 import { authChecked, checkAuth, currentUser, isWeb } from "./session";
 import { isMobileSetup } from "./mobile";
 import { activeView, createHashAdapter, createPathAdapter, initRouter, linkEntity, linkProps, registerViews, route, setAvailableViews, setRoutePending } from "./router";
-import { defaultView, groupOfView, navLayout, viewLabel, visibleGroups, type NavGroup } from "./nav";
+import { defaultView, financeVisible, groupOfView, navLayout, setFinanceAllowed, viewLabel, visibleGroups, type NavGroup } from "./nav";
 
 type View = { name:string; icon:IconName; component:Component };
 type AppProps = { online?: boolean };
@@ -69,6 +71,9 @@ const workspaceViews:View[]=[{name:"Projects",icon:"layers",component:Projects},
 const usersView:View={name:"Users",icon:"users",component:Users};
 const settingsView:View={name:"Settings",icon:"settings",component:Settings};
 const leadsView:View={name:"Leads",icon:"inbox",component:Leads};
+/* Finance is OFFERED only to the people the server admits (nav.ts: financeVisible),
+   and PROTECTED by finance.rs regardless of what this registry says. */
+const financeView:View={name:"Finance",icon:"target",component:Finance};
 const projectTasksView:View={name:"Project Tasks",icon:"check",component:ProjectTasks};
 // Cross-project, project-id-free: routed by its own slug (`team-tasks`), unlike the
 // project-scoped views below which live under /projects/<id>/…
@@ -101,13 +106,16 @@ const [fullTextOpen,setFullTextOpen]=createSignal(false);
     let list=workspaceViews;
     if(web()) list=list.filter(v=>!localOnlyViews.includes(v));
     if(web()&&currentUser()?.role==="GlobalAdmin") list=[...list,usersView,leadsView];
+    if(financeVisible()) list=[...list,financeView];
     return list;
   };
   const views=()=>[...personalViews,...visibleWorkspaceViews(),developmentView,teamTasksView,projectTasksView,projectOverviewView,projectSteeringView,projectSettingsView,projectWorkspaceView,settingsView];
   const current=()=>views().find(view=>view.name===active())??personalViews[0];
   onMount(()=>{
     // Calendar is the shared schedule; Meetings is its dedicated booking and RSVP surface.
-    registerViews([...personalViews,...workspaceViews,usersView,leadsView,developmentView,teamTasksView,projectTasksView,projectOverviewView,projectSteeringView,projectSettingsView,projectWorkspaceView,settingsView]);
+    // The server decides who is a finance owner; the page only relays the answer.
+    void financeApi.access().then(access=>setFinanceAllowed(access.allowed)).catch(()=>setFinanceAllowed(false));
+    registerViews([...personalViews,...workspaceViews,usersView,leadsView,financeView,developmentView,teamTasksView,projectTasksView,projectOverviewView,projectSteeringView,projectSettingsView,projectWorkspaceView,settingsView]);
     setRoutePending(web()&&!authChecked());
     initRouter(web()?createPathAdapter(import.meta.env.BASE_URL):createHashAdapter());
     void checkAuth(online);

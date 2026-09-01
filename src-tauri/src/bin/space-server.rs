@@ -10,9 +10,8 @@ use axum::{
 };
 use gaia_space_lib::{
     app_rights, applications, blogs, calendar_feeds, calls, channel_feeds, channel_notes, chat,
-    chatbot, db,
-    devenv, documents, events, issues, leads, meetings, oauth, organization, package_registry,
-    payload_dispatch, personal, pipelines, platform, review,
+    chatbot, db, devenv, documents, events, issues, leads, meetings, oauth, organization,
+    package_registry, payload_dispatch, personal, pipelines, platform, review,
 };
 use rand::RngCore;
 use rusqlite::{params, OptionalExtension};
@@ -3376,7 +3375,8 @@ fn authorize_command(
             // Same owner-or-admin door as every other project write, and the acting
             // identity comes from the session: the body may name an `actor_id`, it is
             // overwritten before the library re-checks the very same rule.
-            let project_id: String = arg(body, "id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
+            let project_id: String =
+                arg(body, "id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
             let owner = project_owner(&project_id)
                 .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?
                 .ok_or_else(|| err(StatusCode::FORBIDDEN, "project access denied"))?;
@@ -3539,14 +3539,20 @@ fn authorize_command(
             if user.role == "GlobalAdmin" {
                 Ok(())
             } else {
-                Err(err(StatusCode::FORBIDDEN, "only an administrator can view leads"))
+                Err(err(
+                    StatusCode::FORBIDDEN,
+                    "only an administrator can view leads",
+                ))
             }
         }
         CommandPolicy::LeadDelete => {
             if user.role == "GlobalAdmin" {
                 Ok(())
             } else {
-                Err(err(StatusCode::FORBIDDEN, "only an administrator can delete leads"))
+                Err(err(
+                    StatusCode::FORBIDDEN,
+                    "only an administrator can delete leads",
+                ))
             }
         }
         // App credentials are workspace-wide secrets with no per-app owner to fall
@@ -3586,8 +3592,8 @@ fn authorize_command(
             let issue: String = if name == "add_issue_attachment" {
                 arg(body, "issue_id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?
             } else {
-                let attachment_id: String = arg(body, "id")
-                    .map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
+                let attachment_id: String =
+                    arg(body, "id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
                 db::conn()
                     .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?
                     .query_row(
@@ -6309,7 +6315,10 @@ mod tests {
             Some((30, 100))
         );
     }
-    use axum::{body::{to_bytes, Body}, http::Request};
+    use axum::{
+        body::{to_bytes, Body},
+        http::Request,
+    };
     use std::sync::{Mutex, OnceLock};
     use tower::ServiceExt;
     static TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -6376,7 +6385,10 @@ mod tests {
         let (status, listed) = status_and_body(app.clone().oneshot(request).await.unwrap()).await;
         assert_eq!(status, StatusCode::OK, "{listed}");
         assert_eq!(listed[0]["id"], json!(id));
-        assert!(listed[0].get("token").is_none(), "plaintext is never listed");
+        assert!(
+            listed[0].get("token").is_none(),
+            "plaintext is never listed"
+        );
 
         let request = Request::builder()
             .method("DELETE")
@@ -6385,7 +6397,11 @@ mod tests {
             .body(Body::empty())
             .unwrap();
         let (status, _) = status_and_body(app.clone().oneshot(request).await.unwrap()).await;
-        assert_eq!(status, StatusCode::NOT_FOUND, "another user cannot revoke it");
+        assert_eq!(
+            status,
+            StatusCode::NOT_FOUND,
+            "another user cannot revoke it"
+        );
 
         let request = Request::builder()
             .method("DELETE")
@@ -6393,19 +6409,18 @@ mod tests {
             .header(header::COOKIE, "space_session=ta")
             .body(Body::empty())
             .unwrap();
-        assert_eq!(app.oneshot(request).await.unwrap().status(), StatusCode::NO_CONTENT);
+        assert_eq!(
+            app.oneshot(request).await.unwrap().status(),
+            StatusCode::NO_CONTENT
+        );
     }
 
     #[tokio::test]
     async fn permanent_bearer_token_authenticates_command_api_as_its_owner() {
         let _serial = test_lock();
         setup();
-        let (record, raw) = gaia_space_lib::auth_security::create_permanent_token(
-            "ua",
-            "script",
-            None,
-        )
-        .unwrap();
+        let (record, raw) =
+            gaia_space_lib::auth_security::create_permanent_token("ua", "script", None).unwrap();
 
         let (status, body) = call(bearer(&raw), "list_projects", json!({})).await;
         assert_eq!(status, StatusCode::OK, "{body}");
@@ -6415,7 +6430,11 @@ mod tests {
             Ok(true)
         );
         let (status, _) = call(bearer(&raw), "list_projects", json!({})).await;
-        assert_eq!(status, StatusCode::UNAUTHORIZED, "a revoked script token is unusable");
+        assert_eq!(
+            status,
+            StatusCode::UNAUTHORIZED,
+            "a revoked script token is unusable"
+        );
     }
 
     async fn login_call(
@@ -6490,12 +6509,17 @@ mod tests {
     async fn leads_are_an_admin_only_read_over_the_real_command_route() {
         let _serial = test_lock();
         setup();
-        let path = env::temp_dir().join(format!("gaia-space-leads-http-{}.json", std::process::id()));
+        let path =
+            env::temp_dir().join(format!("gaia-space-leads-http-{}.json", std::process::id()));
         std::fs::write(&path, r#"[{"id":"lead-1","bereich":"software","interesse":"vormerken","name":"Ada","business":"Analytical Engines","address":"1 Logic Lane","phone":"+49","email":"ada@example.test","consent":true,"createdAt":"2026-08-25T13:00:22.544Z"}]"#).unwrap();
         env::set_var("SPACE_LEADS_PATH", &path);
 
         let (status, _) = call(cookie("ta"), "list_leads", json!({})).await;
-        assert_eq!(status, StatusCode::FORBIDDEN, "a member must not receive lead PII");
+        assert_eq!(
+            status,
+            StatusCode::FORBIDDEN,
+            "a member must not receive lead PII"
+        );
         let (status, body) = call(cookie("tc"), "list_leads", json!({})).await;
         assert_eq!(status, StatusCode::OK, "{body}");
         assert_eq!(body["value"][0]["email"], "ada@example.test");
@@ -6508,18 +6532,29 @@ mod tests {
     async fn leads_can_be_deleted_by_an_administrator_only() {
         let _serial = test_lock();
         setup();
-        let path = env::temp_dir().join(format!("gaia-space-leads-delete-http-{}.json", std::process::id()));
+        let path = env::temp_dir().join(format!(
+            "gaia-space-leads-delete-http-{}.json",
+            std::process::id()
+        ));
         std::fs::write(&path, r#"[{"id":"lead-1","bereich":"software","interesse":"vormerken","name":"Ada","business":"Analytical Engines","address":"1 Logic Lane","phone":"+49","email":"ada@example.test","consent":true,"createdAt":"2026-08-25T13:00:22.544Z"}]"#).unwrap();
         env::set_var("SPACE_LEADS_PATH", &path);
 
         let (status, body) = call(cookie("ta"), "delete_lead", json!({ "id": "lead-1" })).await;
-        assert_eq!(status, StatusCode::FORBIDDEN, "a member must not erase lead PII: {body}");
+        assert_eq!(
+            status,
+            StatusCode::FORBIDDEN,
+            "a member must not erase lead PII: {body}"
+        );
         let (status, body) = call(cookie("tc"), "delete_lead", json!({ "id": "lead-1" })).await;
         assert_eq!(status, StatusCode::OK, "{body}");
 
         let (status, body) = call(cookie("tc"), "list_leads", json!({})).await;
         assert_eq!(status, StatusCode::OK, "{body}");
-        assert_eq!(body["value"].as_array().unwrap().len(), 0, "the deleted lead must not come back");
+        assert_eq!(
+            body["value"].as_array().unwrap().len(),
+            0,
+            "the deleted lead must not come back"
+        );
 
         env::remove_var("SPACE_LEADS_PATH");
         let _ = std::fs::remove_file(path);
@@ -8126,9 +8161,17 @@ mod tests {
         setup();
         let c = db::conn().unwrap();
         c.execute("INSERT INTO projects(id,name,key,created_by,created_at) VALUES('project-roles','Project Roles','PROLES','pa',1)", []).unwrap();
-        c.execute("INSERT INTO roles(id,name) VALUES('role-member','Member'),('role-editor','Editor')", []).unwrap();
+        c.execute(
+            "INSERT INTO roles(id,name) VALUES('role-member','Member'),('role-editor','Editor')",
+            [],
+        )
+        .unwrap();
         c.execute("INSERT OR IGNORE INTO rights(id,code,title,right_type) VALUES('right-edit-roles','Global.EditRoles','Edit roles','Global')", []).unwrap();
-        c.execute("INSERT INTO role_rights(role_id,right_id) VALUES('role-editor','right-edit-roles')", []).unwrap();
+        c.execute(
+            "INSERT INTO role_rights(role_id,right_id) VALUES('role-editor','right-edit-roles')",
+            [],
+        )
+        .unwrap();
         drop(c);
 
         let input = json!({
@@ -8138,39 +8181,85 @@ mod tests {
             "scope_type": "project",
             "scope_id": "project-roles"
         });
-        let (status, body) = call(cookie("ta"), "create_role_assignment", json!({"input": input})).await;
-        assert_eq!(status, StatusCode::OK, "a project owner may assign within the project: {body}");
-        assert_eq!(call(cookie("ta"), "delete_role_assignment", json!({"id":"assignment-owner"})).await.0, StatusCode::OK, "a project owner may remove the assignment");
+        let (status, body) = call(
+            cookie("ta"),
+            "create_role_assignment",
+            json!({"input": input}),
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::OK,
+            "a project owner may assign within the project: {body}"
+        );
+        assert_eq!(
+            call(
+                cookie("ta"),
+                "delete_role_assignment",
+                json!({"id":"assignment-owner"})
+            )
+            .await
+            .0,
+            StatusCode::OK,
+            "a project owner may remove the assignment"
+        );
 
-        let (status, body) = call(cookie("td"), "create_role_assignment", json!({"input": {
-            "id": "assignment-outsider",
-            "role_id": "role-member",
-            "profile_id": "pa",
-            "scope_type": "project",
-            "scope_id": "project-roles"
-        }})).await;
-        assert_eq!(status, StatusCode::FORBIDDEN, "an unrelated member stays denied: {body}");
+        let (status, body) = call(
+            cookie("td"),
+            "create_role_assignment",
+            json!({"input": {
+                "id": "assignment-outsider",
+                "role_id": "role-member",
+                "profile_id": "pa",
+                "scope_type": "project",
+                "scope_id": "project-roles"
+            }}),
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::FORBIDDEN,
+            "an unrelated member stays denied: {body}"
+        );
 
         let c = db::conn().unwrap();
         c.execute("INSERT INTO role_assignments(id,role_id,profile_id,scope_type,scope_id) VALUES('editor-dora','role-editor','pd','project','project-roles')", []).unwrap();
         drop(c);
-        let (status, body) = call(cookie("td"), "create_role_assignment", json!({"input": {
-            "id": "assignment-editor",
-            "role_id": "role-member",
-            "profile_id": "pa",
-            "scope_type": "project",
-            "scope_id": "project-roles"
-        }})).await;
-        assert_eq!(status, StatusCode::OK, "a project EditRoles grant may assign in its project: {body}");
+        let (status, body) = call(
+            cookie("td"),
+            "create_role_assignment",
+            json!({"input": {
+                "id": "assignment-editor",
+                "role_id": "role-member",
+                "profile_id": "pa",
+                "scope_type": "project",
+                "scope_id": "project-roles"
+            }}),
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::OK,
+            "a project EditRoles grant may assign in its project: {body}"
+        );
 
-        let (status, body) = call(cookie("ta"), "create_role_assignment", json!({"input": {
-            "id": "assignment-global",
-            "role_id": "role-member",
-            "profile_id": "pb",
-            "scope_type": "global",
-            "scope_id": null
-        }})).await;
-        assert_eq!(status, StatusCode::FORBIDDEN, "a project owner does not gain global EditRoles: {body}");
+        let (status, body) = call(
+            cookie("ta"),
+            "create_role_assignment",
+            json!({"input": {
+                "id": "assignment-global",
+                "role_id": "role-member",
+                "profile_id": "pb",
+                "scope_type": "global",
+                "scope_id": null
+            }}),
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::FORBIDDEN,
+            "a project owner does not gain global EditRoles: {body}"
+        );
     }
 
     #[tokio::test]
@@ -8898,7 +8987,12 @@ mod tests {
         c.execute("INSERT INTO channels(id,content_type,name,project_id,archived) VALUES('ch-n','public','Notes','pr-n',0)", []).unwrap();
         drop(c);
 
-        let (status, _) = call(HeaderMap::new(), "list_channel_notes", json!({"channel_id":"ch-n"})).await;
+        let (status, _) = call(
+            HeaderMap::new(),
+            "list_channel_notes",
+            json!({"channel_id":"ch-n"}),
+        )
+        .await;
         assert_eq!(status, StatusCode::UNAUTHORIZED);
 
         // Alice writes a decision while claiming Bob wrote it. The session wins.
@@ -8910,25 +9004,45 @@ mod tests {
         .await;
         assert_eq!(status, StatusCode::OK, "{value}");
         let note = value["value"].clone();
-        assert_eq!(note["author_id"], json!("pa"), "a forged author is replaced by the session");
-        assert_eq!(note["project_id"], json!("pr-n"), "the project is read off the channel");
+        assert_eq!(
+            note["author_id"],
+            json!("pa"),
+            "a forged author is replaced by the session"
+        );
+        assert_eq!(
+            note["project_id"],
+            json!("pr-n"),
+            "the project is read off the channel"
+        );
         assert!(note["edited_at"].is_null());
         let note_id = note["id"].as_str().unwrap().to_string();
 
         // A member reads the log; a non-member is refused, not given an empty list.
-        let (status, value) =
-            call(cookie("tb"), "list_channel_notes", json!({"channel_id":"ch-n"})).await;
+        let (status, value) = call(
+            cookie("tb"),
+            "list_channel_notes",
+            json!({"channel_id":"ch-n"}),
+        )
+        .await;
         assert_eq!(status, StatusCode::OK, "{value}");
         assert_eq!(value["value"].as_array().unwrap().len(), 1);
-        let (_, value) =
-            call(cookie("td"), "list_channel_notes", json!({"channel_id":"ch-n"})).await;
+        let (_, value) = call(
+            cookie("td"),
+            "list_channel_notes",
+            json!({"channel_id":"ch-n"}),
+        )
+        .await;
         assert_eq!(value["ok"], json!(false), "an outsider is refused: {value}");
 
         // Only the author edits, and the edit is stamped.
         let mut foreign = note.clone();
         foreign["body"] = json!("Bob overrules");
         let (_, value) = call(cookie("tb"), "update_channel_note", json!({"note":foreign})).await;
-        assert_eq!(value["ok"], json!(false), "a member is not an author: {value}");
+        assert_eq!(
+            value["ok"],
+            json!(false),
+            "a member is not an author: {value}"
+        );
         let mut own = note.clone();
         own["body"] = json!("Ship on Monday");
         let (status, value) = call(cookie("ta"), "update_channel_note", json!({"note":own})).await;
@@ -8940,12 +9054,19 @@ mod tests {
         );
 
         // Deletion is the author's alone, and an unknown id is answered identically.
-        let (status, _) =
-            call(cookie("tb"), "delete_channel_note", json!({"id":&note_id})).await;
+        let (status, _) = call(cookie("tb"), "delete_channel_note", json!({"id":&note_id})).await;
         assert_eq!(status, StatusCode::FORBIDDEN);
-        let (status, _) =
-            call(cookie("tb"), "delete_channel_note", json!({"id":"no-such-note"})).await;
-        assert_eq!(status, StatusCode::FORBIDDEN, "an unknown id discloses nothing");
+        let (status, _) = call(
+            cookie("tb"),
+            "delete_channel_note",
+            json!({"id":"no-such-note"}),
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::FORBIDDEN,
+            "an unknown id discloses nothing"
+        );
         let (status, value) =
             call(cookie("ta"), "delete_channel_note", json!({"id":&note_id})).await;
         assert_eq!(status, StatusCode::OK, "{value}");
@@ -10066,8 +10187,12 @@ mod tests {
         let (status, value) = call(cookie("ta"), "create_meeting", payload).await;
         assert_eq!(status, StatusCode::OK, "create_meeting: {value}");
 
-        let (status, value) =
-            call(cookie("ta"), "attach_meeting_channel", json!({"id":"issue-5-meeting"})).await;
+        let (status, value) = call(
+            cookie("ta"),
+            "attach_meeting_channel",
+            json!({"id":"issue-5-meeting"}),
+        )
+        .await;
         assert_eq!(status, StatusCode::OK, "attach_meeting_channel: {value}");
 
         let (status, value) = call(
@@ -10076,7 +10201,11 @@ mod tests {
             json!({"meetingId":"issue-5-meeting","profileId":"pb"}),
         )
         .await;
-        assert_eq!(status, StatusCode::OK, "invite_meeting_participant: {value}");
+        assert_eq!(
+            status,
+            StatusCode::OK,
+            "invite_meeting_participant: {value}"
+        );
 
         let (status, value) = call(cookie("ta"), "list_meetings", json!({})).await;
         assert_eq!(status, StatusCode::OK, "list_meetings: {value}");
@@ -10521,12 +10650,22 @@ mod tests {
         let c = db::conn().unwrap();
         c.execute_batch("INSERT INTO projects(id,name,key,created_by,created_at) VALUES('attachment-project','Attachments','ATTACH','pa',1); INSERT INTO project_members(project_id,profile_id) VALUES('attachment-project','pb'); INSERT INTO issues(id,project_id,number,title,archived) VALUES('attachment-issue','attachment-project',1,'Evidence',0);").unwrap();
         let attachment = json!({"id":"attachment-evidence","file_name":"proof.txt","mime_type":"text/plain","byte_length":2,"data_url":"data:text/plain,ok"});
-        let (status, value) = call(cookie("tb"), "add_issue_attachment", json!({"issue_id":"attachment-issue","attachment":attachment})).await;
+        let (status, value) = call(
+            cookie("tb"),
+            "add_issue_attachment",
+            json!({"issue_id":"attachment-issue","attachment":attachment}),
+        )
+        .await;
         assert_eq!(status, StatusCode::OK, "{value}");
         assert_eq!(value["value"]["issue_id"], "attachment-issue");
         let (status, _) = call(cookie("td"), "add_issue_attachment", json!({"issue_id":"attachment-issue","attachment":{"id":"attachment-forbidden","file_name":"secret.txt","mime_type":"text/plain","byte_length":2,"data_url":"data:text/plain,no"}})).await;
         assert_eq!(status, StatusCode::FORBIDDEN);
-        let (status, value) = call(cookie("tb"), "delete_issue_attachment", json!({"id":"attachment-evidence"})).await;
+        let (status, value) = call(
+            cookie("tb"),
+            "delete_issue_attachment",
+            json!({"id":"attachment-evidence"}),
+        )
+        .await;
         assert_eq!(status, StatusCode::OK, "{value}");
     }
 
