@@ -5,6 +5,7 @@ import { render } from "solid-js/web";
 import ChannelWorkspace from "./ChannelWorkspace";
 import { createMemoryAdapter, initRouter, navigate, registerViews, setAvailableViews } from "../router";
 import { setProfileId, setProjectId } from "../session";
+import { setSelectedChannel } from "../chatChannelSelection";
 
 // The channel workspace is chrome around the existing Chat view. Two laws are tested
 // because both are product decisions, not implementation details:
@@ -23,6 +24,7 @@ const profiles = [
 const channels: Record<string, unknown> = {
   "c-project": { id: "c-project", content_type: "public", name: "video-factory", description: "Skripte und Produktion", project_id: "p1", archived: false },
   "c-loose": { id: "c-loose", content_type: "public", name: "wasserkocher", description: "Kein Projekt", project_id: null, archived: false },
+  "dm1": { id: "dm1", content_type: "dm", name: "Me · Other Person", description: null, project_id: null, archived: false },
 };
 
 const reply = (cmd: string, args: Record<string, unknown>) => {
@@ -51,7 +53,7 @@ const mount = async (channelId: string) => {
   return host;
 };
 
-afterEach(() => { dispose?.(); dispose = undefined; document.body.innerHTML = ""; delete (window as any).__TAURI_INTERNALS__; setProfileId(""); setProjectId(""); });
+afterEach(() => { dispose?.(); dispose = undefined; document.body.innerHTML = ""; delete (window as any).__TAURI_INTERNALS__; setProfileId(""); setProjectId(""); setSelectedChannel(null); });
 
 describe("channel workspace", () => {
   test("a channel without a project shows no tab row and no project rail", async () => {
@@ -60,6 +62,26 @@ describe("channel workspace", () => {
     expect(host.querySelector(".cw-rail")).toBeNull();
     // The channel itself is still fully rendered — nothing is hidden but the work tabs.
     expect(host.querySelector(".cw-title h1")?.textContent).toContain("wasserkocher");
+    expect(host.querySelector('[aria-label="Message refresh"]')).toBeNull();
+    expect(host.textContent).not.toContain("Refresh:2s");
+    expect(host.querySelector('[aria-label="Message refresh"]')).toBeNull();
+    expect(host.textContent).not.toContain("Refresh:2s");
+  });
+
+  test("a sidebar-seeded project channel reserves its rail and real header immediately", async () => {
+    setSelectedChannel({ id: "c-project", content_type: "public", name: "video-factory", description: null, project_id: "p1", archived: false, member_count: 2, unread_count: 0, last_message_at: null });
+    const host = await mount("c-project");
+    expect(host.querySelector(".cw-title h1")?.textContent).toBe("# video-factory");
+    expect(host.querySelector(".cw-body")?.classList.contains("with-rail")).toBe(true);
+    expect(host.querySelector(".cw-rail")).toBeTruthy();
+  });
+
+  test("a seeded direct message has a person header, not a channel hash", async () => {
+    setSelectedChannel({ id: "dm1", content_type: "dm", name: "Me · Other Person", description: null, project_id: null, archived: false, member_count: 2, unread_count: 0, last_message_at: null, headerLabel: "Other Person" });
+    const host = await mount("dm1");
+    expect(host.querySelector(".cw-dm-title h1")?.textContent).toBe("Other Person");
+    expect(host.querySelector(".cw-dm-title .avatar")).toBeTruthy();
+    expect(host.querySelector(".cw-title h1")?.textContent).not.toContain("#");
   });
 
   test("THE CHANNEL OWNS NO TAB ROW: it points at the project that does", async () => {

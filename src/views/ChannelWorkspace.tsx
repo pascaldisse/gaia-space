@@ -1,5 +1,8 @@
 import { For, Show, createEffect, createMemo, createResource, createSignal, type JSX } from "solid-js";
 import { chatApi, type Channel } from "../api/chat";
+import { selectedChannel } from "../chatChannelSelection";
+import { isDirectMessage, dmLabel } from "../chatPartition";
+import { Avatar } from "../components/Avatar";
 import { bumpChannels } from "../chatIdentity";
 import { meetingsApi } from "../api/meetings";
 import { personalApi } from "../api/personal";
@@ -78,14 +81,24 @@ export default function ChannelWorkspace(): JSX.Element {
   // Identity: web is bound to the authenticated profile, desktop to the acting one.
   const actingProfileId = () => currentUser()?.profile_id ?? profileId();
 
-  const [channel, { refetch: refetchChannel }] = createResource(channelId, (id) =>
+  const [loadedChannel, { refetch: refetchChannel }] = createResource(channelId, (id) =>
     id ? chatApi.getChannel(id) : Promise.resolve<Channel | null>(null),
   );
+  const channel = () => loadedChannel()?.id === channelId()
+    ? loadedChannel()
+    : selectedChannel()?.id === channelId() ? selectedChannel() : null;
+  const channelProjectId = () => channel()?.project_id ?? "";
+  const seededHeader = () => selectedChannel()?.id === channelId() ? selectedChannel()?.headerLabel : undefined;
+  const channelTitle = () => {
+    const current = channel();
+    if (!current) return "";
+    return seededHeader() ?? (isDirectMessage(current) ? dmLabel(current, actingProfileId()) : current.name ?? current.content_type);
+  };
   void reloadProjects().catch(() => undefined);
   void reloadProfiles().catch(() => undefined);
 
   const project = createMemo(() => {
-    const projectIdOfChannel = channel()?.project_id;
+    const projectIdOfChannel = channelProjectId();
     return projectIdOfChannel ? projects()?.find((item) => item.id === projectIdOfChannel) : undefined;
   });
   const projectIdOf = () => project()?.id ?? "";
@@ -213,7 +226,9 @@ export default function ChannelWorkspace(): JSX.Element {
         <div class="cw-title-row">
           <div class="cw-title">
             <Show when={project()}>{(value) => <div class="cw-kicker">{value().name}</div>}</Show>
-            <h1># {channel()?.name ?? "Channel"}</h1>
+            <Show when={channel()?.content_type === "dm"} fallback={<h1># {channelTitle()}</h1>}>
+            <div class="cw-dm-title"><Avatar name={channelTitle()} avatarUrl={selectedChannel()?.avatarUrl} size={30} /><h1>{channelTitle()}</h1><span class="cw-presence" aria-label="Available" /></div>
+          </Show>
             <Show when={channel()?.description}>{(text) => <p class="cw-subtitle">{text()}</p>}</Show>
             {/* A FACT IS NOT A LABEL ON A CONTROL. "Not part of a project yet" used to
                 be glued to the left of the picker in a row of its own; it belongs with
@@ -287,7 +302,7 @@ export default function ChannelWorkspace(): JSX.Element {
         </Show>
       </header>
 
-      <div class="cw-body" classList={{ "with-rail": !!project() }}>
+      <div class="cw-body" classList={{ "with-rail": !!channelProjectId() }}>
         <section class="cw-panel cw-chat">
           {/* THE ONLY BODY THIS SURFACE HAS NOW: the messages. The five guest views
               that used to be mounted here are mounted by views/ProjectWorkspace.tsx
@@ -296,8 +311,7 @@ export default function ChannelWorkspace(): JSX.Element {
           <Chat embedded />
         </section>
 
-        <Show when={project()}>
-          {(value) => (
+        <Show when={channelProjectId()}>
             <aside class="cw-rail" aria-label="Project details">
               <div class="cw-rail-tabs" role="group" aria-label="Project details">
                 <button type="button" class="cw-rail-toggle" classList={{ active: statusOpen() }} aria-controls="cw-project-status" aria-expanded={statusOpen()} onClick={() => setStatusOpen((open) => !open)}>
@@ -309,7 +323,7 @@ export default function ChannelWorkspace(): JSX.Element {
               </div>
               <Show when={statusOpen()}>
                 <section id="cw-project-status" class="cw-card">
-                  <h2>{value().name} · Project status</h2>
+                  <h2>{project()?.name ?? "Project"} · Project status</h2>
                   <div class="cw-stat"><span>Open tasks</span><strong>{dashboard()?.open_todos ?? "—"}</strong></div>
                   <div class="cw-stat"><span>Tickets</span><strong>{dashboard()?.open_issues ?? "—"}</strong></div>
                   <div class="cw-stat"><span>Next meeting</span><strong>{nextMeeting() ? hhmm(nextMeeting()!.starts_at) : "—"}</strong></div>
@@ -327,7 +341,6 @@ export default function ChannelWorkspace(): JSX.Element {
                 </section>
               </Show>
             </aside>
-          )}
         </Show>
       </div>
     </div>

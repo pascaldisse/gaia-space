@@ -202,3 +202,5 @@ cursor: pointer;
 .cw-rail-toggle:hover,
 .cw-rail-toggle.active { color: var(--ink); }
 .cw-rail-toggle.active { border-color: var(--teal); }
+.cw-dm-title { display: flex; align-items: center; gap: 9px; }
+.cw-presence { width: 8px; height: 8px; border-radius: 50%; background: var(--teal); }
