@@ -545,8 +545,8 @@ fn member_count_impl(c: &Connection, channel_id: &str) -> Result<i64> {
 }
 fn unread_count_impl(c: &Connection, channel_id: &str, profile_id: &str) -> Result<i64> {
     c.query_row(
-        "SELECT COUNT(*) FROM messages WHERE channel_id=?1 AND archived=0 AND created_at > \
-         COALESCE((SELECT read_at FROM read_state WHERE channel_id=?1 AND profile_id=?2), 0)",
+        "SELECT COUNT(*) FROM messages WHERE channel_id=?1 AND archived=0 AND author_id IS NOT ?2 \
+         AND created_at > COALESCE((SELECT read_at FROM read_state WHERE channel_id=?1 AND profile_id=?2), 0)",
         rusqlite::params![channel_id, profile_id],
         |r| r.get(0),
     )
@@ -2313,9 +2313,6 @@ fn create_message_impl(c: &Connection, message: &Message) -> Result<()> {
         rusqlite::params![message.id, message.channel_id, message.author_id, message.text, message.created_at, message.edited_at, message.thread_of, message.archived, message.pinned, message.content_kind],
     )
     .map_err(|e| e.to_string())?;
-    if let Some(author_id) = message.author_id.as_deref() {
-        mark_channel_read_impl(c, &message.channel_id, author_id, Some(message.id.clone()))?;
-    }
     sync_mentions_impl(
         c,
         &message.id,
@@ -5557,8 +5554,17 @@ mod tests {
             .unwrap();
         assert_eq!(
             summary.unread_count, 0,
-            "a sender's own message advances their read cursor"
+            "a sender's own message is excluded from their unread badge"
         );
+        let sender_cursor: Option<i64> = c
+            .query_row(
+                "SELECT read_at FROM read_state WHERE channel_id=?1 AND profile_id=?2",
+                rusqlite::params!["chan-unread", "default-org"],
+                |r| r.get(0),
+            )
+            .optional()
+            .unwrap();
+        assert_eq!(sender_cursor, None, "sending does not move the read cursor");
 
         mark_channel_read_impl(&c, "chan-unread", "default-org", None).unwrap();
         let after = list_channels_with_meta_impl(&c, "default-org").unwrap();
