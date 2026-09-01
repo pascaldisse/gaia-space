@@ -107,6 +107,7 @@ export default function Projects() {
   const [query, setQuery] = createSignal("");
   const [portfolioFilter, setPortfolioFilter] = createSignal<"all" | "attention" | "due">("all");
   const [showArchived, setShowArchived] = createSignal(false);
+  const [showDone, setShowDone] = createSignal(false);
   const [items, { refetch }] = createResource(platformApi.projects);
   if (!profiles()) void reloadProfiles().catch(() => undefined);
   const leadName = (id: string) => {
@@ -205,6 +206,7 @@ export default function Projects() {
     const needle = query().trim().toLocaleLowerCase();
     return (items() ?? []).filter((project) => {
       if (project.archived && !showArchived()) return false;
+      if (project.status === "done" && !showDone()) return false;
       if (needle && !`${project.name} ${project.key} ${project.description ?? ""}`.toLocaleLowerCase().includes(needle)) return false;
       if (portfolioFilter() === "attention")
         return openCount(project.id) > 0 || taskCount(project.id) > 0 || unreadCount(project.id) > 0 || !!(project.deadline && deadlineTone(project.deadline).colour);
@@ -327,7 +329,8 @@ export default function Projects() {
           ...(project.deadline ? [{ label: "Clear deadline", onSelect: () => void writeDeadline(project, null) }] : []),
         ]
       : []),
-    { label: project.archived ? "Restore" : "Archive", onSelect: () => void update(project, { archived: !project.archived }) },
+    { label: project.status === "done" ? "Reopen project" : "Mark done", onSelect: () => void update(project, { status: project.status === "done" ? "open" : "done" }) },
+{ label: project.archived ? "Restore" : "Archive", onSelect: () => void update(project, { archived: !project.archived }) },
     ...(ownsProject(project)
       ? [{ label: "Delete project…", danger: true, onSelect: () => setPendingDelete(project) }]
       : []),
@@ -393,6 +396,7 @@ export default function Projects() {
             <button type="button" classList={{ active: portfolioFilter() === "attention" }} onClick={() => setPortfolioFilter("attention")}>Needs attention</button>
             <button type="button" classList={{ active: portfolioFilter() === "due" }} onClick={() => setPortfolioFilter("due")}>Due soon</button>
           </span>
+          <button type="button" class="portfolio-archive-toggle" classList={{ active: showDone() }} onClick={() => setShowDone((shown) => !shown)}>{showDone() ? "Hide done" : "Show done"}</button>
           <button type="button" class="portfolio-archive-toggle" classList={{ active: showArchived() }} onClick={() => setShowArchived((shown) => !shown)}>{showArchived() ? "Hide archived" : "Show archived"}</button>
         </span>
       </Show>
@@ -485,8 +489,9 @@ export default function Projects() {
         <p class="portfolio-no-results">No projects match these filters.</p>
       </Show>
     }>
-    <ul class="project-cards"><For each={visibleProjects()}>{project => {
-      return <li classList={{ "project-card": true, archived: project.archived }} onContextMenu={(event) => openMenu(event, project)}>
+    <ul class="project-cards"><For each={visibleProjects()}>{(project, index) => {
+      const firstDone = () => project.status === "done" && !visibleProjects().slice(0, index()).some(item => item.status === "done");
+      return <><Show when={firstDone()}><li class="project-list-section">Done</li></Show><li classList={{ "project-card": true, archived: project.archived, done: project.status === "done" }} onContextMenu={(event) => openMenu(event, project)}>
         {/* THE ROW IS THE LINK. One anchor over the identifying part of the card, so
             a single click opens the project and the keyboard reaches it by tabbing.
             The controls below (deadline, archive) sit OUTSIDE it: a control nested in
@@ -514,6 +519,7 @@ export default function Projects() {
             {/* THE KEY IS NOT ON THE CARD: it answered no question anybody asked.
                 It remains searchable (visibleProjects) and editable in settings. */}
             <strong>{project.name}</strong>
+            <Show when={project.status === "done"}><span class="project-done-badge">Done</span></Show>
             {/* LAW: lead is PURELY INFORMATIONAL — a name on a row, read-only here,
                 gating nothing. Editing it lives in Project settings. */}
             <Show when={project.lead_id}>{lead => <span class="project-lead-chip" title="Who is responsible for this project (informational)">Responsible: {leadName(lead())}</span>}</Show>
@@ -593,7 +599,7 @@ export default function Projects() {
             navigation bar; both surfaces are one click further in, and nothing can be
             reached only from here. Archive/Restore moved to the card's menu, where the
             other acts on a listed project already are. */}
-      </li>;
+      </li></>;
     }}</For></ul>
     </Show>
   </section>;

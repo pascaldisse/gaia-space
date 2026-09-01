@@ -313,3 +313,9 @@
 .project-create .project-members-hint { color: var(--text-muted); font-size: 12.5px; font-weight: 500; }
 /* The picker takes the width of a field, not of the whole card. */
 .project-create .project-members-field .pill-menu { max-width: 22rem; }
+
+/* Completed projects are kept apart from archived history: the label states their
+   lifecycle without making their card look deleted. */
+.project-list-section { list-style: none; margin: 20px 0 8px; color: var(--text-muted); font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; }
+.project-done-badge, .pw-status-done { display: inline-flex; align-items: center; padding: 2px 7px; border-radius: 999px; background: var(--teal-soft, #e1f3ef); color: var(--teal-ink, #006b5e); font-size: 12px; font-weight: 700; }
+.project-card.done .project-card-icon { opacity: .65; }

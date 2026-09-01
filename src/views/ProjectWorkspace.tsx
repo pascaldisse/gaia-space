@@ -166,6 +166,15 @@ export default function ProjectWorkspace(props: { children?: JSX.Element }): JSX
      "the server does not know this command yet") MUST be readable; silence would
      look exactly like success. */
   const [deleteError, setDeleteError] = createSignal("");
+  const [statusBusy, setStatusBusy] = createSignal(false);
+  const setDone = async () => {
+    const value = project();
+    if (!value) return;
+    setDeleteError(""); setStatusBusy(true);
+    try { await platformApi.updateProject({ ...value, status: value.status === "done" ? "open" : "done" }); await reloadProjects(); }
+    catch (reason) { setDeleteError(humanError(reason)); }
+    finally { setStatusBusy(false); }
+  };
   const deleteProject = async () => {
     const id = projectIdOf();
     if (!id) return;
@@ -218,6 +227,7 @@ export default function ProjectWorkspace(props: { children?: JSX.Element }): JSX
                 {project()?.name ?? "Project unavailable"}
               </a>
               <Show when={project()?.key}>{(value) => <code class="pw-key">{value()}</code>}</Show>
+              <Show when={project()?.status === "done"}><span class="pw-status-done">Done</span></Show>
             </h1>
             {/* NO LINE FOR AN EMPTY FACT. "Lead — No lead yet" occupied the most
                 prominent line under the project's name to say that nothing had been
@@ -249,6 +259,7 @@ export default function ProjectWorkspace(props: { children?: JSX.Element }): JSX
               <GhostPill {...linkProps({ view: "Project Settings", projectId: projectIdOf() })}>Settings</GhostPill>
               {/* OWNER ONLY. Not a disabled button for everyone else — nothing at all. */}
               <Show when={project() && isOwner()}>
+                <button type="button" class="ghost pw-done" aria-pressed={project()?.status === "done"} disabled={statusBusy()} onClick={() => void setDone()}>{project()?.status === "done" ? "Done" : "Mark done"}</button>
                 <DeleteButton label="Delete project" onRequest={() => setConfirmDelete(true)} />
               </Show>
             </div>

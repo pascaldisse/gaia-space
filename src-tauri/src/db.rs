@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 139;
+pub const SCHEMA_VERSION: i64 = 140;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -871,7 +871,17 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if version < 132 && table_exists(&tx, "projects")? {
         add_column_if_missing(&tx, "projects", "lead_id", "TEXT REFERENCES profiles(id)")?;
     }
-    // V133: work created out of a conversation must keep pointing back at it. Todos
+    // V140: completion is distinct from archival. Existing projects are open by default;
+// no row is moved or rewritten during this additive migration.
+if version < 140 && table_exists(&tx, "projects")? {
+add_column_if_missing(
+&tx,
+"projects",
+"status",
+"TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','done'))",
+)?;
+}
+// V133: work created out of a conversation must keep pointing back at it. Todos
     // already carry the generic `(source_entity_type, source_entity_id)` anchor; issues
     // and meetings did not, so a ticket or a date born in a channel lost its origin the
     // moment it was saved. Two nullable TEXT columns each, deliberately UNCONSTRAINED
@@ -2453,6 +2463,20 @@ mod tests {
     }
 
     #[test]
+    fn v140_adds_open_project_status_without_moving_legacy_rows() {
+        let temp = TempDb::new("gaia-space-v140-project-status");
+        let conn = open_at(&temp).expect("database");
+        migrate(&conn).expect("migrate to head");
+        seed(&conn).expect("seed");
+        conn.execute("INSERT INTO projects(id,name,key,created_at) VALUES('legacy','Legacy','LEG',1)", []).unwrap();
+        conn.pragma_update(None, "user_version", 139).unwrap();
+        migrate(&conn).expect("v140");
+        let status: String = conn.query_row("SELECT status FROM projects WHERE id='legacy'", [], |r| r.get(0)).unwrap();
+        assert_eq!(status, "open");
+        migrate(&conn).expect("v140 idempotent");
+    }
+
+    #[test]
     fn v11_adds_nullable_todo_notes_without_touching_legacy_rows() {
         let temp = TempDb::new("gaia-space-v11-notes");
         let conn = open_at(&temp).expect("database");
@@ -2471,7 +2495,7 @@ mod tests {
             version, SCHEMA_VERSION,
             "schema version is monotonic and lands on head"
         );
-        assert_eq!(SCHEMA_VERSION, 139);
+        assert_eq!(SCHEMA_VERSION, 140);
         let notes: Option<String> = conn
             .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
                 r.get(0)
@@ -2511,8 +2535,8 @@ mod tests {
             println!("MIGRATION PROOF {label}: user_version={version}");
             version
         };
-        assert_eq!(head("after climb from 100"), 139);
-        assert_eq!(SCHEMA_VERSION, 139);
+        assert_eq!(head("after climb from 100"), 140);
+        assert_eq!(SCHEMA_VERSION, 140);
         // Every rung the merge touched exists exactly once, and by name.
         for (table, column) in [
             ("projects", "lead_id"),
