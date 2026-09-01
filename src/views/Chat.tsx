@@ -821,7 +821,7 @@ const [showJumpToLatest, setShowJumpToLatest] = createSignal(false);
       setDraftMessageId(ok ? null : message.id);
       setDraft(""); setDraftRows(COMPOSER_MIN_ROWS); setDraftMentionIds([]);
       clearDraftState();
-      void markChannelRead(ch, p, message.id).then(bumpChannels).catch(fail);
+      void markChannelRead(ch, p).then(bumpChannels).catch(fail);
       refetchMessages();
       refetchChannels();
     } catch (e) {
@@ -854,7 +854,7 @@ const [showJumpToLatest, setShowJumpToLatest] = createSignal(false);
       const ok = await saveAttachments(message.id, attachments, setThreadAttachments);
       setThreadMessageId(ok ? null : message.id);
       setThreadDraft(""); setThreadMentionIds([]);
-      void markChannelRead(thread.id, p, message.id).then(bumpChannels).catch(fail);
+      void markChannelRead(thread.id, p).then(bumpChannels).catch(fail);
       refetchThread();
       refetchMessages();
       refetchChannels();
