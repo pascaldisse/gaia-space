@@ -132,8 +132,10 @@ export type DocumentFilePreview = {
   data_base64: string | null;
 };
 
+export const ORGANIZATION_LIBRARY_ID = "organization-library";
 export const documentsApi = {
   // documents
+  ensureOrganizationLibraryRoot: () => invoke<DocumentFolder>("ensure_organization_library_root"),
   ensureProjectDocumentRoot: (projectId: string) => invoke<DocumentFolder>("ensure_project_document_root", { projectId }),
   listDocuments: () => invoke<Document[]>("list_documents"),
   getDocument: (id: string) => invoke<Document | null>("get_document", { id }),

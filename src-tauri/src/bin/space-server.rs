@@ -2712,7 +2712,7 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         "list_backlog_issues" | "list_board_columns" | "list_board_issues" | "get_board_card_settings" => {
             CommandPolicy::BoardRead
         }
-        "list_cf_definitions" | "list_channel_members" | "list_locations" | "location_channel" | "list_desk_assignments" | "save_desk_assignment" | "remove_desk_assignment" | "list_meeting_rooms" | "reserve_meeting_room" | "save_location" | "meeting_availability" | "attach_document_discussion" | "get_document_discussion" | "import_document_folder" | "save_channel_subscription" | "list_channel_subscriptions" | "ensure_project_document_root" => CommandPolicy::Session,
+        "list_cf_definitions" | "list_channel_members" | "list_locations" | "location_channel" | "list_desk_assignments" | "save_desk_assignment" | "remove_desk_assignment" | "list_meeting_rooms" | "reserve_meeting_room" | "save_location" | "meeting_availability" | "attach_document_discussion" | "get_document_discussion" | "import_document_folder" | "save_channel_subscription" | "list_channel_subscriptions" | "ensure_project_document_root" | "ensure_organization_library_root" => CommandPolicy::Session,
         "search_book_documents" => CommandPolicy::BookRead,
         "list_book_access" | "update_book_access" => CommandPolicy::BookManage,
         "list_book_owners" => CommandPolicy::BookRead,
@@ -5412,6 +5412,7 @@ async fn cmd(
     "create_channel" => chat::create_channel(channel: chat::Channel, member_ids: Vec<String>),
     "create_deploy_target" => pipelines::create_deploy_target(target: pipelines::DeployTarget),
     "ensure_project_document_root" => documents::ensure_project_document_root(project_id: String),
+    "ensure_organization_library_root" => documents::ensure_organization_library_root(),
     "create_document" => documents::create_document(document: documents::Document),
     "create_document_folder" => documents::create_document_folder(folder: documents::DocumentFolder, owner_id: Option<String>),
     "create_entity_channel" => chat::create_entity_channel(entity_type: String, entity_id: String, name: Option<String>),

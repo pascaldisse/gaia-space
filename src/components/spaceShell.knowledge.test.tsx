@@ -74,11 +74,12 @@ describe("knowledge sidebar", () => {
     expect(sidebar!.querySelector(".side-mode")?.getAttribute("data-mode")).toBe("knowledge");
 
     const heads = [...sidebar!.querySelectorAll(".section-head span")].map((s) => s.textContent);
-    expect(heads).toEqual(["Organization library", "Project libraries"]);
+    expect(heads).toEqual(["Other organization libraries", "Project libraries"]);
 
     const links = [...sidebar!.querySelectorAll(".side-link")].map((a) => a.textContent?.trim());
     // Personal docs are the fixed anchor, then the books, then the projects.
-    expect(links).toEqual(["My Documents", "Handbook", "Orbital"]);
+    expect(links).toEqual(["Library", "Handbook", "Orbital"]);
+    expect(sidebar!.querySelector<HTMLAnchorElement>(".side-link.strong")?.getAttribute("href")).toBe("/documents/kb/organization-library");
   });
 });
 
