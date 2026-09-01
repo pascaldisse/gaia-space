@@ -2313,6 +2313,9 @@ fn create_message_impl(c: &Connection, message: &Message) -> Result<()> {
         rusqlite::params![message.id, message.channel_id, message.author_id, message.text, message.created_at, message.edited_at, message.thread_of, message.archived, message.pinned, message.content_kind],
     )
     .map_err(|e| e.to_string())?;
+    if let Some(author_id) = message.author_id.as_deref() {
+        mark_channel_read_impl(c, &message.channel_id, author_id, Some(message.id.clone()))?;
+    }
     sync_mentions_impl(
         c,
         &message.id,
@@ -5553,8 +5556,8 @@ mod tests {
             .find(|s| s.channel.id == "chan-unread")
             .unwrap();
         assert_eq!(
-            summary.unread_count, 1,
-            "unread before any read-state exists"
+            summary.unread_count, 0,
+            "a sender's own message advances their read cursor"
         );
 
         mark_channel_read_impl(&c, "chan-unread", "default-org", None).unwrap();

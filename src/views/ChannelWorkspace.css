@@ -96,7 +96,7 @@
   grid-template-columns: minmax(0, 1fr);
   overflow: hidden;
 }
-.cw-body.with-rail { grid-template-columns: minmax(0, 1fr) 308px; }
+.cw-body.with-rail { grid-template-columns: minmax(0, 1fr) var(--cw-rail-width, 308px); }
 .cw-panel { min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: auto; }
 .cw-panel.cw-chat { overflow: hidden; }
 
@@ -229,3 +229,5 @@ cursor: pointer;
 .cw-rail-toggle:hover,
 .cw-rail-toggle.active { color: var(--ink); }
 .cw-rail-toggle.active { border-color: var(--teal); }
+.cw-dm-title { display: flex; align-items: center; gap: 9px; }
+.cw-presence { width: 8px; height: 8px; border-radius: 50%; background: var(--teal); }
