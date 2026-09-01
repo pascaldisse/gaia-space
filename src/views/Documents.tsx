@@ -5,6 +5,7 @@ import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialo
 import "../App.css";
 import "./Documents.css";
 import DocumentCreateDrawer, { type DocumentCreateMode } from "../components/DocumentCreateDrawer";
+import SheetEditor from "../components/SheetEditor";
 import ConfirmDialog from "../components/ConfirmDialog";
 import PromptDialog from "../components/PromptDialog";
 import ContextMenu, { type ContextMenuItem } from "../components/ContextMenu";
@@ -20,6 +21,12 @@ import {
   type DocumentFolder,
   type DocumentImportSummary,
   type DocumentBodyFormat,
+  type DocumentCreateType,
+  type SheetDoc,
+  emptySheet,
+  parseSheet,
+  versionSnippet,
+  serializeSheet,
   type DocumentFilePreview,
   type DocumentDiscussion,
   type FavoriteDocument,
@@ -551,7 +558,7 @@ const [showArchived, setShowArchived] = createSignal(false);
 
   // ---- document CRUD ----
   const [newDocTitle, setNewDocTitle] = createSignal("");
-const [newDocBodyFormat, setNewDocBodyFormat] = createSignal<DocumentBodyFormat>("text");
+const [newDocBodyFormat, setNewDocBodyFormat] = createSignal<DocumentCreateType>("text");
   const [selectedDocumentId, setSelectedDocumentId] = createSignal<string | null>(null);
   async function createDocument() {
     const title = newDocTitle().trim();
@@ -566,9 +573,12 @@ const [newDocBodyFormat, setNewDocBodyFormat] = createSignal<DocumentBodyFormat>
       // not to `null` — otherwise it would be written where the tree cannot show it.
       folder_id: selectedFolderId() ?? rootParentId(),
       doc_type: "text",
-      body_format: newDocBodyFormat(),
+      // A table is a document KIND, not a text flavour: it keeps the plain body format
+      // and carries its grid as the body the same versioning writes for prose.
+      body_format: newDocBodyFormat() === "sheet" ? "text" : (newDocBodyFormat() as DocumentBodyFormat),
+      kind: newDocBodyFormat() === "sheet" ? "sheet" : "markdown",
       title,
-      body: "",
+      body: newDocBodyFormat() === "sheet" ? serializeSheet(emptySheet()) : "",
       version: 1,
       archived: false,
       created_by: actingProfileId(),
@@ -629,6 +639,9 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
 
   const [editTitle, setEditTitle] = createSignal("");
   const [editBody, setEditBody] = createSignal("");
+  // A sheet edits a parsed grid; the text body stays its single serialized source, so
+  // saving, versions and restore keep using the one document save path.
+  const [sheet, setSheet] = createSignal<SheetDoc>(emptySheet());
   const [showPreview, setShowPreview] = createSignal(true);
   // sync editor fields when the *selected document id* changes — not on every refetch,
   // so in-progress edits survive background polling/refetches.
@@ -638,6 +651,7 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
     if (id !== prevId) {
       setEditTitle(doc?.title ?? "");
       setEditBody(doc?.body ?? "");
+      if (doc?.kind === "sheet") setSheet(parseSheet(doc.body));
     }
     return id;
   }, null);
@@ -1149,10 +1163,16 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
     try {
       // rich-text is stored as HTML and rendered with innerHTML, so it is sanitized on
       // the way in as well as on the way out — a hostile paste must never reach the row.
-      const body = doc.body_format === "rich-text" ? sanitizeRichHtml(editBody()) : editBody();
+      const body =
+        doc.kind === "sheet"
+          ? serializeSheet(sheet())
+          : doc.body_format === "rich-text"
+            ? sanitizeRichHtml(editBody())
+            : editBody();
       const saved = await documentsApi.saveDocument(doc.id, editTitle().trim() || doc.title, body, actingProfileId());
       setEditTitle(saved.title);
       setEditBody(saved.body ?? "");
+      if (saved.kind === "sheet") setSheet(parseSheet(saved.body));
       await refetchDocuments();
       await refetchVersions();
     } catch (e) {
@@ -1185,6 +1205,7 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
     if (!doc) return;
     try {
       const restored = await documentsApi.restoreDocVersion(doc.id, version, actingProfileId());
+      if (restored.kind === "sheet") setSheet(parseSheet(restored.body));
       // resync the editor fields directly from the returned document — the id-keyed
       // effect below only refires on document *selection* change, not on content
       // changes to the currently-open document (restore/save happen in place).
@@ -1850,7 +1871,16 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
             {(doc) => (
               <>
                 <div class="editor-toolbar">
-                  <input class="editor-title" value={editTitle()} onInput={(e) => setEditTitle(e.currentTarget.value)} />
+                  {/* The name of the thing you are editing is readable in full, in both
+                      editors alike; only genuine lack of room clips it, and then the
+                      whole title is still one hover away. */}
+                  <input
+                    class="editor-title"
+                    aria-label="Document title"
+                    title={editTitle()}
+                    value={editTitle()}
+                    onInput={(e) => setEditTitle(e.currentTarget.value)}
+                  />
                   <span class="version-chip">v{doc().version}</span>
                   <button
                     class="ghost small favorite-toggle"
@@ -1860,15 +1890,21 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
                   >
                     {isFavorite(doc().id) ? "★ Favourite" : "☆ Favourite"}
                   </button>
+{/* A table has no text flavour and no preview: neither control would say anything
+    about it, so neither is on the page. */}
+<Show when={doc().kind !== "sheet"}>
 <select aria-label="Document body type" value={doc().body_format} onChange={(e) => void changeBodyFormat(doc(), e.currentTarget.value as DocumentBodyFormat)}>
 <option value="text">Text / Markdown</option><option value="rich-text">Rich text</option><option value="checklist">Checklist</option><option value="code">Code</option>
 </select>
+</Show>
                   <Show when={doc().archived}>
                     <span class="archived-chip">archived</span>
                   </Show>
-                  <button class="ghost small" onClick={() => setShowPreview((v) => !v)}>
-                    {showPreview() ? "hide preview" : "show preview"}
-                  </button>
+                  <Show when={doc().kind !== "sheet"}>
+                    <button class="ghost small" onClick={() => setShowPreview((v) => !v)}>
+                      {showPreview() ? "hide preview" : "show preview"}
+                    </button>
+                  </Show>
                   <select value={doc().folder_id ?? ""} onChange={(e) => moveDocumentTo(e.currentTarget.value)}>
                     <option value={activeContainer() === "project" ? rootParentId() ?? "" : ""}>{activeContainer() === "project" ? "Documents" : "(root)"}</option>
                     <For each={displayFolders()}>{(f) => <option value={f.id}>{f.name}</option>}</For>
@@ -1923,12 +1959,18 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
                 </div>
 
                 <Show when={doc().doc_type === "file"} fallback={
-                  <div class="editor-panes" classList={{ split: showPreview() }}>
-                    <EditorSurface format={doc().body_format} />
-                    <Show when={showPreview()}>
-                      <div class="editor-preview"><DocumentRenderer format={() => doc().body_format} /></div>
-                    </Show>
-                  </div>
+                  <Show when={doc().kind !== "sheet"} fallback={
+                    <div class="editor-panes">
+                      <SheetEditor sheet={sheet()} onChange={setSheet} disabled={doc().archived} />
+                    </div>
+                  }>
+                    <div class="editor-panes" classList={{ split: showPreview() }}>
+                      <EditorSurface format={doc().body_format} />
+                      <Show when={showPreview()}>
+                        <div class="editor-preview"><DocumentRenderer format={() => doc().body_format} /></div>
+                      </Show>
+                    </div>
+                  </Show>
                 }>
                   <div class="editor-panes">
                     <Show when={filePreview()} fallback={<p class="hint pad" role="status">Loading file…</p>}>
@@ -2026,7 +2068,9 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
                         <span class="version-time">{when(v.created_at)}</span>
                       </div>
                       <div class="version-author">{profiles()?.find((p) => p.id === v.created_by)?.display_name ?? v.created_by ?? "—"}</div>
-                      <div class="version-snippet">{(v.body ?? "").slice(0, 80) || "(empty)"}</div>
+                      {/* History speaks about the document, not about its storage: a
+                          table is counted and named, prose keeps its text preview. */}
+                      <div class="version-snippet">{versionSnippet(selectedDocument()?.kind, v.body)}</div>
                       <Show when={v.version !== selectedDocument()?.version}>
                         <button class="ghost small" onClick={() => restoreVersion(v.version)}>
                           Restore

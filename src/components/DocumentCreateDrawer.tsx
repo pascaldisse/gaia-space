@@ -1,5 +1,5 @@
 import { Show, type JSX } from "solid-js";
-import type { DocumentBodyFormat } from "../api/documents";
+import type { DocumentCreateType } from "../api/documents";
 import { PillMenu } from "./controls";
 import "./DocumentCreateDrawer.css";
 
@@ -24,8 +24,9 @@ export type DocumentCreateDrawerProps = {
   scopeLabel: string;
   name: string;
   setName: (value: string) => void;
-  bodyFormat: DocumentBodyFormat;
-  setBodyFormat: (value: DocumentBodyFormat) => void;
+  /** Prose flavour or `sheet` — one question, asked once. */
+  bodyFormat: DocumentCreateType;
+  setBodyFormat: (value: DocumentCreateType) => void;
   busy?: boolean;
   onSubmit: () => void;
   onClose: () => void;
@@ -72,12 +73,13 @@ export default function DocumentCreateDrawer(props: DocumentCreateDrawerProps): 
               <PillMenu
                 label="Document body type"
                 value={props.bodyFormat}
-                onChange={(value) => props.setBodyFormat(value as DocumentBodyFormat)}
+                onChange={(value) => props.setBodyFormat(value as DocumentCreateType)}
                 options={[
                   { value: "text", label: "Text / Markdown" },
                   { value: "rich-text", label: "Rich text" },
                   { value: "checklist", label: "Checklist" },
                   { value: "code", label: "Code" },
+                  { value: "sheet", label: "Table" },
                 ]}
               />
             </div>

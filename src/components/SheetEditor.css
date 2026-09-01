@@ -1,0 +1,180 @@
+/* Sheet editor — the grid body of a `sheet` document. It fills the same editor pane a
+   markdown body fills, so a table ends at exactly the edge every other page ends at.
+   Structure is unscoped: the light theme recolours, it never re-measures. */
+
+.sheet-editor {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  background: var(--dk-editor-bg);
+}
+
+.sheet-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.sheet-grid {
+  border-collapse: collapse;
+  /* The grid ends where the editor pane ends — one page, one measure. It only grows
+     past that edge (and scrolls) once the columns genuinely need the room. */
+  width: 100%;
+  table-layout: fixed;
+  font-size: var(--dk-fs-sm, 0.9em);
+}
+
+.sheet-grid th,
+.sheet-grid td {
+  border: var(--dk-hairline) solid var(--dk-line);
+  padding: 0;
+  vertical-align: middle;
+  text-align: left;
+}
+
+.sheet-grid thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--dk-editor-bg);
+}
+
+.sheet-gutter {
+  width: 2.6em;
+  padding: 0 var(--dk-space-xs, 0.35em);
+  color: var(--text-muted);
+  font-weight: 500;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.sheet-gutter-head { opacity: 0.6; }
+
+/* AT REST A COLUMN HEAD IS ITS NAME. The handle that opens rename / type / delete
+   only appears once the pointer or the keyboard is on the head. */
+.sheet-column-head {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--dk-space-2xs, 0.25em);
+  padding: 0.2em 0.3em;
+  min-width: 0;
+}
+
+.sheet-column-trigger {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--dk-space-2xs, 0.25em);
+  background: transparent;
+  border: 0;
+  border-radius: var(--dk-radius-sm, 4px);
+  padding: 0.25em;
+  font: inherit;
+  font-weight: 600;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.sheet-column-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sheet-column-caret {
+  opacity: 0;
+  font-size: 0.85em;
+  color: var(--text-muted);
+}
+.sheet-column-head:hover .sheet-column-caret,
+.sheet-column-head:focus-within .sheet-column-caret { opacity: 0.75; }
+.sheet-editor .sheet-column-trigger:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+/* ONE ACTION, ONE PLACE: everything you can decide about a column is in this one
+   panel, and nowhere else on the page. */
+.sheet-column-menu {
+  position: absolute;
+  top: calc(100% + 0.25em);
+  left: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: var(--dk-space-xs, 0.35em);
+  min-width: 12em;
+  padding: var(--dk-space-sm, 0.5em);
+  background: var(--dk-editor-bg, var(--surface, #fff));
+  border: var(--dk-hairline) solid var(--dk-line);
+  border-radius: var(--dk-radius-md, 8px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  font-weight: 400;
+}
+.sheet-editor .sheet-column-menu .sheet-column-delete { opacity: 1; }
+.sheet-editor .sheet-column-menu .sheet-column-delete[disabled] { opacity: 0.35; }
+
+/* The app's global input skin (border, radius, filled background) would draw a second
+   frame inside every cell. A cell IS the frame, so the control inside it is flat. */
+.sheet-editor .sheet-cell {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  color: inherit;
+  font: inherit;
+}
+
+.sheet-column-label {
+  width: 100%;
+  font-weight: 600;
+  padding: 0.25em;
+}
+
+.sheet-column-type {
+  width: 100%;
+  font: inherit;
+  padding: 0.2em 0.3em;
+}
+
+.sheet-cell {
+  width: 100%;
+  min-width: 4em;
+  box-sizing: border-box;
+  padding: 0.4em 0.5em;
+}
+.sheet-editor .sheet-cell:focus-visible,
+.sheet-editor .sheet-column-label:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+.sheet-row-actions,
+.sheet-add-column {
+  border: 0;
+  padding: 0 0.25em;
+  width: 6.5em;
+  white-space: nowrap;
+}
+.sheet-row-actions { width: 2.4em; text-align: center; }
+/* `button.ghost.small` is invisible by default app-wide (a hover-reveal affordance).
+   Adding a row or a column is an offer the page must make out loud, so those two are
+   always shown; dropping one appears on the row or column it belongs to. */
+.sheet-editor .sheet-foot button.ghost.small,
+.sheet-editor .sheet-add-column button.ghost.small { opacity: 1; }
+.sheet-drop { line-height: 1; padding: 0.1em 0.45em; }
+.sheet-editor tr:hover .sheet-drop,
+.sheet-editor tr:focus-within .sheet-drop,
+.sheet-editor .sheet-drop:focus-visible { opacity: 0.8; }
+.sheet-editor .sheet-drop[disabled] { opacity: 0; }
+
+.sheet-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--dk-space-md, 0.75em);
+  padding: 0.45em 0.6em;
+  border-top: var(--dk-hairline) solid var(--dk-line);
+}
+.sheet-hint { color: var(--text-muted); font-size: 0.8em; }

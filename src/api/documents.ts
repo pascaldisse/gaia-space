@@ -33,6 +33,123 @@ export type FavoriteDocument = Document & {
 };
 export type DocumentBodyFormat = "text" | "rich-text" | "checklist" | "code";
 
+/** What a document IS, not how its text is styled: prose or a grid.
+ *  Older rows carry no kind at all and read back as "markdown" (see documents.rs). */
+export type DocKind = "markdown" | "sheet";
+
+/** The single question the create form asks: prose in one of its flavours, or a table. */
+export type DocumentCreateType = DocumentBodyFormat | "sheet";
+
+export type SheetColumnType = "text" | "number" | "date";
+export type SheetColumn = { id: string; label: string; type: SheetColumnType };
+export type SheetRow = { id: string; cells: Record<string, string> };
+/** The body of a `sheet` document, verbatim as it is stored (JSON string in `body`).
+ *  Ids are stable and never reused, so two versions diff cell by cell. */
+export type SheetDoc = { columns: SheetColumn[]; rows: SheetRow[] };
+
+export const newColumnId = () => newId("c");
+export const newRowId = () => newId("r");
+
+/** A sheet nobody has filled in yet: three named columns, three empty rows —
+ *  enough to type into, never an empty statement on the page. */
+export function emptySheet(): SheetDoc {
+  const columns: SheetColumn[] = [
+    { id: newColumnId(), label: "Column 1", type: "text" },
+    { id: newColumnId(), label: "Column 2", type: "text" },
+    { id: newColumnId(), label: "Column 3", type: "text" },
+  ];
+  const rows: SheetRow[] = [0, 1, 2].map(() => ({ id: newRowId(), cells: {} }));
+  return { columns, rows };
+}
+
+const COLUMN_TYPES: SheetColumnType[] = ["text", "number", "date"];
+
+/** Tolerant on the way in: an unreadable or empty body opens a usable grid rather than
+ *  an error page. Strictness lives on the write path, where the server refuses garbage. */
+export function parseSheet(body: string | null | undefined): SheetDoc {
+  if (!body || !body.trim()) return emptySheet();
+  let raw: unknown;
+  try {
+    raw = JSON.parse(body);
+  } catch {
+    return emptySheet();
+  }
+  if (!raw || typeof raw !== "object") return emptySheet();
+  const source = raw as { columns?: unknown; rows?: unknown };
+  const columns: SheetColumn[] = Array.isArray(source.columns)
+    ? source.columns.flatMap((entry) => {
+        const column = entry as Partial<SheetColumn>;
+        if (!column || typeof column.id !== "string" || !column.id.trim()) return [];
+        const type = COLUMN_TYPES.includes(column.type as SheetColumnType) ? (column.type as SheetColumnType) : "text";
+        return [{ id: column.id, label: typeof column.label === "string" ? column.label : "", type }];
+      })
+    : [];
+  if (!columns.length) return emptySheet();
+  const known = new Set(columns.map((column) => column.id));
+  const rows: SheetRow[] = Array.isArray(source.rows)
+    ? source.rows.flatMap((entry) => {
+        const row = entry as Partial<SheetRow>;
+        if (!row || typeof row.id !== "string" || !row.id.trim()) return [];
+        const cells: Record<string, string> = {};
+        for (const [columnId, value] of Object.entries(row.cells ?? {})) {
+          if (known.has(columnId) && typeof value === "string") cells[columnId] = value;
+        }
+        return [{ id: row.id, cells }];
+      })
+    : [];
+  return { columns, rows };
+}
+
+/** WHAT A TABLE LOOKS LIKE IN A LIST. A version list is a list of *changes a person
+ *  made*, so it must speak about the table — "3 columns × 3 rows · Vendor, Amount" —
+ *  never about its JSON. Unlike `parseSheet` this one is STRICT on purpose: a body it
+ *  cannot read must not be dressed up as an empty grid, it is simply "Table".
+ *  It never throws: a broken version may not take the whole history down with it. */
+export function sheetSnippet(body: string | null | undefined): string {
+  let raw: unknown;
+  try {
+    raw = JSON.parse((body ?? "").trim() || "null");
+  } catch {
+    return "Table";
+  }
+  if (!raw || typeof raw !== "object") return "Table";
+  const source = raw as { columns?: unknown; rows?: unknown };
+  if (!Array.isArray(source.columns)) return "Table";
+  const labels = source.columns.flatMap((entry) => {
+    const column = entry as Partial<SheetColumn> | null;
+    if (!column || typeof column !== "object" || typeof column.id !== "string" || !column.id.trim()) return [];
+    const label = typeof column.label === "string" ? column.label.trim() : "";
+    return [label || "Column"];
+  });
+  if (!labels.length) return "Table";
+  const rows = Array.isArray(source.rows) ? source.rows.length : 0;
+  const named = labels.slice(0, 4).join(", ") + (labels.length > 4 ? ", …" : "");
+  const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`;
+  return `${plural(labels.length, "column")} × ${plural(rows, "row")} · ${named}`;
+}
+
+/** The one place a stored body becomes a line of history — prose keeps its old text
+ *  preview, a table gets counted and named. */
+export function versionSnippet(kind: string | null | undefined, body: string | null | undefined): string {
+  if (kind === "sheet") return sheetSnippet(body);
+  return (body ?? "").slice(0, 80) || "(empty)";
+}
+
+/** Exactly the shape `documents.rs` validates — no extra keys, no undefined cells. */
+export function serializeSheet(sheet: SheetDoc): string {
+  return JSON.stringify({
+    columns: sheet.columns.map((column) => ({ id: column.id, label: column.label, type: column.type })),
+    rows: sheet.rows.map((row) => ({
+      id: row.id,
+      cells: Object.fromEntries(
+        sheet.columns
+          .filter((column) => (row.cells[column.id] ?? "") !== "")
+          .map((column) => [column.id, row.cells[column.id]]),
+      ),
+    })),
+  });
+}
+
 export type Document = {
   id: string;
   container_type: string;
@@ -40,6 +157,9 @@ export type Document = {
   folder_id: string | null;
   doc_type: DocType;
   body_format: DocumentBodyFormat;
+  /** Absent on documents written by callers that predate sheets; the server reads
+   *  those back as "markdown", so treat a missing kind as prose. */
+  kind?: DocKind;
   title: string;
   body: string | null;
   version: number;
