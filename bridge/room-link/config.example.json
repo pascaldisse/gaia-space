@@ -23,8 +23,7 @@
   "mappings": [],
   "space": {
     "baseUrl": "http://127.0.0.1:8090",
-    "username": "bridge-user",
-    "password": "set-this-outside-git",
+    "personalAccessToken": "set-this-outside-git",
     "pollIntervalMs": 1000,
     "requestTimeoutMs": 15000
   },
