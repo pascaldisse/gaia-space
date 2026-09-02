@@ -1,0 +1,14 @@
+{
+  "action": "closed",
+  "number": 42,
+  "repository": { "full_name": "acme/widgets" },
+  "pull_request": {
+    "number": 42,
+    "title": "Ship the webhook bridge",
+    "merged": true,
+    "html_url": "https://github.com/acme/widgets/pull/42",
+    "user": { "login": "octocat" },
+    "base": { "ref": "main" },
+    "head": { "ref": "feature/bridge" }
+  }
+}

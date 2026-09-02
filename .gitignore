@@ -39,3 +39,5 @@ src-tauri/target/
 reports/finance/
 docs/finance/
 *finanzplan*
+# GitHub push bridge delivery dedupe state; deployment-owned.
+bridge/github-push/state.json
