@@ -20,6 +20,20 @@
       "commandPrefix": "!bridge"
     }
   },
+  "actions": {
+    "enabled": false,
+    "commandPrefix": "!space",
+    "kinds": { "task": true, "ticket": true },
+    "confirmTtlMs": 300000,
+    "maxTitleLength": 200,
+    "duplicateWindowMs": 86400000,
+    "statePath": "bridge/room-link/state/actions.json",
+    "stateLimit": 500,
+    "webBaseUrl": "",
+    "webBasePath": "",
+    "announceInChannel": true,
+    "allowedRoomIds": []
+  },
   "mappings": [],
   "space": {
     "baseUrl": "http://127.0.0.1:8090",
