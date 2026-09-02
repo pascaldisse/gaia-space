@@ -32,6 +32,8 @@ Create a dedicated Space service account; grant it access to the target channel.
 ## Deploy
 
 ```sh
+# Advance /opt/gaia-space-repo to a ref containing bridge/github-push.
+cd /opt/gaia-space-repo && git fetch origin && git checkout <merge-commit-or-branch>
 install -o root -g root -m 0644 deploy/gaia-space-github-push.service /etc/systemd/system/
 # Add deploy/caddy-github-push.snippet before the /space SPA fallback; it mirrors /space/api/* strip-prefix routing.
 systemctl daemon-reload
@@ -60,7 +62,7 @@ curl -X POST http://127.0.0.1:8093/notify \
   --data '{"repo":"paloptic/deploy","ref":"main","text":"Deploy complete","url":"https://paloptic.com"}'
 ```
 
-`GET /health` → `{"ok":true,"posted":0,"lastDeliveryAt":null}` shape.
+`GET /health` → `{"ok":true,"posted":0,"failed":0,"lastDeliveryAt":null}` shape.
 
 ## Test
 

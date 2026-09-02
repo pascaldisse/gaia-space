@@ -16,7 +16,8 @@ export function formatPush(payload: unknown, maxCommits: number): FormattedEvent
   const event = object(payload);
   if (!event || event.deleted === true) return null;
   const repo = repoName(event);
-  const branch = text(event.ref, "unknown").replace(/^refs\/heads\//, "");
+  const ref = text(event.ref, "unknown");
+  const branch = ref.startsWith("refs/tags/") ? `tag ${ref.slice("refs/tags/".length)}` : ref.replace(/^refs\/heads\//, "");
   const pusher = text(object(event.pusher)?.name);
   const commits = Array.isArray(event.commits) ? event.commits.map(object).filter((commit): commit is RecordValue => !!commit) : [];
   const rendered = commits.slice(0, maxCommits).map((commit) => {
@@ -25,7 +26,8 @@ export function formatPush(payload: unknown, maxCommits: number): FormattedEvent
     return `• ${text(commit.id, "???????").slice(0, 7)} ${subject} — ${text(author?.name)}`;
   });
   const more = commits.length > rendered.length ? `+${commits.length - rendered.length} more` : undefined;
-  return { repo, text: lines(`⬆ ${repo} → ${branch} · ${commits.length} commits by ${pusher}`, ...rendered, more, url(event.compare)) };
+  const prefix = event.forced === true ? "⚠ force-push " : "";
+  return { repo, text: lines(`${prefix}⬆ ${repo} → ${branch} · ${commits.length} commits by ${pusher}`, ...rendered, more, url(event.compare)) };
 }
 
 export function formatPullRequest(payload: unknown): FormattedEvent | null {

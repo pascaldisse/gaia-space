@@ -13,12 +13,17 @@ function json(body: unknown, status = 200): Response {
 function channelFor(config: GitHubPushConfig, repo: string): string {
   return config.repoChannelMap[repo] || config.channelId;
 }
-function notificationInput(value: unknown): { repo: string; ref?: string; text: string; url?: string } | null {
+type NotificationInput = { repo: string; ref?: string; text: string; url?: string };
+const NOTIFY_MAX_URL = 2048;
+function notificationInput(value: unknown, maxText: number): NotificationInput | "too_large" | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const input = value as Record<string, unknown>;
   if (typeof input.repo !== "string" || !input.repo.trim() || typeof input.text !== "string" || !input.text.trim()) return null;
   if ((input.ref !== undefined && typeof input.ref !== "string") || (input.url !== undefined && typeof input.url !== "string")) return null;
-  return { repo: input.repo.trim(), text: input.text.trim(), ref: input.ref?.trim(), url: input.url?.trim() };
+  const text = input.text.trim();
+  const url = input.url?.trim();
+  if (text.length > maxText || (url !== undefined && url.length > NOTIFY_MAX_URL)) return "too_large";
+  return { repo: input.repo.trim(), text, ref: input.ref?.trim(), url };
 }
 
 export function createHandler(config: GitHubPushConfig, poster: Poster, state: DeliveryState, metrics: Metrics = { posted: 0, failed: 0, lastDeliveryAt: null }): (request: Request) => Promise<Response> {
@@ -34,13 +39,14 @@ export function createHandler(config: GitHubPushConfig, poster: Poster, state: D
 
   return async (request: Request): Promise<Response> => {
     const pathname = new URL(request.url).pathname;
-    if (request.method === "GET" && pathname === "/health") return json({ ok: true, posted: metrics.posted, lastDeliveryAt: metrics.lastDeliveryAt });
+    if (request.method === "GET" && pathname === "/health") return json({ ok: true, posted: metrics.posted, failed: metrics.failed, lastDeliveryAt: metrics.lastDeliveryAt });
 
     if (request.method === "POST" && pathname === "/notify") {
       const authorization = request.headers.get("authorization");
       if (!authorization?.startsWith("Bearer ") || !timingSafeEqual(authorization.slice(7), config.notifyToken)) return json({ ok: false, error: "unauthorized" }, 401);
       try {
-        const input = notificationInput(await request.json());
+        const input = notificationInput(await request.json(), config.notifyMaxText);
+        if (input === "too_large") return json({ ok: false, error: "notification too large" }, 413);
         if (!input) return json({ ok: false, error: "invalid notification" }, 400);
         await post(formatNotification(input));
         return json({ ok: true });

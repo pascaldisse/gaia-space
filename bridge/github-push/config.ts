@@ -10,6 +10,7 @@ export type GitHubPushConfig = {
   repoChannelMap: Record<string, string>;
   statePath: string;
   maxCommits: number;
+  notifyMaxText: number;
 };
 
 export class ConfigError extends Error {}
@@ -61,5 +62,6 @@ export function readConfig(env: Record<string, string | undefined> = Bun.env): G
     repoChannelMap: channelMap(env.REPO_CHANNEL_MAP),
     statePath: env.STATE_PATH?.trim() || "bridge/github-push/state.json",
     maxCommits: positiveInteger(env.MAX_COMMITS, 5, "MAX_COMMITS"),
+    notifyMaxText: positiveInteger(env.NOTIFY_MAX_TEXT, 4000, "NOTIFY_MAX_TEXT"),
   };
 }

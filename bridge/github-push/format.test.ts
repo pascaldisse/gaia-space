@@ -9,6 +9,9 @@ describe("GitHub event formatting", () => {
     expect(formatPush(push, 2)?.text).toBe("⬆ acme/widgets → main · 3 commits by octocat\n• 0123456 Add bridge — Ada\n• fedcba9 Fix retry — Bob\n+1 more\nhttps://github.com/acme/widgets/compare/a...b");
   });
   test("skips deleted refs", () => { expect(formatPush({ ...push, deleted: true }, 5)).toBeNull(); });
+  test("labels tag and force pushes", () => {
+    expect(formatPush({ ...push, ref: "refs/tags/v1.2.3", forced: true }, 1)?.text).toStartWith("⚠ force-push ⬆ acme/widgets → tag v1.2.3");
+  });
   test("formats merged pull requests", () => {
     expect(formatPullRequest(pullRequest)?.text).toBe("🔀 acme/widgets PR #42 merged: Ship the webhook bridge (by octocat)\nmain ← feature/bridge\nhttps://github.com/acme/widgets/pull/42");
   });
