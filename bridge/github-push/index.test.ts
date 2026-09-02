@@ -53,7 +53,7 @@ describe("GitHub push bridge HTTP routes", () => {
     try {
       const url = `http://127.0.0.1:${server.port}`;
       expect((await fetch(`${url}/notify`, { method: "POST", headers: { authorization: "Bearer notify-secret", "content-type": "application/json" }, body: JSON.stringify({ repo: "local/paloptic", text: "Deployed" }) })).status).toBe(200);
-      expect(await (await fetch(`${url}/health`)).json()).toMatchObject({ ok: true, posted: 0, failed: 1, lastDeliveryAt: null });
+      expect(await (await fetch(`${url}/hooks/health`)).json()).toMatchObject({ ok: true, posted: 0, failed: 1, lastDeliveryAt: null });
     } finally { server.stop(true); }
   });
   test("posts to Space with a permanent token and retries a 5xx once", async () => {

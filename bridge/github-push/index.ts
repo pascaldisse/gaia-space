@@ -39,7 +39,7 @@ export function createHandler(config: GitHubPushConfig, poster: Poster, state: D
 
   return async (request: Request): Promise<Response> => {
     const pathname = new URL(request.url).pathname;
-    if (request.method === "GET" && pathname === "/health") return json({ ok: true, posted: metrics.posted, failed: metrics.failed, lastDeliveryAt: metrics.lastDeliveryAt });
+    if (request.method === "GET" && (pathname === "/health" || pathname === "/hooks/health")) return json({ ok: true, posted: metrics.posted, failed: metrics.failed, lastDeliveryAt: metrics.lastDeliveryAt });
 
     if (request.method === "POST" && pathname === "/notify") {
       const authorization = request.headers.get("authorization");
