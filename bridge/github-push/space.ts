@@ -38,7 +38,8 @@ export class SpaceApi {
         method: "POST", headers: this.headers(),
         body: JSON.stringify({ message: { id: crypto.randomUUID(), channel_id: channelId, author_id: null, text, created_at: Math.floor(Date.now() / 1_000), edited_at: null, thread_of: null, archived: false } }),
       });
-      const payload = await response.json() as CommandResponse<SpaceMessage>;
+      let payload: CommandResponse<SpaceMessage> = {};
+      try { payload = await response.json() as CommandResponse<SpaceMessage>; } catch { /* status still determines retry */ }
       if (response.ok && payload.ok && payload.value) return payload.value;
       if (response.status >= 500 && attempt === 0) continue;
       throw new SpacePostError(response.status, `Space create_message failed: ${payload.error ?? response.status}`);

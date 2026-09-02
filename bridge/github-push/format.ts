@@ -38,7 +38,7 @@ export function formatPullRequest(payload: unknown): FormattedEvent | null {
   const author = text(object(pr.user)?.login);
   const base = text(object(pr.base)?.ref);
   const head = text(object(pr.head)?.ref);
-  return { repo: repoName(event), text: lines(`🔀 ${repoName(event)} PR #${text(pr.number, text(event.number))} ${state}: ${text(pr.title, "(no title)")} (by ${author})`, `${base} ← ${head}`, url(pr.html_url)) };
+  return { repo: repoName(event), text: lines(`🔀 ${repoName(event)} PR #${typeof pr.number === "number" || typeof pr.number === "string" ? String(pr.number) : text(event.number)} ${state}: ${text(pr.title, "(no title)")} (by ${author})`, `${base} ← ${head}`, url(pr.html_url)) };
 }
 
 export function formatRelease(payload: unknown): FormattedEvent | null {
