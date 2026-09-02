@@ -1,0 +1,12 @@
+{
+  "ref": "refs/heads/main",
+  "compare": "https://github.com/acme/widgets/compare/a...b",
+  "deleted": false,
+  "pusher": { "name": "octocat" },
+  "repository": { "full_name": "acme/widgets" },
+  "commits": [
+    { "id": "0123456789abcdef", "message": "Add bridge\n\nDetails", "author": { "name": "Ada" } },
+    { "id": "fedcba9876543210", "message": "Fix retry", "author": { "name": "Bob" } },
+    { "id": "1111111111111111", "message": "Document deploy", "author": { "name": "Cam" } }
+  ]
+}
