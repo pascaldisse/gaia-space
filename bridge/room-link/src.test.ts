@@ -14,12 +14,22 @@ describe("configuration and loop guard", () => {
 
   test("never forwards bridge-authored, archived, threaded, blank, or seen messages", () => {
     const seen = new Set(["seen"]);
-    expect(isForwardable(message("human", "human"), "bridge", seen)).toBe(true);
-    expect(isForwardable(message("bridge", "bridge"), "bridge", seen)).toBe(false);
-    expect(isForwardable(message("seen", "human"), "bridge", seen)).toBe(false);
-    expect(isForwardable({ ...message("thread", "human"), thread_of: "root" }, "bridge", seen)).toBe(false);
-    expect(isForwardable({ ...message("archived", "human"), archived: true }, "bridge", seen)).toBe(false);
-    expect(isForwardable(message("blank", "human", "  "), "bridge", seen)).toBe(false);
+    const byAuthor = (candidate: SpaceMessage) => candidate.author_id === "bridge";
+    expect(isForwardable(message("human", "human"), byAuthor, seen)).toBe(true);
+    expect(isForwardable(message("bridge", "bridge"), byAuthor, seen)).toBe(false);
+    expect(isForwardable(message("seen", "human"), byAuthor, seen)).toBe(false);
+    expect(isForwardable({ ...message("thread", "human"), thread_of: "root" }, byAuthor, seen)).toBe(false);
+    expect(isForwardable({ ...message("archived", "human"), archived: true }, byAuthor, seen)).toBe(false);
+    expect(isForwardable(message("blank", "human", "  "), byAuthor, seen)).toBe(false);
+  });
+
+  test("own-account mode is off by default and its knobs have defaults", () => {
+    const config = parseConfig({ mappings: [], space: { sessionCookie: "space_session=t" }, gaia: { workspaceId: "w" } });
+    expect(config.space.ownAccountMode).toBe(false);
+    expect(config.space.outboundIdPrefix).toBe("bridge-");
+    expect(config.space.outboundLedgerLimit).toBe(5000);
+    expect(parseConfig({ mappings: [], space: { sessionCookie: "t", ownAccountMode: true, outboundLedgerLimit: 10 }, gaia: { workspaceId: "w" } }).space.ownAccountMode).toBe(true);
+    expect(() => parseConfig({ mappings: [], space: { sessionCookie: "t", ownAccountMode: true, outboundIdPrefix: "has space" }, gaia: { workspaceId: "w" } })).toThrow("outboundIdPrefix");
   });
 });
 
@@ -32,7 +42,7 @@ describe("RoomLink", () => {
     const space: SpaceTransport = {
       bridgeAuthorId: async () => "bridge-profile",
       listMessages: async () => messages,
-      postMessage: async (channel, text) => { posted.push(`${channel}:${text}`); messages.push(message("bridge-reply", "bridge-profile", text)); },
+      postMessage: async (channel, text, messageId) => { posted.push(`${channel}:${text}`); const id = messageId ?? "bridge-reply"; messages.push(message(id, "bridge-profile", text)); return id; },
     };
     const gaia: GaiaTransport = {
       events: async (): Promise<GaiaEvent[]> => eventReads++ === 0 ? [{ id: "before", author: "user", text: "prior" }] : [{ id: "before", author: "user", text: "prior" }, { id: "reply", author: "terra", text: "agent reply" }],

@@ -65,6 +65,36 @@ bun run bridge/room-link/src.ts bridge/room-link/config.json
 
 Set either `space.sessionCookie` or `space.username` + `space.password`. Space derives the bridge identity from `/api/auth/me`; replies authored by that profile are never re-forwarded.
 
+### Own-account mode (running under your own Space credential)
+
+By default the bridge assumes a **dedicated account** and suppresses by author: everything written by its own profile is ignored. Point that same default at your *personal* credential and it also swallows every message you type in Space by hand — same author, no way to tell the two apart.
+
+`space.ownAccountMode: true` switches the loop guard from author to **origin**:
+
+| message | default mode | own-account mode |
+| --- | --- | --- |
+| written by hand by the credential owner | dropped | **forwarded** |
+| written by anyone else | forwarded | forwarded |
+| posted by GAIA through this bridge | dropped | dropped |
+| thread reply / archived / blank | dropped | dropped |
+
+Origin lives in the **message id**, never in a marker inside the text:
+
+1. the id is chosen by the client, and `create_message` stores it verbatim and returns the whole message view (server-side only `author_id` is rebound, by `bind_session_identity`) — so a posted id is a fact both sides agree on;
+2. every outbound id is written to a durable ledger (`space.outboundLedgerPath`) **before** the post goes out, so a crash between record and post can only over-suppress, never loop;
+3. the ledger is a bounded FIFO ring (`space.outboundLedgerLimit`, default 5000) — it cannot grow without end, and the id prefix (`space.outboundIdPrefix`, default `bridge-`) is the stateless second guard that still holds for an evicted id or a lost state file.
+
+The honest caveat: a message you write by hand whose id happens to start with `bridge-` would be treated as GAIA's own. Space clients mint UUID-shaped ids, so this cannot happen by accident; pick a more distinctive prefix if you want the point moot.
+
+```jsonc
+"space": {
+  "ownAccountMode": true,                                            // default false — behaviour above is unchanged when off
+  "outboundIdPrefix": "bridge-",                                     // default; must be non-empty [A-Za-z0-9._-]
+  "outboundLedgerPath": "bridge/room-link/state/outbound-ids.json",  // default; gitignored, atomic writes
+  "outboundLedgerLimit": 5000                                        // default; FIFO ring size
+}
+```
+
 ### Config keys (whole-space)
 
 ```jsonc

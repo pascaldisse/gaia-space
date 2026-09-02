@@ -25,6 +25,10 @@
     "baseUrl": "http://127.0.0.1:8090",
     "username": "bridge-user",
     "password": "set-this-outside-git",
+    "ownAccountMode": false,
+    "outboundIdPrefix": "bridge-",
+    "outboundLedgerPath": "bridge/room-link/state/outbound-ids.json",
+    "outboundLedgerLimit": 5000,
     "pollIntervalMs": 1000,
     "requestTimeoutMs": 15000
   },
