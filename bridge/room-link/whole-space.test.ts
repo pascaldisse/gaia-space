@@ -14,7 +14,7 @@ const fakeSpace = (channels: SpaceChannel[], messages: Record<string, SpaceMessa
   bridgeAuthorId: async () => "bridge-profile",
   listChannels: async () => channels,
   listMessages: async (channelId: string) => messages[channelId] ?? [],
-  postMessage: async function (this: { posted: string[] }, channelId: string, text: string) { this.posted.push(`${channelId}:${text}`); },
+  postMessage: async function (this: { posted: string[] }, channelId: string, text: string, messageId?: string) { this.posted.push(`${channelId}:${text}`); return messageId ?? "bridge-post"; },
 });
 
 const fakeGaia = (rooms: string[] = []) => {
@@ -159,7 +159,7 @@ describe("per-channel isolation and late linking", () => {
     const space: SpaceTransport = {
       bridgeAuthorId: async () => "bridge-profile",
       listMessages: async (channelId: string) => messages[channelId] ?? [],
-      postMessage: async () => {},
+      postMessage: async (_channel: string, _text: string, messageId?: string) => messageId ?? "bridge-post",
     };
     let replyIndex = 0;
     const gaia = { events: async () => (replyIndex++ % 2 === 0 ? [] : [{ id: `r${replyIndex}`, author: "gaia", text: "ack" }]), send: async (roomId: string, text: string) => { sent.push(`${roomId}:${text}`); } };

@@ -2,20 +2,28 @@
  *  Two modes: `mappings` (an explicit routing table) and `whole-space` (every discovered
  *  Space channel gets its own GAIA room, plus a hub room — see whole-space.ts). */
 import { channelDiscoveryOn, createWholeSpace, digestDue, digestText, FileMappingStore, HttpGaiaProvisioning, mappingsOf, parseWholeSpace, type WholeSpaceConfig } from "./whole-space.ts";
+import { authorOriginGuard, FileLedgerStore, OwnAccountGuard, type OriginGuard } from "./own-account.ts";
 
 export type Mapping = { spaceChannelId: string; roomId: string };
 export type Config = {
   mode: "mappings" | "whole-space";
   wholeSpace?: WholeSpaceConfig;
   mappings: Mapping[];
-  space: { baseUrl: string; personalAccessToken?: string; username?: string; password?: string; sessionCookie?: string; pollIntervalMs: number; requestTimeoutMs: number };
+  space: {
+    baseUrl: string; personalAccessToken?: string; username?: string; password?: string; sessionCookie?: string; pollIntervalMs: number; requestTimeoutMs: number;
+    /** Opt-in: the credential belongs to a human, so suppress by message origin, not by author. */
+    ownAccountMode: boolean;
+    outboundIdPrefix: string;
+    outboundLedgerPath: string;
+    outboundLedgerLimit: number;
+  };
   gaia: { baseUrl: string; workspaceId: string; replyTimeoutMs: number; pollIntervalMs: number; requestTimeoutMs: number };
 };
 export type SpaceMessage = { id: string; channel_id: string; author_id: string | null; text: string; created_at: number; thread_of: string | null; archived: boolean };
 export type GaiaEvent = { id: string; author: string; text: string };
 
 const defaults: Omit<Config, "mappings" | "mode" | "wholeSpace"> = {
-  space: { baseUrl: "http://127.0.0.1:8090", pollIntervalMs: 1_000, requestTimeoutMs: 15_000 },
+  space: { baseUrl: "http://127.0.0.1:8090", pollIntervalMs: 1_000, requestTimeoutMs: 15_000, ownAccountMode: false, outboundIdPrefix: "bridge-", outboundLedgerPath: "bridge/room-link/state/outbound-ids.json", outboundLedgerLimit: 5_000 },
   gaia: { baseUrl: "http://127.0.0.1:8787", workspaceId: "", replyTimeoutMs: 120_000, pollIntervalMs: 1_000, requestTimeoutMs: 15_000 },
 };
 const requiredString = (value: unknown, name: string) => {
@@ -53,8 +61,14 @@ export function parseConfig(raw: unknown): Config {
     sessionCookie: typeof spaceInput.sessionCookie === "string" ? requiredString(spaceInput.sessionCookie, "space.sessionCookie") : undefined,
     pollIntervalMs: positive(spaceInput.pollIntervalMs, "space.pollIntervalMs", defaults.space.pollIntervalMs),
     requestTimeoutMs: positive(spaceInput.requestTimeoutMs, "space.requestTimeoutMs", defaults.space.requestTimeoutMs),
+    ownAccountMode: spaceInput.ownAccountMode === undefined ? defaults.space.ownAccountMode : spaceInput.ownAccountMode === true,
+    outboundIdPrefix: spaceInput.outboundIdPrefix === undefined ? defaults.space.outboundIdPrefix : requiredString(spaceInput.outboundIdPrefix, "space.outboundIdPrefix"),
+    outboundLedgerPath: spaceInput.outboundLedgerPath === undefined ? defaults.space.outboundLedgerPath : requiredString(spaceInput.outboundLedgerPath, "space.outboundLedgerPath"),
+    outboundLedgerLimit: positive(spaceInput.outboundLedgerLimit, "space.outboundLedgerLimit", defaults.space.outboundLedgerLimit),
   };
   if (!space.personalAccessToken && !space.sessionCookie && (!space.username || !space.password)) throw new Error("config space requires personalAccessToken or sessionCookie or username and password");
+  // Own-account mode leans on the id prefix as its stateless second guard, so it must be usable.
+  if (space.ownAccountMode && !/^[A-Za-z0-9._-]+$/.test(space.outboundIdPrefix)) throw new Error("config space.outboundIdPrefix must be non-empty and may only contain letters, numbers, dots, underscores, hyphens");
   return { mode, wholeSpace, mappings, space, gaia: {
     baseUrl: typeof gaiaInput.baseUrl === "string" ? requiredString(gaiaInput.baseUrl, "gaia.baseUrl") : defaults.gaia.baseUrl,
     workspaceId: requiredString(gaiaInput.workspaceId, "gaia.workspaceId"),
@@ -65,10 +79,15 @@ export function parseConfig(raw: unknown): Config {
 }
 export async function loadConfig(path: string): Promise<Config> { return parseConfig(JSON.parse(await Bun.file(path).text())); }
 
-export interface SpaceTransport { bridgeAuthorId(): Promise<string>; listMessages(channelId: string): Promise<SpaceMessage[]>; postMessage(channelId: string, text: string): Promise<void>; }
+/** `postMessage` returns the id the Space server stored — `create_message` answers with the whole
+ *  message view, and the id is the one the client sent (only `author_id` is rebound server-side). */
+export interface SpaceTransport { bridgeAuthorId(): Promise<string>; listMessages(channelId: string): Promise<SpaceMessage[]>; postMessage(channelId: string, text: string, messageId?: string): Promise<string>; }
 export interface GaiaTransport { events(roomId: string): Promise<GaiaEvent[]>; send(roomId: string, text: string): Promise<void>; }
 export const inboundText = (message: SpaceMessage) => `Space message from ${message.author_id ?? "unknown"}: ${message.text}`;
-export const isForwardable = (message: SpaceMessage, bridgeAuthorId: string, seen: ReadonlySet<string>) => !message.archived && !message.thread_of && !!message.text.trim() && message.author_id !== bridgeAuthorId && !seen.has(message.id);
+/** Channel content only — never a thread reply, never archived, never blank, never seen, and never
+ *  a message this bridge itself originated (what "own" means is the guard's decision). */
+export const isForwardable = (message: SpaceMessage, ownOrigin: (message: SpaceMessage) => boolean, seen: ReadonlySet<string>) =>
+  !message.archived && !message.thread_of && !!message.text.trim() && !ownOrigin(message) && !seen.has(message.id);
 export const sleep = (milliseconds: number) => new Promise<void>(resolve => setTimeout(resolve, milliseconds));
 
 export class RoomLink {
@@ -76,7 +95,7 @@ export class RoomLink {
   // Priming is PER CHANNEL: a channel linked later (whole-space discovery) primes its own
   // history instead of replaying it, and already-linked channels keep forwarding uninterrupted.
   private readonly primed = new Set<string>();
-  constructor(private mappings: Mapping[], private readonly space: SpaceTransport, private readonly gaia: GaiaTransport, private readonly replyTimeoutMs: number, private readonly replyPollIntervalMs: number) {}
+  constructor(private mappings: Mapping[], private readonly space: SpaceTransport, private readonly gaia: GaiaTransport, private readonly replyTimeoutMs: number, private readonly replyPollIntervalMs: number, private readonly origin: OriginGuard = authorOriginGuard()) {}
   /** Replace the routing table in place, keeping seen/primed state (used after re-discovery). */
   setMappings(mappings: Mapping[]): void { this.mappings = mappings; }
   async pollOnce(): Promise<number> {
@@ -85,11 +104,14 @@ export class RoomLink {
     for (const mapping of this.mappings) {
       const messages = await this.space.listMessages(mapping.spaceChannelId);
       if (!this.primed.has(mapping.spaceChannelId)) { for (const message of messages) this.seen.add(message.id); this.primed.add(mapping.spaceChannelId); continue; }
-      for (const message of messages.filter(item => isForwardable(item, bridgeAuthorId, this.seen))) {
+      for (const message of messages.filter(item => isForwardable(item, candidate => this.origin.isOwnOrigin(candidate, bridgeAuthorId), this.seen))) {
         const before = new Set((await this.gaia.events(mapping.roomId)).map(event => event.id));
         await this.gaia.send(mapping.roomId, inboundText(message));
         const reply = await this.waitForReply(mapping.roomId, before);
-        await this.space.postMessage(mapping.spaceChannelId, reply.text);
+        // Claim (and durably record) the outbound id BEFORE posting: a crash in between can only
+        // suppress a message that was never written, never replay one that was.
+        const claimed = await this.origin.claim();
+        await this.origin.confirm(await this.space.postMessage(mapping.spaceChannelId, reply.text, claimed));
         this.seen.add(message.id);
         forwarded++;
       }
@@ -146,8 +168,11 @@ export class HttpSpaceTransport implements SpaceTransport {
     if (!Array.isArray(payload.value)) throw new Error("Space list_messages returned malformed response");
     return payload.value;
   }
-  async postMessage(channelId: string, text: string): Promise<void> {
-    await this.authenticated("/api/cmd/create_message", { method: "POST", body: JSON.stringify({ message: { id: `bridge-${crypto.randomUUID()}`, channel_id: channelId, author_id: null, text, created_at: Math.floor(Date.now() / 1000), edited_at: null, thread_of: null, archived: false } }) });
+  async postMessage(channelId: string, text: string, messageId?: string): Promise<string> {
+    const id = messageId ?? `bridge-${crypto.randomUUID()}`;
+    const response = await this.authenticated("/api/cmd/create_message", { method: "POST", body: JSON.stringify({ message: { id, channel_id: channelId, author_id: null, text, created_at: Math.floor(Date.now() / 1000), edited_at: null, thread_of: null, archived: false } }) });
+    const payload = await response.json().catch(() => ({})) as { value?: { id?: string } };
+    return typeof payload.value?.id === "string" && payload.value.id ? payload.value.id : id;
   }
 }
 export class HttpGaiaTransport implements GaiaTransport {
@@ -167,9 +192,15 @@ if (import.meta.main) {
   const config = await loadConfig(path);
   const space = new HttpSpaceTransport(config.space);
   const gaiaTransport = new HttpGaiaTransport(config.gaia);
+  // Default: a dedicated bridge account, suppression by author (unchanged). Own-account mode:
+  // a human's credential, suppression by the durable ledger of ids this bridge posted.
+  const origin = config.space.ownAccountMode
+    ? await OwnAccountGuard.open(new FileLedgerStore(config.space.outboundLedgerPath), config.space.outboundLedgerLimit, config.space.outboundIdPrefix)
+    : authorOriginGuard();
+  if (config.space.ownAccountMode) console.log(`own-account mode: forwarding the token owner's manual messages; suppressing ids from ${config.space.outboundLedgerPath} and prefix "${config.space.outboundIdPrefix}"`);
 
   if (config.mode === "mappings") {
-    const link = new RoomLink(config.mappings, space, gaiaTransport, config.gaia.replyTimeoutMs, config.gaia.pollIntervalMs);
+    const link = new RoomLink(config.mappings, space, gaiaTransport, config.gaia.replyTimeoutMs, config.gaia.pollIntervalMs, origin);
     console.log(`room-link started: ${config.mappings.length} mapping(s)`);
     for (;;) { try { await link.pollOnce(); } catch (error) { console.error("room-link poll failed:", error); } await sleep(config.space.pollIntervalMs); }
   }
@@ -181,7 +212,7 @@ if (import.meta.main) {
   console.log(`whole-space started: hub ${wholeSpace.hubRoomId}; linked ${result.created.length + result.existing.length} channel(s) (${result.created.length} new, ${result.skipped.length} filtered out)`);
   if (provisionOnly) { console.log(JSON.stringify(await runner.store.load(), null, 2)); process.exit(0); }
 
-  const link = new RoomLink(mappingsOf(await runner.store.load()), space, gaiaTransport, config.gaia.replyTimeoutMs, config.gaia.pollIntervalMs);
+  const link = new RoomLink(mappingsOf(await runner.store.load()), space, gaiaTransport, config.gaia.replyTimeoutMs, config.gaia.pollIntervalMs, origin);
   let lastDiscovery = Date.now(), lastDigest = 0;
   for (;;) {
     try {
