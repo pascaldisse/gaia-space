@@ -41,7 +41,7 @@ export function createHandler(config: GitHubPushConfig, poster: Poster, state: D
     const pathname = new URL(request.url).pathname;
     if (request.method === "GET" && (pathname === "/health" || pathname === "/hooks/health")) return json({ ok: true, posted: metrics.posted, failed: metrics.failed, lastDeliveryAt: metrics.lastDeliveryAt });
 
-    if (request.method === "POST" && pathname === "/notify") {
+    if (request.method === "POST" && (pathname === "/notify" || pathname === "/hooks/notify")) {
       const authorization = request.headers.get("authorization");
       if (!authorization?.startsWith("Bearer ") || !timingSafeEqual(authorization.slice(7), config.notifyToken)) return json({ ok: false, error: "unauthorized" }, 401);
       try {

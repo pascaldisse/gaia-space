@@ -40,7 +40,7 @@ describe("GitHub push bridge HTTP routes", () => {
   test("authorizes /notify", async () => {
     const messages: string[] = []; const server = serverFor(config(), { createMessage: async (_channel, text) => { messages.push(text); return {}; } });
     try {
-      const url = `http://127.0.0.1:${server.port}/notify`;
+      const url = `http://127.0.0.1:${server.port}/hooks/notify`;
       expect((await fetch(url, { method: "POST", body: "{}" })).status).toBe(401);
       expect((await fetch(url, { method: "POST", headers: { authorization: "Bearer notify-secret", "content-type": "application/json" }, body: JSON.stringify({ repo: "local/paloptic", ref: "main", text: "Deployed", url: "https://paloptic.com" }) })).status).toBe(200);
       expect(messages[0]).toContain("local/paloptic → main");
