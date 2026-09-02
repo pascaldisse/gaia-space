@@ -8,7 +8,7 @@ export type Config = {
   mode: "mappings" | "whole-space";
   wholeSpace?: WholeSpaceConfig;
   mappings: Mapping[];
-  space: { baseUrl: string; username?: string; password?: string; sessionCookie?: string; pollIntervalMs: number; requestTimeoutMs: number };
+  space: { baseUrl: string; personalAccessToken?: string; username?: string; password?: string; sessionCookie?: string; pollIntervalMs: number; requestTimeoutMs: number };
   gaia: { baseUrl: string; workspaceId: string; replyTimeoutMs: number; pollIntervalMs: number; requestTimeoutMs: number };
 };
 export type SpaceMessage = { id: string; channel_id: string; author_id: string | null; text: string; created_at: number; thread_of: string | null; archived: boolean };
@@ -45,13 +45,16 @@ export function parseConfig(raw: unknown): Config {
   const gaiaInput = (input.gaia ?? {}) as Record<string, unknown>;
   const space = {
     baseUrl: typeof spaceInput.baseUrl === "string" ? requiredString(spaceInput.baseUrl, "space.baseUrl") : defaults.space.baseUrl,
+    // Preferred credential: a Space personal access token. Sent as `Authorization: Bearer`,
+    // so no password is ever transmitted and no session cookie is minted or stored.
+    personalAccessToken: typeof spaceInput.personalAccessToken === "string" ? requiredString(spaceInput.personalAccessToken, "space.personalAccessToken") : undefined,
     username: typeof spaceInput.username === "string" ? requiredString(spaceInput.username, "space.username") : undefined,
     password: typeof spaceInput.password === "string" ? requiredString(spaceInput.password, "space.password") : undefined,
     sessionCookie: typeof spaceInput.sessionCookie === "string" ? requiredString(spaceInput.sessionCookie, "space.sessionCookie") : undefined,
     pollIntervalMs: positive(spaceInput.pollIntervalMs, "space.pollIntervalMs", defaults.space.pollIntervalMs),
     requestTimeoutMs: positive(spaceInput.requestTimeoutMs, "space.requestTimeoutMs", defaults.space.requestTimeoutMs),
   };
-  if (!space.sessionCookie && (!space.username || !space.password)) throw new Error("config space requires sessionCookie or username and password");
+  if (!space.personalAccessToken && !space.sessionCookie && (!space.username || !space.password)) throw new Error("config space requires personalAccessToken or sessionCookie or username and password");
   return { mode, wholeSpace, mappings, space, gaia: {
     baseUrl: typeof gaiaInput.baseUrl === "string" ? requiredString(gaiaInput.baseUrl, "gaia.baseUrl") : defaults.gaia.baseUrl,
     workspaceId: requiredString(gaiaInput.workspaceId, "gaia.workspaceId"),
@@ -112,14 +115,18 @@ async function request(url: string, init: RequestInit, timeoutMs: number): Promi
 export class HttpSpaceTransport implements SpaceTransport {
   private cookie: string | undefined;
   private authorId: string | undefined;
-  constructor(private readonly config: Config["space"]) { this.cookie = config.sessionCookie; }
+  /** Token auth wins over cookie/password: when a personal access token is configured the
+   *  bridge never logs in, so no password leaves this process and no session is created. */
+  private readonly token: string | undefined;
+  constructor(private readonly config: Config["space"]) { this.token = config.personalAccessToken; this.cookie = this.token ? undefined : config.sessionCookie; }
   /** Public JSON command helper so discovery (whole-space.ts) reuses this session, never a second login. */
   async authenticatedJson(path: string, body: unknown): Promise<unknown> {
     return (await this.authenticated(path, { method: "POST", body: JSON.stringify(body) })).json();
   }
   private async authenticated(path: string, init: RequestInit = {}): Promise<Response> {
-    if (!this.cookie) await this.login();
-    return request(`${this.config.baseUrl.replace(/\/$/, "")}${path}`, { ...init, headers: { "content-type": "application/json", cookie: this.cookie!, ...(init.headers ?? {}) } }, this.config.requestTimeoutMs);
+    if (!this.token && !this.cookie) await this.login();
+    const credential = this.token ? { authorization: `Bearer ${this.token}` } : { cookie: this.cookie! };
+    return request(`${this.config.baseUrl.replace(/\/$/, "")}${path}`, { ...init, headers: { "content-type": "application/json", ...credential, ...(init.headers ?? {}) } }, this.config.requestTimeoutMs);
   }
   private async login(): Promise<void> {
     const response = await request(`${this.config.baseUrl.replace(/\/$/, "")}/api/auth/login`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ username: this.config.username, password: this.config.password }) }, this.config.requestTimeoutMs);

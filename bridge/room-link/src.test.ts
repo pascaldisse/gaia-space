@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { RoomLink, isForwardable, parseConfig, type GaiaEvent, type GaiaTransport, type SpaceMessage, type SpaceTransport } from "./src.ts";
+import { HttpSpaceTransport, RoomLink, isForwardable, parseConfig, type GaiaEvent, type GaiaTransport, type SpaceMessage, type SpaceTransport } from "./src.ts";
 
 const message = (id: string, author_id: string | null, text = "hello"): SpaceMessage => ({ id, channel_id: "space-1", author_id, text, created_at: 1, thread_of: null, archived: false });
 
@@ -10,6 +10,72 @@ describe("configuration and loop guard", () => {
     expect(config.space.pollIntervalMs).toBe(1000);
     expect(config.gaia.replyTimeoutMs).toBe(120000);
     expect(() => parseConfig({ mappings: [], space: { sessionCookie: "x" }, gaia: {} })).toThrow("gaia.workspaceId");
+  });
+
+  test("a personal access token is a complete Space credential on its own", () => {
+    const config = parseConfig({ mappings: [], space: { personalAccessToken: " pat-secret " }, gaia: { workspaceId: "workspace-1" } });
+    expect(config.space.personalAccessToken).toBe("pat-secret");
+    expect(config.space.password).toBeUndefined();
+  });
+
+  test("existing cookie and username/password credentials still parse, and no credential still fails", () => {
+    expect(parseConfig({ mappings: [], space: { sessionCookie: "space_session=t" }, gaia: { workspaceId: "w" } }).space.sessionCookie).toBe("space_session=t");
+    expect(parseConfig({ mappings: [], space: { username: "u", password: "p" }, gaia: { workspaceId: "w" } }).space.username).toBe("u");
+    expect(() => parseConfig({ mappings: [], space: { username: "u" }, gaia: { workspaceId: "w" } })).toThrow("personalAccessToken");
+  });
+});
+
+describe("HttpSpaceTransport credentials", () => {
+  const spaceConfig = (extra: Record<string, unknown>) => parseConfig({ mappings: [], space: { baseUrl: "http://space.test", ...extra }, gaia: { workspaceId: "w" } }).space;
+  const withFetch = async <T>(handler: (url: string, init: RequestInit) => Response, body: (calls: { url: string; init: RequestInit }[]) => Promise<T>): Promise<T> => {
+    const calls: { url: string; init: RequestInit }[] = [];
+    const original = globalThis.fetch;
+    globalThis.fetch = (async (input: string | URL | Request, init: RequestInit = {}) => { const url = String(input); calls.push({ url, init }); return handler(url, init); }) as typeof fetch;
+    try { return await body(calls); } finally { globalThis.fetch = original; }
+  };
+  const meResponse = new Response(JSON.stringify({ user: { profile_id: "bridge-profile" } }), { headers: { "content-type": "application/json" } });
+
+  test("token auth sends Authorization Bearer, never logs in, and never sends a cookie", async () => {
+    await withFetch(() => meResponse.clone(), async calls => {
+      const transport = new HttpSpaceTransport(spaceConfig({ personalAccessToken: "pat-secret" }));
+      expect(await transport.bridgeAuthorId()).toBe("bridge-profile");
+      expect(calls).toHaveLength(1);
+      expect(calls[0]!.url).toBe("http://space.test/api/auth/me");
+      const headers = calls[0]!.init.headers as Record<string, string>;
+      expect(headers.authorization).toBe("Bearer pat-secret");
+      expect(headers.cookie).toBeUndefined();
+      expect(calls.some(call => call.url.includes("/api/auth/login"))).toBe(false);
+    });
+  });
+
+  test("the token also authorizes /api/cmd routes", async () => {
+    await withFetch(() => new Response(JSON.stringify({ value: [] }), { headers: { "content-type": "application/json" } }), async calls => {
+      const transport = new HttpSpaceTransport(spaceConfig({ personalAccessToken: "pat-secret" }));
+      expect(await transport.listMessages("channel-1")).toEqual([]);
+      expect(calls[0]!.url).toBe("http://space.test/api/cmd/list_messages");
+      expect((calls[0]!.init.headers as Record<string, string>).authorization).toBe("Bearer pat-secret");
+    });
+  });
+
+  test("without a token the pre-existing cookie path is unchanged", async () => {
+    await withFetch(() => meResponse.clone(), async calls => {
+      const transport = new HttpSpaceTransport(spaceConfig({ sessionCookie: "space_session=abc" }));
+      expect(await transport.bridgeAuthorId()).toBe("bridge-profile");
+      const headers = calls[0]!.init.headers as Record<string, string>;
+      expect(headers.cookie).toBe("space_session=abc");
+      expect(headers.authorization).toBeUndefined();
+    });
+  });
+
+  test("without a token or cookie the username/password login still runs first", async () => {
+    // `Response` drops `set-cookie` on read, so the login reply is a minimal stand-in.
+    const loginResponse = { ok: true, status: 200, headers: { get: (name: string) => name === "set-cookie" ? "space_session=fresh; HttpOnly" : null } } as unknown as Response;
+    await withFetch(url => url.includes("/api/auth/login") ? loginResponse : meResponse.clone(), async calls => {
+      const transport = new HttpSpaceTransport(spaceConfig({ username: "bridge", password: "pw" }));
+      expect(await transport.bridgeAuthorId()).toBe("bridge-profile");
+      expect(calls[0]!.url).toBe("http://space.test/api/auth/login");
+      expect((calls[1]!.init.headers as Record<string, string>).cookie).toBe("space_session=fresh");
+    });
   });
 
   test("never forwards bridge-authored, archived, threaded, blank, or seen messages", () => {
