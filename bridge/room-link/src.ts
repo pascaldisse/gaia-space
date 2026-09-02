@@ -1,13 +1,16 @@
 /** Space chat ↔ GAIA room bridge. All endpoints and timing are configurable.
  *  Two modes: `mappings` (an explicit routing table) and `whole-space` (every discovered
  *  Space channel gets its own GAIA room, plus a hub room — see whole-space.ts). */
-import { channelDiscoveryOn, createWholeSpace, digestDue, digestText, FileMappingStore, HttpGaiaProvisioning, mappingsOf, parseWholeSpace, type WholeSpaceConfig } from "./whole-space.ts";
+import { channelDiscoveryOn, createWholeSpace, digestDue, digestText, FileMappingStore, HttpGaiaProvisioning, mappingsOf, parseWholeSpace, type SpaceChannel, type WholeSpaceConfig } from "./whole-space.ts";
 import { authorOriginGuard, FileLedgerStore, OwnAccountGuard, type OriginGuard } from "./own-account.ts";
+import { ActionBridge, FileActionStore, parseActions, spaceWorkOn, type ActionsConfig } from "./actions.ts";
 
 export type Mapping = { spaceChannelId: string; roomId: string };
 export type Config = {
   mode: "mappings" | "whole-space";
   wholeSpace?: WholeSpaceConfig;
+  /** Opt-in write path: create Space work items from a linked room (see actions.ts). */
+  actions?: ActionsConfig;
   mappings: Mapping[];
   space: {
     baseUrl: string; personalAccessToken?: string; username?: string; password?: string; sessionCookie?: string; pollIntervalMs: number; requestTimeoutMs: number;
@@ -39,6 +42,7 @@ export function parseConfig(raw: unknown): Config {
   if (!raw || typeof raw !== "object") throw new Error("config must be an object");
   const input = raw as Record<string, unknown>;
   const wholeSpace = parseWholeSpace(input.wholeSpace);
+  const actions = parseActions(input.actions);
   const mode = input.mode === undefined ? (wholeSpace ? "whole-space" : "mappings") : input.mode;
   if (mode !== "mappings" && mode !== "whole-space") throw new Error('config mode must be "mappings" or "whole-space"');
   if (mode === "whole-space" && !wholeSpace) throw new Error("config wholeSpace is required in whole-space mode");
@@ -69,7 +73,7 @@ export function parseConfig(raw: unknown): Config {
   if (!space.personalAccessToken && !space.sessionCookie && (!space.username || !space.password)) throw new Error("config space requires personalAccessToken or sessionCookie or username and password");
   // Own-account mode leans on the id prefix as its stateless second guard, so it must be usable.
   if (space.ownAccountMode && !/^[A-Za-z0-9._-]+$/.test(space.outboundIdPrefix)) throw new Error("config space.outboundIdPrefix must be non-empty and may only contain letters, numbers, dots, underscores, hyphens");
-  return { mode, wholeSpace, mappings, space, gaia: {
+  return { mode, wholeSpace, actions, mappings, space, gaia: {
     baseUrl: typeof gaiaInput.baseUrl === "string" ? requiredString(gaiaInput.baseUrl, "gaia.baseUrl") : defaults.gaia.baseUrl,
     workspaceId: requiredString(gaiaInput.workspaceId, "gaia.workspaceId"),
     replyTimeoutMs: positive(gaiaInput.replyTimeoutMs, "gaia.replyTimeoutMs", defaults.gaia.replyTimeoutMs),
@@ -199,20 +203,40 @@ if (import.meta.main) {
     : authorOriginGuard();
   if (config.space.ownAccountMode) console.log(`own-account mode: forwarding the token owner's manual messages; suppressing ids from ${config.space.outboundLedgerPath} and prefix "${config.space.outboundIdPrefix}"`);
 
+  // Channel metadata backs the actions' project resolution. Cached, because it is read per poll
+  // and only ever changes when a channel is created, renamed, or moved between projects.
+  const discovery = channelDiscoveryOn(space);
+  let channelCache: { at: number; channels: SpaceChannel[] } | undefined;
+  const channels = async () => {
+    const ttl = config.wholeSpace?.discoveryIntervalMs ?? 60_000;
+    if (!channelCache || Date.now() - channelCache.at >= ttl) channelCache = { at: Date.now(), channels: await discovery.listChannels() };
+    return channelCache.channels;
+  };
+  const actionsConfig = config.actions;
+  const makeActions = (mappings: Mapping[]) => actionsConfig?.enabled
+    ? new ActionBridge(mappings, { gaia: gaiaTransport, space: spaceWorkOn(space), store: new FileActionStore(actionsConfig.statePath), config: actionsConfig, origin, channels })
+    : undefined;
+  if (actionsConfig?.enabled) console.log(`actions enabled: "${actionsConfig.commandPrefix} task|ticket <title>" then "${actionsConfig.commandPrefix} confirm <token>"; rooms ${actionsConfig.allowedRoomIds.length ? actionsConfig.allowedRoomIds.join(", ") : "(all linked)"}`);
+
   if (config.mode === "mappings") {
     const link = new RoomLink(config.mappings, space, gaiaTransport, config.gaia.replyTimeoutMs, config.gaia.pollIntervalMs, origin);
+    const actions = makeActions(config.mappings);
     console.log(`room-link started: ${config.mappings.length} mapping(s)`);
-    for (;;) { try { await link.pollOnce(); } catch (error) { console.error("room-link poll failed:", error); } await sleep(config.space.pollIntervalMs); }
+    for (;;) {
+      try { await link.pollOnce(); await actions?.pollOnce(); } catch (error) { console.error("room-link poll failed:", error); }
+      await sleep(config.space.pollIntervalMs);
+    }
   }
 
   const wholeSpace = config.wholeSpace!;
   const gaia = new HttpGaiaProvisioning(config.gaia, gaiaTransport);
-  const runner = createWholeSpace(channelDiscoveryOn(space), gaia, new FileMappingStore(wholeSpace.mappingStatePath), wholeSpace);
+  const runner = createWholeSpace(discovery, gaia, new FileMappingStore(wholeSpace.mappingStatePath), wholeSpace);
   let result = await runner.provision();
   console.log(`whole-space started: hub ${wholeSpace.hubRoomId}; linked ${result.created.length + result.existing.length} channel(s) (${result.created.length} new, ${result.skipped.length} filtered out)`);
   if (provisionOnly) { console.log(JSON.stringify(await runner.store.load(), null, 2)); process.exit(0); }
 
   const link = new RoomLink(mappingsOf(await runner.store.load()), space, gaiaTransport, config.gaia.replyTimeoutMs, config.gaia.pollIntervalMs, origin);
+  const actions = makeActions(mappingsOf(await runner.store.load()));
   let lastDiscovery = Date.now(), lastDigest = 0;
   for (;;) {
     try {
@@ -220,7 +244,7 @@ if (import.meta.main) {
       if (now - lastDiscovery >= wholeSpace.discoveryIntervalMs) {
         lastDiscovery = now;
         const next = await runner.provision();
-        if (next.created.length) link.setMappings(mappingsOf(await runner.store.load()));
+        if (next.created.length) { const table = mappingsOf(await runner.store.load()); link.setMappings(table); actions?.setMappings(table); }
         result = next;
       }
       if (wholeSpace.hub.digestEnabled && digestDue(lastDigest, now, wholeSpace.hub.digestIntervalMs)) {
@@ -229,6 +253,7 @@ if (import.meta.main) {
       }
       await runner.hub.pollOnce();
       await link.pollOnce();
+      await actions?.pollOnce();
     } catch (error) { console.error("whole-space poll failed:", error); }
     await sleep(config.space.pollIntervalMs);
   }

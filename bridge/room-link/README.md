@@ -43,6 +43,10 @@ Caveat, honestly: writing into a hub room is a normal room message, so the hub's
 | Space channel discovery | `POST /api/cmd/list_channels_with_meta {profile_id}` | verified in `space-server.rs` (policy `Session`) |
 | Space channel discovery via `list_channels` | `POST /api/cmd/list_channels` | **unavailable** — `CommandPolicy::Unavailable` over HTTP; discovery must use `list_channels_with_meta` |
 | Space personal access token | `Authorization: Bearer <token>` on `/api/auth/me` and `/api/cmd/*` | verified in `space-server.rs` (`user_by_token` resolves the bearer via `auth_security::permanent_token_user`) |
+| create a ticket (project issue) | `POST /api/cmd/create_issue {input}` | verified in `space-server.rs`: policy `ProjectMemberWrite` **plus** `Right::CreateIssue` on the project; `input` is `issues::IssueInput` (`project_id` required) |
+| create a task (to-do) | `POST /api/cmd/create_todo {input}` | verified in `space-server.rs`: policy `TodoCreate` (project only checked when a `project_id` is present); `input` is `personal::TodoInput` (`profile_id` rebound to the session) |
+| ticket permalink | `…/projects/<projectId>/issues/<issueId>` | verified against the router grammar in `src/router.ts` (`entityRoutes.issue`) |
+| task permalink | *(none)* | to-dos have **no** entity route in `src/router.ts`; a project task is linked via `…/projects/<projectId>/tasks`, a personal task is reported by id only |
 
 Two consequences worth knowing before deployment:
 
@@ -121,6 +125,92 @@ The honest caveat: a message you write by hand whose id happens to start with `b
   "outboundLedgerLimit": 5000                                        // default; FIFO ring size
 }
 ```
+
+## Creating Space work items from a GAIA room (`actions`) — opt-in
+
+A person standing in a linked GAIA room can file a Space **task** (to-do) or **ticket** (project issue). This is the only path in the bridge that *writes work* into Space, so it is off unless `actions.enabled` is `true`, and every step is explicit.
+
+### The grammar
+
+| typed in the GAIA room | effect |
+| --- | --- |
+| `!space task <title>` | **preview only** — resolves context, answers with a one-time token |
+| `!space ticket <title>` | **preview only** — same, requires the channel's project |
+| `!space confirm <TOKEN>` | creates the previewed item — the *only* command that writes |
+| `!space cancel <TOKEN>` | discards the preview |
+| `!space help` (or bare `!space`) | prints the grammar |
+
+A second line and everything after it becomes the item's description (issue `description`, to-do `notes`).
+
+Example:
+
+```
+you:    !space ticket Login redirect loops after SSO
+        Repro: staging, Safari, second login attempt.
+
+bridge: Preview — nothing created yet.
+        kind:    ticket (project issue)
+        title:   Login redirect loops after SSO
+        details: Repro: staging, Safari, second login attempt.
+        channel: chan-7f21
+        project: proj-core
+
+        Create it: !space confirm K7QM4T   (expires in 5 min)
+        Discard it: !space cancel K7QM4T
+
+you:    !space confirm K7QM4T
+
+bridge: Created ticket: Login redirect loops after SSO
+        id: issue-8931 (#412)
+        link: https://space.example/projects/proj-core/issues/issue-8931
+```
+
+The same line is posted into the linked Space channel (`announceInChannel`, on by default), so the people in the channel see the item appear with its link — under the bridge's own outbound id, so own-account mode does not forward it back.
+
+### Why this cannot fire by accident
+
+| gate | rule |
+| --- | --- |
+| off by default | `actions.enabled: false`; `actions.allowedRoomIds` narrows further to named rooms |
+| prefix at the START | only a message beginning with the prefix is parsed. `"as I said, !space ticket X"` and `"!spacex ticket X"` do nothing |
+| human turns only | only events authored by `user` act. An **agent** that emits `!space ticket …` is ignored, so nothing a model is told to say can create work |
+| chat cannot reach it | forwarded Space messages arrive as `Space message from <id>: …`, so Space chat never begins with the prefix either |
+| two steps | naming an item creates nothing. Only `confirm <token>` writes; the token is 6 chars from a 32-symbol alphabet, single-use, room-bound, and expires (`confirmTtlMs`, default 5 min) |
+| context, never guesswork | project = the linked channel's project. A channel with no project **refuses** a ticket (and says to use `task` instead); a room linked to two channels refuses as ambiguous |
+| no duplicates | room + kind + normalized title inside `duplicateWindowMs` (default 24 h) answers with the existing item's link instead of creating a second |
+| no replay | handled event ids, spent tokens and completed items are durable (`statePath`, atomic writes), and a room's transcript is **primed** on first sight — a restart never re-executes an old `confirm` |
+| write-then-create order | the token is spent *before* the create call: a crash can lose an item (retypeable), never create two (not undoable) |
+
+### Permission is Space's, not the bridge's
+
+The create calls ride the **same authenticated transport** as everything else — with `space.personalAccessToken` set, that is the token owner. The server rebinds `created_by`/`profile_id` to that session (`bind_session_identity`) and enforces `ProjectMemberWrite` + `Right::CreateIssue` (tickets) or `TodoCreate` (tasks). The bridge holds no capability of its own and grants none: a refusal comes back as the server's own message, e.g.
+
+```
+Space refused to create the ticket: POST /api/cmd/create_issue: HTTP 403 project access denied
+```
+
+Consequence worth stating plainly: **whoever can type in the linked GAIA room acts as the token owner.** Give the bridge a token from an account whose rights you are willing to lend to that room, and use `allowedRoomIds` when only some rooms should be able to file work.
+
+### Config keys (actions)
+
+```jsonc
+"actions": {
+  "enabled": false,                 // default — the whole feature is opt-in
+  "commandPrefix": "!space",        // default; no whitespace allowed
+  "kinds": { "task": true, "ticket": true },
+  "confirmTtlMs": 300000,           // preview lifetime
+  "maxTitleLength": 200,
+  "duplicateWindowMs": 86400000,    // same title in the same room = the same item
+  "statePath": "bridge/room-link/state/actions.json",  // gitignored, atomic writes
+  "stateLimit": 500,                // bounded history of tokens/events/items
+  "webBaseUrl": "",                 // e.g. "https://space.example"; empty = report ids, never guess a link
+  "webBasePath": "",                // path the SPA is mounted under, e.g. "/space"
+  "announceInChannel": true,        // post the created item into the Space channel too
+  "allowedRoomIds": []              // empty = every linked room; otherwise only these
+}
+```
+
+Caveat, honestly: the bridge answers by posting a normal room message, so the room's own agent takes a turn on the preview and on the result. That is the only ingress the GAIA daemon exposes.
 
 ### Config keys (whole-space)
 
