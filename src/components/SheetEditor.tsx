@@ -110,7 +110,12 @@ const isLocked = (columnId: string) => props.lockedColumnIds?.includes(columnId)
 
   function retypeColumn(columnId: string, type: SheetColumnType) {
     if (isLocked(columnId)) return;
-    emit({ ...props.sheet, columns: columns().map((c) => (c.id === columnId ? { ...c, type } : c)) });
+    emit({
+      ...props.sheet,
+      columns: columns().map((c) => (c.id === columnId
+        ? { ...c, type, ...(type === "formula" ? { formula: c.formula ?? "0" } : {}) }
+        : c)),
+    });
   }
   function setFormula(columnId: string, formula: string) {
     emit({ ...props.sheet, columns: columns().map((c) => (c.id === columnId ? { ...c, formula } : c)) });
