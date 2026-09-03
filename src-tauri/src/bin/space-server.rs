@@ -9,8 +9,8 @@ use axum::{
     Json, Router,
 };
 use gaia_space_lib::{
-    app_rights, applications, blogs, calendar_feeds, calls, channel_feeds, channel_notes, chat,
-    chatbot, db, devenv, documents, events, issues, leads, meetings, oauth, organization,
+    app_rights, applications, blogs, budget, calendar_feeds, calls, channel_feeds, channel_notes,
+    chat, chatbot, db, devenv, documents, events, issues, leads, meetings, oauth, organization,
     package_registry, payload_dispatch, personal, pipelines, platform, review,
 };
 use rand::RngCore;
@@ -2587,7 +2587,8 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         "mark_notification_read" => CommandPolicy::NotificationWrite,
         "create_absence" | "update_absence" | "delete_absence" => CommandPolicy::AbsenceWrite,
         "create_meeting" => CommandPolicy::SessionIdentityWrite,
-        "save_document" | "restore_doc_version" => CommandPolicy::DocumentWrite,
+        "save_document" | "restore_doc_version" | "budget_add_expense" | "budget_export_statement" => CommandPolicy::DocumentWrite,
+        "budget_statement" => CommandPolicy::DocumentRead,
         "list_document_access" => CommandPolicy::DocumentRead,
         "update_document_access" => CommandPolicy::DocumentAccessWrite,
         "create_document" => CommandPolicy::DocumentCreate,
@@ -3087,6 +3088,9 @@ fn document_id(body: &Value, name: &str) -> Option<String> {
     } else if matches!(
         name,
         "restore_doc_version"
+            | "budget_statement"
+            | "budget_add_expense"
+            | "budget_export_statement"
             | "list_doc_versions"
             | "list_document_access"
             | "update_document_access"
@@ -4039,8 +4043,14 @@ fn authorize_command(
             if documents::document_writable_by(&id, &user.profile_id, user.role == "GlobalAdmin")
                 .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?
             {
-                if matches!(name, "save_document" | "restore_doc_version") {
+                if matches!(
+                    name,
+                    "save_document" | "restore_doc_version" | "budget_add_expense"
+                ) {
                     put_arg(body, "actor", json!(user.profile_id));
+                }
+                if matches!(name, "budget_statement" | "budget_export_statement") {
+                    put_arg(body, "profile_id", json!(user.profile_id));
                 }
                 require_catalog_right(
                     user,
@@ -5403,6 +5413,9 @@ async fn cmd(
     "add_review_participant" => review::add_review_participant(participant: review::ReviewParticipant),
     "add_team_membership" => platform::add_team_membership(input: platform::TeamMembershipInput),
     "archive_cf_definition" => platform::archive_cf_definition(id: String, archived: bool),
+    "budget_statement" => budget::budget_statement(document_id: String, month: Option<String>, profile_id: Option<String>),
+    "budget_add_expense" => budget::budget_add_expense(document_id: String, input: budget::BudgetExpenseInput, actor: Option<String>),
+    "budget_export_statement" => budget::budget_export_statement(document_id: String, month: String, profile_id: Option<String>),
     "archive_document" => documents::archive_document(id: String, archived: bool),
     "delete_document" => documents::delete_document(id: String, actor_id: String),
     "archive_issue" => issues::archive_issue(id: String, archived: bool),
@@ -11490,6 +11503,70 @@ mod tests {
     }
 
     /// Without a session there is no resource owner to consent.
+    #[tokio::test]
+    async fn budget_commands_bind_the_session_and_apply_document_acl() {
+        let _serial = test_lock();
+        setup();
+        let c = db::conn().unwrap();
+        c.execute(
+            "ALTER TABLE documents ADD COLUMN kind TEXT NOT NULL DEFAULT 'markdown'",
+            [],
+        )
+        .ok();
+        let body = json!({
+            "currency":"EUR", "members":["pa"],
+            "columns":[
+                {"id":"date","label":"Date","type":"date"},
+                {"id":"paid_by","label":"Paid by","type":"person"},
+                {"id":"amount","label":"Amount","type":"number"},
+                {"id":"description","label":"Description","type":"text"},
+                {"id":"split","label":"Split among","type":"text"}
+            ], "rows":[]
+        })
+        .to_string();
+        c.execute("INSERT INTO documents(id,container_type,container_id,doc_type,title,body,version,archived,created_by,kind) VALUES('budget-acl','my-docs','pa','text','Budget',?1,1,0,'pa','budget')", [body]).unwrap();
+        let (status, _) = call(
+            cookie("tb"),
+            "budget_statement",
+            json!({"document_id":"budget-acl","month":null}),
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::FORBIDDEN,
+            "a stranger cannot read a budget by id"
+        );
+        let (status, statement) = call(
+            cookie("ta"),
+            "budget_statement",
+            json!({"document_id":"budget-acl","month":null}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{statement}");
+        let (status, _) = call(
+            cookie("tb"),
+            "budget_add_expense",
+            json!({"document_id":"budget-acl","input":{"amount":"1.00","description":"Denied"}}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "a stranger cannot append");
+        let (status, added) = call(
+            cookie("ta"),
+            "budget_add_expense",
+            json!({"document_id":"budget-acl","input":{"amount":"1.00","description":"Coffee"}}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{added}");
+        assert_eq!(
+            added["value"]["body"]
+                .as_str()
+                .unwrap()
+                .contains("\"paid_by\":\"pa\""),
+            true,
+            "the actor is session-bound"
+        );
+    }
+
     #[tokio::test]
     async fn oauth_authorize_requires_a_session() {
         let _serial = test_lock();
