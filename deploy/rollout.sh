@@ -12,6 +12,12 @@ REVISION="${2:?revision}"
 DB=/var/lib/gaia-space/space.db
 STATIC=/var/www/gaia-space
 BIN=/opt/gaia-space/bin/space-server
+LIVEKIT_ROOT="${LIVEKIT_ROOT:-/opt/livekit}"
+LIVEKIT_BIN="${LIVEKIT_BIN:-$LIVEKIT_ROOT/livekit-server}"
+LIVEKIT_CONFIG_DIR="${LIVEKIT_CONFIG_DIR:-/etc/livekit}"
+LIVEKIT_ENV="${LIVEKIT_ENV:-$LIVEKIT_CONFIG_DIR/livekit.env}"
+LIVEKIT_CONFIG="${LIVEKIT_CONFIG:-$LIVEKIT_CONFIG_DIR/livekit.yaml}"
+CADDY_CONFIG="${CADDY_CONFIG:-/etc/caddy/Caddyfile.space}"
 STAMP=$(date -u +%Y%m%dT%H%M%SZ)
 BACKUP="/root/gaia-space-backups/$STAMP"
 
@@ -41,6 +47,8 @@ PY
 cp -a "$BIN" "$BACKUP/space-server"
 cp -a /etc/gaia-space.env "$BACKUP/gaia-space.env"
 cp -a /etc/systemd/system/gaia-space.service "$BACKUP/gaia-space.service"
+cp -a /etc/systemd/system/livekit.service "$BACKUP/livekit.service" 2>/dev/null || true
+cp -a "$CADDY_CONFIG" "$BACKUP/Caddyfile.space" 2>/dev/null || true
 tar -C "$STATIC" -czf "$BACKUP/static.tar.gz" .
 chmod -R go-rwx "$BACKUP"
 census "$BACKUP/space.db" > /tmp/census-backup.txt
@@ -75,9 +83,21 @@ trap restore ERR
 
 STEP="install"
 echo "== install"
+test -x "$LIVEKIT_BIN" # provision pinned LiveKit before first rollout; do not fall back to a dev server.
+test -f "$LIVEKIT_ENV"
+chmod 0600 "$LIVEKIT_ENV"
+install -d -o root -g root -m 0755 "$LIVEKIT_CONFIG_DIR"
+install -d -o root -g root -m 0755 /var/lib/livekit
+install -o root -g root -m 0644 "$RELEASE_DIR/livekit.yaml" "$LIVEKIT_CONFIG"
+install -o root -g root -m 0644 "$RELEASE_DIR/livekit.service" /etc/systemd/system/livekit.service
+install -o root -g root -m 0644 "$RELEASE_DIR/Caddyfile.space" "$CADDY_CONFIG"
 systemctl stop gaia-space
 install -o root -g root -m 0644 "$RELEASE_DIR/gaia-space.service" /etc/systemd/system/gaia-space.service
 systemctl daemon-reload
+systemctl enable livekit
+systemctl restart livekit
+systemctl is-active livekit
+systemctl reload caddy
 install -o gaia-space -g gaia-space -m 0755 "$RELEASE_DIR/space-server" "$BIN"
 rsync -a --delete "$RELEASE_DIR/static/" "$STATIC/"
 # SELinux: fresh files carry the wrong type and Caddy answers 403 without this.

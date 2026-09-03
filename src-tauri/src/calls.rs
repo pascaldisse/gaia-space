@@ -20,6 +20,7 @@ const DEFAULT_PORT: u16 = 7880;
 const DEFAULT_API_KEY: &str = "devkey";
 const DEFAULT_API_SECRET: &str = "secret";
 const DEFAULT_SERVER_PATH: &str = "livekit-server";
+const LIVEKIT_PUBLIC_URL_ENV: &str = "LIVEKIT_PUBLIC_URL";
 const TOKEN_LIFETIME_SECONDS: u64 = 60 * 60;
 const DEFAULT_EGRESS_TIMEOUT_MS: u64 = 10_000;
 const DEFAULT_RESERVATION_TTL_SECONDS: i64 = 120;
@@ -31,6 +32,8 @@ pub struct LivekitConfig {
     pub server_path: Option<String>,
     pub host: Option<String>,
     pub port: Option<u16>,
+    /// Browser-reachable WebSocket endpoint; local URL when unset.
+    pub public_url: Option<String>,
     pub api_key: Option<String>,
     pub api_secret: Option<String>,
     /// Enables anonymous admission to explicitly public meetings; defaults false.
@@ -80,6 +83,7 @@ impl std::fmt::Debug for LivekitConfig {
             .field("server_path", &self.server_path)
             .field("host", &self.host)
             .field("port", &self.port)
+            .field("public_url", &self.public_url)
             .field("api_key", &redacted(&self.api_key))
             .field("api_secret", &redacted(&self.api_secret))
             .field("allow_unregistered_rooms", &self.allow_unregistered_rooms)
@@ -118,10 +122,26 @@ impl LivekitConfig {
             .unwrap_or_else(|| DEFAULT_SERVER_PATH.into())
     }
     fn host(&self) -> String {
-        self.host.clone().unwrap_or_else(|| DEFAULT_HOST.into())
+        self.host
+            .clone()
+            .or_else(|| std::env::var("LIVEKIT_HOST").ok())
+            .unwrap_or_else(|| DEFAULT_HOST.into())
     }
     fn port(&self) -> u16 {
-        self.port.unwrap_or(DEFAULT_PORT)
+        self.port
+            .or_else(|| {
+                std::env::var("LIVEKIT_PORT")
+                    .ok()
+                    .and_then(|value| value.parse().ok())
+            })
+            .unwrap_or(DEFAULT_PORT)
+    }
+    fn public_url(&self) -> String {
+        self.public_url
+            .clone()
+            .or_else(|| std::env::var(LIVEKIT_PUBLIC_URL_ENV).ok())
+            .filter(|url| !url.trim().is_empty())
+            .unwrap_or_else(|| self.url())
     }
     fn api_key(&self) -> String {
         self.api_key
@@ -709,11 +729,43 @@ pub(crate) fn join_meeting_call_with_config(
     display_name: String,
     config: LivekitConfig,
 ) -> Result<CallJoin> {
+    let connection = db::connection(&app)?;
+    join_meeting_call_with_connection(
+        &connection,
+        meeting_id,
+        participant_id,
+        display_name,
+        config,
+    )
+}
+
+/// HTTP/server counterpart. Its caller obtains identity and display name only from
+/// the authenticated session; this function accepts no request body.
+pub fn join_web_meeting_call(
+    meeting_id: String,
+    participant_id: String,
+    display_name: String,
+) -> Result<CallJoin> {
+    let connection = db::conn()?;
+    join_meeting_call_with_connection(
+        &connection,
+        meeting_id,
+        participant_id,
+        display_name,
+        LivekitConfig::default(),
+    )
+}
+
+fn join_meeting_call_with_connection(
+    connection: &rusqlite::Connection,
+    meeting_id: String,
+    participant_id: String,
+    display_name: String,
+    config: LivekitConfig,
+) -> Result<CallJoin> {
     if participant_id.trim().is_empty() || display_name.trim().is_empty() {
         return Err("Call participant identity and display name are required".into());
     }
-    // Read the meeting *as the joining participant*: a stranger cannot even learn
-    // that the meeting exists, let alone reach the RSVP check below.
     let meeting = meetings::get_meeting_scoped(meeting_id.clone(), participant_id.clone())?
         .ok_or("Meeting not found")?;
     if meeting.archived {
@@ -722,7 +774,6 @@ pub(crate) fn join_meeting_call_with_config(
     if meeting.video_provider.as_deref() != Some("livekit") {
         return Err("External Meet rooms are not configured; select Native LiveKit or configure the external room API".into());
     }
-    let connection = db::connection(&app)?;
     let rsvp: Option<String> = connection
         .query_row(
             "SELECT status FROM meeting_participants WHERE meeting_id=?1 AND profile_id=?2",
@@ -735,19 +786,17 @@ pub(crate) fn join_meeting_call_with_config(
     if !is_organizer && !matches!(rsvp.as_deref(), Some("accepted")) {
         return Err("Waiting for organizer admission: only accepted participants can join this meeting call".into());
     }
-    let status = ensure_server(config.clone())?;
-    // Persist the room BEFORE minting: the token must be scoped to the room the
-    // meeting is actually bound to. `record_call_room_on` returns the first room ever
-    // recorded, so a later join can never mint a token for a second, split room.
+    ensure_server(config.clone())?;
+    let public_url = config.public_url();
     let room = meetings::record_call_room_on(
-        &connection,
+        connection,
         &meeting_id,
         VIDEO_PROVIDER,
         &room_for_meeting(&meeting_id),
-        &status.url,
+        &public_url,
     )?;
     Ok(CallJoin {
-        url: status.url,
+        url: public_url,
         token: token_for(
             &config,
             room.clone(),
@@ -766,12 +815,26 @@ pub(crate) fn join_meeting_call_with_config(
 pub fn end_meeting_call(app: AppHandle, meeting_id: String) -> Result<bool> {
     let connection = db::connection(&app)?;
     let (participant_id, _) = actor::resolve(&connection)?;
+    end_meeting_call_with_connection(&connection, meeting_id, participant_id)
+}
+
+/// HTTP/server counterpart; the authenticated session supplies `participant_id`.
+pub fn end_web_meeting_call(meeting_id: String, participant_id: String) -> Result<bool> {
+    let connection = db::conn()?;
+    end_meeting_call_with_connection(&connection, meeting_id, participant_id)
+}
+
+fn end_meeting_call_with_connection(
+    connection: &rusqlite::Connection,
+    meeting_id: String,
+    participant_id: String,
+) -> Result<bool> {
     let meeting = meetings::get_meeting_scoped(meeting_id.clone(), participant_id.clone())?
         .ok_or("Meeting not found")?;
     if meeting.organizer_id.as_deref() != Some(participant_id.as_str()) {
         return Err("Only the meeting organizer can end the call".into());
     }
-    meetings::end_call_on(&connection, &meeting_id, &participant_id)
+    meetings::end_call_on(connection, &meeting_id, &participant_id)
 }
 
 /// LiveKit room-composite Egress handle as Gaia records it. The Egress worker writes

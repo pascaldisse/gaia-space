@@ -4,7 +4,7 @@ import { platformApi } from "../api/platform";
 import { calendarsApi } from "../api/calendar-feeds";
 import { meetingLinkError, meetingsApi, type Meeting, type MeetingParticipant } from "../api/meetings";
 import CallPanel from "./CallPanel";
-import { humanError, isWeb, profileId } from "../session";
+import { currentUser, humanError, isWeb, profileId } from "../session";
 import { linkProps, route, useDeepLink } from "../router";
 import PageHeader from "../components/PageHeader";
 import { ProfilePicker } from "../components/Pickers";
@@ -478,7 +478,7 @@ subline={scopeProjectId() ? "This project's meetings, deadlines and time off on 
 <div class="inline-form"><ProfilePicker label="" value={invitee()} onChange={setInvitee}/><button onClick={invite}>Invite</button></div>
 <For each={participants()}>{participant=><div class="participant"><span>{participant.profile_id}</span><select value={participant.status} onChange={e=>rsvp(participant,e.currentTarget.value as MeetingParticipant["status"])}><option value="invited">Invited</option><option value="accepted">Accepted</option><option value="declined">Declined</option></select></div>}</For>
 </section>
-<Show when={!isWeb()}><CallPanel meeting={item()} identity={profileId()} displayName={profileId()}/></Show>
+<CallPanel meeting={item()} identity={isWeb() ? currentUser()?.profile_id ?? "" : profileId()} displayName={isWeb() ? currentUser()?.display_name ?? "" : profileId()}/>
 </div>}
 </Show>
 </aside>
