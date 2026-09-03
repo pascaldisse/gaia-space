@@ -121,6 +121,7 @@ fn default_body_format() -> String {
 }
 pub const KIND_MARKDOWN: &str = "markdown";
 pub const KIND_SHEET: &str = "sheet";
+pub const KIND_BUDGET: &str = crate::budget::KIND_BUDGET;
 fn default_kind() -> String {
     KIND_MARKDOWN.into()
 }
@@ -160,15 +161,19 @@ fn ensure_sheet_schema(c: &rusqlite::Connection) -> Result<()> {
 }
 
 /// Every connection this module opens carries the sheet column.
-fn conn() -> Result<rusqlite::Connection> {
+pub(crate) fn document_connection() -> Result<rusqlite::Connection> {
     let c = db::conn()?;
     ensure_sheet_schema(&c)?;
     Ok(c)
 }
 
+fn conn() -> Result<rusqlite::Connection> {
+    document_connection()
+}
+
 fn validate_kind(kind: &str) -> Result<()> {
     match kind {
-        KIND_MARKDOWN | KIND_SHEET => Ok(()),
+        KIND_MARKDOWN | KIND_SHEET | KIND_BUDGET => Ok(()),
         other => Err(format!(
             "unknown document kind '{other}' (expected 'markdown' or 'sheet')"
         )),
@@ -399,7 +404,15 @@ pub(crate) fn document_readable_by_on(
 }
 
 pub fn document_writable_by(id: &str, profile_id: &str, is_admin: bool) -> Result<bool> {
-    let c = conn()?;
+    document_writable_by_on(&conn()?, id, profile_id, is_admin)
+}
+
+pub(crate) fn document_writable_by_on(
+    c: &rusqlite::Connection,
+    id: &str,
+    profile_id: &str,
+    is_admin: bool,
+) -> Result<bool> {
     c.query_row(
         &format!(
             "SELECT EXISTS(SELECT 1 FROM documents d WHERE d.id=?3 AND {})",
@@ -756,7 +769,9 @@ pub fn ensure_organization_library_root() -> Result<DocumentFolder> {
     let c = db::conn()?;
     ensure_organization_library_root_on(&c)
 }
-pub(crate) fn ensure_organization_library_root_on(c: &rusqlite::Connection) -> Result<DocumentFolder> {
+pub(crate) fn ensure_organization_library_root_on(
+    c: &rusqlite::Connection,
+) -> Result<DocumentFolder> {
     c.execute(
         "INSERT OR IGNORE INTO document_folders(id,container_type,container_id,parent_id,name,description,archived) VALUES(?1,'kb',?1,NULL,'Library',NULL,0)",
         [ORGANIZATION_LIBRARY_ID],
@@ -764,7 +779,8 @@ pub(crate) fn ensure_organization_library_root_on(c: &rusqlite::Connection) -> R
     c.execute(
         "INSERT OR IGNORE INTO kb_book_owners(book_id,profile_id) VALUES(?1,'default-org')",
         [ORGANIZATION_LIBRARY_ID],
-    ).map_err(|e| e.to_string())?;
+    )
+    .map_err(|e| e.to_string())?;
     c.query_row(
         "SELECT id,container_type,container_id,parent_id,name,description,archived FROM document_folders WHERE id=?1",
         [ORGANIZATION_LIBRARY_ID], row_to_folder,
@@ -871,6 +887,10 @@ pub fn create_document(mut document: Document) -> Result<()> {
     if document.kind == KIND_SHEET {
         if let Some(body) = document.body.as_deref() {
             validate_sheet_body(body)?;
+        }
+    } else if document.kind == KIND_BUDGET {
+        if let Some(body) = document.body.as_deref() {
+            crate::budget::validate_budget_body(body)?;
         }
     }
     c.execute(
@@ -1030,17 +1050,47 @@ pub fn save_document(
     actor: Option<String>,
 ) -> Result<Document> {
     let mut c = conn()?;
-    let tx = c.transaction().map_err(|e| e.to_string())?;
+    save_document_on(&mut c, &id, &title, body, actor)
+}
+
+pub(crate) fn save_document_on(
+    c: &mut rusqlite::Connection,
+    id: &str,
+    title: &str,
+    body: Option<String>,
+    actor: Option<String>,
+) -> Result<Document> {
+    let (doc, kind) = {
+        let tx = c.transaction().map_err(|e| e.to_string())?;
+        let result = save_document_tx(&tx, id, title, body, actor)?;
+        tx.commit().map_err(|e| e.to_string())?;
+        result
+    };
+    if kind == KIND_SHEET {
+        reindex_sheet(c, &doc.id, doc.body.as_deref());
+    }
+    document_updated_event(&doc);
+    Ok(doc)
+}
+
+pub(crate) fn save_document_tx(
+    tx: &rusqlite::Transaction<'_>,
+    id: &str,
+    title: &str,
+    body: Option<String>,
+    actor: Option<String>,
+) -> Result<(Document, String)> {
     let (current_version, kind): (i64, String) = tx
         .query_row(
             "SELECT version,kind FROM documents WHERE id=?1",
-            [&id],
+            [id],
             |r| Ok((r.get(0)?, r.get(1)?)),
         )
         .map_err(|e| e.to_string())?;
-    // A broken grid is refused before anything is written: no body change, no version.
     if kind == KIND_SHEET {
         validate_sheet_body(body.as_deref().unwrap_or(""))?;
+    } else if kind == KIND_BUDGET {
+        crate::budget::validate_budget_body(body.as_deref().unwrap_or(""))?;
     }
     let next_version = current_version + 1;
     tx.execute(
@@ -1059,22 +1109,25 @@ pub fn save_document(
         ],
     )
     .map_err(|e| e.to_string())?;
-    tx.commit().map_err(|e| e.to_string())?;
-    if kind == KIND_SHEET {
-        reindex_sheet(&c, &id, body.as_deref());
-    }
-    let doc = get_document(id)?.ok_or_else(|| "document vanished after save".to_string())?;
-    // Taxonomy name first; the pre-taxonomy alias is re-emitted so subscriptions
-    // stored before `events.rs` existed keep firing.
-    document_event(crate::events::DOCUMENT_UPDATED, &doc);
-    document_event(crate::events::LEGACY_DOCUMENT_EVENT, &doc);
-    Ok(doc)
+    let doc = tx
+        .query_row(
+            &format!("SELECT {DOC_COLUMNS} FROM documents WHERE id=?1"),
+            [id],
+            row_to_document,
+        )
+        .map_err(|_| "document vanished after save".to_string())?;
+    Ok((doc, kind))
 }
 
 /// Webhook fan-out envelope: `{"event": …, "document": …}`; subscription filters address
 /// it by dot-path, e.g. `"document.title"`. Second domain in the cross-domain taxonomy
 /// (issues being the first). Best effort after commit — a subscriber problem must never
 /// undo a user's document edit.
+pub(crate) fn document_updated_event(doc: &Document) {
+    document_event(crate::events::DOCUMENT_UPDATED, doc);
+    document_event(crate::events::LEGACY_DOCUMENT_EVENT, doc);
+}
+
 fn document_event(event_type: &str, doc: &Document) {
     let payload = serde_json::json!({ "event": event_type, "document": doc });
     if let Err(e) = crate::applications::enqueue_event(event_type, &payload) {
@@ -1276,9 +1329,13 @@ pub fn list_document_folders_scoped(profile_id: String) -> Result<Vec<DocumentFo
     let c = db::conn()?;
     list_document_folders_scoped_on(&c, &profile_id)
 }
-pub(crate) fn list_document_folders_scoped_on(c: &rusqlite::Connection, profile_id: &str) -> Result<Vec<DocumentFolder>> {
+pub(crate) fn list_document_folders_scoped_on(
+    c: &rusqlite::Connection,
+    profile_id: &str,
+) -> Result<Vec<DocumentFolder>> {
     let mut s = c.prepare(&format!("SELECT id,container_type,container_id,parent_id,name,description,archived FROM document_folders f WHERE {FOLDER_READ_SCOPE} ORDER BY name")).map_err(|e|e.to_string())?;
-    let rows = s.query_map([profile_id], row_to_folder)
+    let rows = s
+        .query_map([profile_id], row_to_folder)
         .map_err(|e| e.to_string())?
         .collect::<std::result::Result<_, _>>()
         .map_err(|e| e.to_string());
@@ -3211,15 +3268,22 @@ mod tests {
     fn organization_library_root_exists_once_and_every_active_member_can_list_it() {
         let c = test_conn();
         c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('member-a','a','A',1),('member-b','b','B',1),('former','f','Former',1)", []).unwrap();
-        c.execute("UPDATE profiles SET archived=1 WHERE id='former'", []).unwrap();
+        c.execute("UPDATE profiles SET archived=1 WHERE id='former'", [])
+            .unwrap();
         let root = ensure_organization_library_root_on(&c).unwrap();
         assert_eq!(root.id, ORGANIZATION_LIBRARY_ID);
         assert_eq!(root.name, "Library");
         assert_eq!(ensure_organization_library_root_on(&c).unwrap().id, root.id);
         for member in ["member-a", "member-b"] {
-            assert!(list_document_folders_scoped_on(&c, member).unwrap().iter().any(|folder| folder.id == ORGANIZATION_LIBRARY_ID));
+            assert!(list_document_folders_scoped_on(&c, member)
+                .unwrap()
+                .iter()
+                .any(|folder| folder.id == ORGANIZATION_LIBRARY_ID));
         }
-        assert!(!list_document_folders_scoped_on(&c, "former").unwrap().iter().any(|folder| folder.id == ORGANIZATION_LIBRARY_ID));
+        assert!(!list_document_folders_scoped_on(&c, "former")
+            .unwrap()
+            .iter()
+            .any(|folder| folder.id == ORGANIZATION_LIBRARY_ID));
     }
 
     /// A knowledge-base book is navigable to the profile that owns an article inside it,
