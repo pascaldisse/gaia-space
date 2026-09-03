@@ -103,14 +103,28 @@ export default function Documents(props: { container?: ContainerType; containerI
   });
 
   const [projects] = createResource(() => documentsApi.listProjects());
-  const [selectedProjectId, setSelectedProjectId] = createSignal<string | null>(null);
+  const [selectedProjectIdState, setSelectedProjectId] = createSignal<string | null>(null);
+  // URL context is authoritative. Keeping it only in effects made an immediately mounted
+  // document view briefly render the prior library until its route observer had run.
+  const selectedProjectId = () => {
+    const r = route();
+    return r.view === "Documents" && r.containerType === "project" ? r.containerId ?? null : selectedProjectIdState();
+  };
   createEffect(() => {
     const list = projects();
-    if (list && list.length && !selectedProjectId()) setSelectedProjectId(list[0].id);
+    if (list && list.length && !selectedProjectIdState()) setSelectedProjectId(list[0].id);
   });
 
-  const [activeContainer, setActiveContainer] = createSignal<ContainerType>("my-docs");
-  const [selectedBookId, setSelectedBookId] = createSignal<string | null>(null);
+  const [activeContainerState, setActiveContainer] = createSignal<ContainerType>("my-docs");
+  const activeContainer = (): ContainerType => {
+    const r = route();
+    return r.view === "Documents" && r.containerType ? r.containerType as ContainerType : activeContainerState();
+  };
+  const [selectedBookIdState, setSelectedBookId] = createSignal<string | null>(null);
+  const selectedBookId = () => {
+    const r = route();
+    return r.view === "Documents" && r.containerType === "kb" ? r.containerId ?? null : selectedBookIdState();
+  };
   const [newBookName, setNewBookName] = createSignal("");
 
   const containerId = () => {
@@ -559,7 +573,22 @@ const [showArchived, setShowArchived] = createSignal(false);
   // ---- document CRUD ----
   const [newDocTitle, setNewDocTitle] = createSignal("");
 const [newDocBodyFormat, setNewDocBodyFormat] = createSignal<DocumentCreateType>("text");
-  const [selectedDocumentId, setSelectedDocumentId] = createSignal<string | null>(null);
+  type LocalDocumentSelection = { id: string | null; routeKey: string };
+  const routeKey = () => {
+    const r = route();
+    return [r.view, r.entityType ?? "", r.entityId ?? "", r.containerType ?? "", r.containerId ?? "", r.projectId ?? ""].join("\0");
+  };
+  const [localDocumentSelection, setLocalDocumentSelection] = createSignal<LocalDocumentSelection | null>(null);
+  const setSelectedDocumentId = (id: string | null) => setLocalDocumentSelection({ id, routeKey: routeKey() });
+  // A route is authoritative unless a local act (create/upload) selected a replacement
+  // while that exact route remained current. This avoids an effect-timing fallback to
+  // the library root without discarding an uploaded file's immediate preview.
+  const selectedDocumentId = () => {
+    const local = localDocumentSelection();
+    if (local?.routeKey === routeKey()) return local.id;
+    const r = route();
+    return r.view === "Documents" && r.entityType === "document" ? r.entityId ?? null : null;
+  };
   async function createDocument() {
     const title = newDocTitle().trim();
     const cid = containerId();
