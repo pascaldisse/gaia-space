@@ -11,18 +11,18 @@ const meetingId = `calls-web-live-${suffix}`;
 const title = `Production web two peer ${meetingId}`;
 const secret = () => `${crypto.randomUUID()}${crypto.randomUUID()}`;
 
-const request = async (token, command, payload) => {
-  const response = await fetch(`${base}/api/cmd/${command}`, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify(payload) });
+const request = async (credential, command, payload) => {
+  const response = await fetch(`${base}/api/cmd/${command}`, { method: "POST", headers: { ...credential, "content-type": "application/json" }, body: JSON.stringify(payload) });
   return { status: response.status, body: await response.json().catch(() => null) };
 };
 const require200 = (label, result) => {
   if (result.status !== 200 || !result.body?.ok) throw new Error(`${label}: HTTP ${result.status} ${JSON.stringify(result.body)}`);
   return result.body.value;
 };
-const createPeer = async () => {
-  const username = `calls-proof3-b-${suffix}`;
+const createPeer = async (side) => {
+  const username = `calls-proof3-${side}-${suffix}`;
   const password = secret();
-  const response = await fetch(`${base}/api/users`, { method: "POST", headers: { authorization: `Bearer ${aToken}`, "content-type": "application/json" }, body: JSON.stringify({ username, password, display_name: "Calls Proof B", role: "member", profile_id: null }) });
+  const response = await fetch(`${base}/api/users`, { method: "POST", headers: { authorization: `Bearer ${aToken}`, "content-type": "application/json" }, body: JSON.stringify({ username, password, display_name: `Calls Proof ${side.toUpperCase()}`, role: "member", profile_id: null }) });
   const body = await response.json().catch(() => null);
   if (response.status !== 200) throw new Error(`create B: HTTP ${response.status} ${JSON.stringify(body)}`);
   const login = await fetch(`${base}/api/auth/login`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ username, password }) });
@@ -90,21 +90,23 @@ const inspect = async page => page.evaluate(async () => {
 
 let browser; let contexts = {}; let pages = {}; let stage = "API setup"; let results = { a: null, b: null };
 try {
-  const peer = await createPeer();
+  const aPeer = await createPeer("a");
+  const bPeer = await createPeer("b");
   const now = Math.floor(Date.now() / 1000);
   const meeting = { id: meetingId, title, description: "Ephemeral browser production proof", starts_at: now, ends_at: now + 3600, rrule: null, location: null, organizer_id: "bound-by-server", channel_id: null, visibility: "participants", modification_preference: "participants", archived: false, video_provider: "livekit", video_room_id: null, join_url: null, meeting_url: null, video_status: "scheduled", video_started_at: null, video_ended_at: null, video_ended_by: null, source_entity_type: null, source_entity_id: null };
-  require200("A create_meeting", await request(aToken, "create_meeting", { meeting }));
-  require200("A invite B", await request(aToken, "invite_meeting_participant", { meetingId, profileId: peer.profileId }));
-  // B acceptance uses its cookie, never A's PAT.
-  const accept = await fetch(`${base}/api/cmd/set_meeting_participant_status`, { method: "POST", headers: { cookie: peer.cookie, "content-type": "application/json" }, body: JSON.stringify({ meetingId, profileId: peer.profileId, status: "accepted" }) });
+  require200("A create_meeting", await request({ cookie: aPeer.cookie }, "create_meeting", { meeting }));
+  require200("A invite B", await request({ cookie: aPeer.cookie }, "invite_meeting_participant", { meetingId, profileId: bPeer.profileId }));
+  // B acceptance uses B's own cookie.
+  const accept = await fetch(`${base}/api/cmd/set_meeting_participant_status`, { method: "POST", headers: { cookie: bPeer.cookie, "content-type": "application/json" }, body: JSON.stringify({ meetingId, profileId: bPeer.profileId, status: "accepted" }) });
   const acceptBody = await accept.json().catch(() => null);
   if (accept.status !== 200 || !acceptBody?.ok) throw new Error(`B accept: HTTP ${accept.status} ${JSON.stringify(acceptBody)}`);
 
   browser = await chromium.launch({ headless: true, args: ["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream"] });
   contexts = { a: await browser.newContext(), b: await browser.newContext() };
-  await contexts.b.addCookies([{ name: peer.cookie.split("=")[0], value: peer.cookie.slice(peer.cookie.indexOf("=") + 1), domain: new URL(base).hostname, path: "/", httpOnly: true, secure: true, sameSite: "Lax" }]);
+  const addSession = async (context, cookie) => context.addCookies([{ name: cookie.split("=")[0], value: cookie.slice(cookie.indexOf("=") + 1), domain: new URL(base).hostname, path: "/", httpOnly: true, secure: true, sameSite: "Lax" }]);
+  await Promise.all([addSession(contexts.a, aPeer.cookie), addSession(contexts.b, bPeer.cookie)]);
   pages = { a: await contexts.a.newPage(), b: await contexts.b.newPage() };
-  await pages.a.addInitScript(installProbe, { token: aToken });
+  await pages.a.addInitScript(installProbe, { token: null });
   await pages.b.addInitScript(installProbe, { token: null });
   stage = "CallPanel";
   const detailUrl = `${base}/meetings/${encodeURIComponent(meetingId)}`;
@@ -131,7 +133,7 @@ try {
   if (pages.b) await pages.b.screenshot({ path: "proof/calls-web-2peers-b.png", fullPage: false }).catch(() => {});
   const detailUrl = `${base}/meetings/${encodeURIComponent(meetingId)}`;
   const safeError = String(error).replaceAll(aToken, "[REDACTED]");
-  await writeFile("proof/calls-web-2peers.txt", ["# Production browser two-peer LiveKit proof — FAILED", `UTC: ${new Date().toISOString()}`, `base: ${base}`, `direct_meeting_url: ${detailUrl}`, `meeting_id: ${meetingId}`, `stage: ${stage}`, `error: ${safeError}`, `A: ${JSON.stringify(results.a)}`, `B: ${JSON.stringify(results.b)}`, ""].join("\n"));
+  await writeFile("proof/calls-web-2peers.txt", ["# Production browser two-peer LiveKit proof — FAILED", `UTC: ${new Date().toISOString()}`, `base: ${base}`, `direct_meeting_url: ${detailUrl}`, `meeting_id: ${meetingId}`, `stage: ${stage}`, `error: ${safeError}`, `A: ${JSON.stringify(results.a)}`, `B: ${JSON.stringify(results.b)}`, ...await Promise.all(Object.entries(pages).map(async ([side, page]) => `${side}_body: ${JSON.stringify((await page.locator("body").innerText().catch(() => "")).replaceAll(aToken, "[REDACTED]")}`)), "screenshots: proof/calls-web-2peers-a.png, proof/calls-web-2peers-b.png", ""].join("\n"));
   console.error(safeError); process.exitCode = 1;
 } finally {
   await Promise.all(Object.values(contexts).map(context => context.close()));

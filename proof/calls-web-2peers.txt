@@ -1,8 +1,8 @@
 # Production browser two-peer LiveKit proof — FAILED
-UTC: 2026-09-03T20:34:32.123Z
+UTC: 2026-09-03T20:35:47.798Z
 base: https://paloptic.com/space
-direct_meeting_url: https://paloptic.com/space/meetings/calls-web-live-1788467668646-2960d25f
-meeting_id: calls-web-live-1788467668646-2960d25f
+direct_meeting_url: https://paloptic.com/space/meetings/calls-web-live-1788467743831-d2d9b9bb
+meeting_id: calls-web-live-1788467743831-d2d9b9bb
 stage: CallPanel
 error: Error: created meeting row count: 0
 A: {"state":null,"participants":0,"tiles":[],"videos":0,"remoteVideos":0,"ws":[],"ice":[],"peerDiagnostics":[]}
