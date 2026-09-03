@@ -472,7 +472,8 @@
 /* Responsive placement + phone tab bar. */
 .space-chat-shell { grid-template-areas: "rail sidebar main"; }
 .space-chat-shell > .rail { grid-area: rail; }.space-chat-shell > .space-sidebar { grid-area: sidebar; }.space-chat-shell > .space-main { grid-area: main; }
-.mobile-rail,.mobile-sidebar-back{display:none}
+.space-chat-shell > .mobile-rail,
+.space-chat-shell .mobile-sidebar-back { display: none; }
 @media (max-width:720px){
 .space-chat-shell,.space-chat-shell[data-nav-placement]{width:100dvw;max-width:100dvw;grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr) var(--nav-mobile-bar-size);grid-template-areas:"main" "rail"}
 .space-chat-shell[data-mobile-nav-placement="top"]{grid-template-rows:var(--nav-mobile-bar-size) minmax(0,1fr);grid-template-areas:"rail" "main"}
