@@ -292,7 +292,7 @@
 .graph-row {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 6px;
   padding: 0 10px;
   height: 30px;
   cursor: pointer;
@@ -300,7 +300,7 @@
 }
 .graph-row:hover { background: var(--wash-2, #141d30); }
 .graph-row.active { background: var(--accent-soft); }
-.graph-cell { flex-shrink: 0; display: block; }
+.graph-cell { flex: 0 1 64px; max-width: 64px; display: block; }
 .graph-summary {
   flex: 1 1 auto;
   min-width: 0;
@@ -309,7 +309,7 @@
   white-space: nowrap;
 }
 .graph-sha {
-  flex: 0 0 8ch;
+  flex: 0 0 7ch;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -318,7 +318,7 @@
   font-size: 0.82em;
 }
 .graph-date {
-  flex: 0 0 6ch;
+  flex: 0 0 5ch;
   color: var(--text-faint, #5a6478);
   font-size: 0.82em;
   white-space: nowrap;

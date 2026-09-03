@@ -146,8 +146,8 @@ function GraphRow(props: {
         </Show>
       </svg>
       <span class="graph-summary">
-        <For each={props.refs}>{(r) => <span class={`ref-badge ref-${r.kind}`}>{r.label}</span>}</For>
         {props.commit.summary || "(no summary)"}
+        <For each={props.refs}>{(r) => <span class={`ref-badge ref-${r.kind}`}>{r.label}</span>}</For>
       </span>
       <span class="graph-sha">{props.commit.short_id}</span>
       <span class="graph-date" title={when(props.commit.time)}>{relativeTime(props.commit.time)}</span>
