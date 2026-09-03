@@ -18,9 +18,40 @@ LIVEKIT_CONFIG_DIR="${LIVEKIT_CONFIG_DIR:-/etc/livekit}"
 LIVEKIT_ENV="${LIVEKIT_ENV:-$LIVEKIT_CONFIG_DIR/livekit.env}"
 LIVEKIT_CONFIG="${LIVEKIT_CONFIG:-$LIVEKIT_CONFIG_DIR/livekit.yaml}"
 CADDY_CONFIG="${CADDY_CONFIG:-/etc/caddy/Caddyfile.space}"
+CADDY_MAIN_CONFIG="${CADDY_MAIN_CONFIG:-/etc/caddy/Caddyfile}"
+CADDY_IMPORT="# GAIA Space routes: managed by $CADDY_CONFIG"
 STAMP=$(date -u +%Y%m%dT%H%M%SZ)
 BACKUP="/root/gaia-space-backups/$STAMP"
 
+install_caddy_import() {
+python3 - "$CADDY_MAIN_CONFIG" "$CADDY_CONFIG" "$CADDY_IMPORT" <<'PYTHON'
+from pathlib import Path
+import re
+import sys
+
+main_path, fragment, marker = sys.argv[1:]
+main = Path(main_path)
+text = main.read_text()
+import_line = f"import {fragment}"
+if text.count(import_line) == 1 and text.count(marker) == 1:
+    raise SystemExit(0)
+if import_line in text or marker in text:
+    raise SystemExit("Caddy main config has an incomplete or duplicate GAIA Space import")
+indent = r"(?P<indent>[ \t]*)"
+block = r"(?P=indent)handle /space/(?:api|hooks)/\* \{\n(?s:.*?)^(?P=indent)\}\n"
+legacy = re.compile(
+    rf"(?m)^{indent}redir /space /space/ 308\n"
+    rf"(?:{block})+"
+    rf"(?P=indent)handle_path /space/\* \{{\n(?s:.*?)^(?P=indent)\}}\n"
+)
+matches = list(legacy.finditer(text))
+if len(matches) != 1:
+    raise SystemExit("Caddy main config must contain exactly one legacy GAIA Space route block")
+match = matches[0]
+replacement = f"{match.group('indent')}{marker}\n{match.group('indent')}{import_line}\n"
+main.write_text(text[:match.start()] + replacement + text[match.end():])
+PYTHON
+}
 census() { # census <sqlite-path> — table row counts + schema version, one line each
   python3 - "$1" <<'PY'
 import sqlite3, sys
@@ -49,6 +80,7 @@ cp -a /etc/gaia-space.env "$BACKUP/gaia-space.env"
 cp -a /etc/systemd/system/gaia-space.service "$BACKUP/gaia-space.service"
 cp -a /etc/systemd/system/livekit.service "$BACKUP/livekit.service" 2>/dev/null || true
 cp -a "$CADDY_CONFIG" "$BACKUP/Caddyfile.space" 2>/dev/null || true
+cp -a "$CADDY_MAIN_CONFIG" "$BACKUP/Caddyfile"
 tar -C "$STATIC" -czf "$BACKUP/static.tar.gz" .
 chmod -R go-rwx "$BACKUP"
 census "$BACKUP/space.db" > /tmp/census-backup.txt
@@ -65,6 +97,12 @@ restore() {
   install -o gaia-space -g gaia-space -m 0755 "$BACKUP/space-server" "$BIN"
   install -o root -g root -m 0644 "$BACKUP/gaia-space.service" /etc/systemd/system/gaia-space.service
   systemctl daemon-reload
+  install -o root -g root -m 0644 "$BACKUP/Caddyfile" "$CADDY_MAIN_CONFIG"
+  if [ -f "$BACKUP/Caddyfile.space" ]; then
+    install -o root -g root -m 0644 "$BACKUP/Caddyfile.space" "$CADDY_CONFIG"
+  fi
+  caddy validate --config "$CADDY_MAIN_CONFIG"
+  systemctl reload caddy
   rm -rf "${STATIC:?}/"* && tar -C "$STATIC" -xzf "$BACKUP/static.tar.gz"
   if [ "$DB_SUSPECT" = "1" ]; then
     echo "   migration was the failure — restoring the database too"
@@ -91,6 +129,8 @@ install -d -o root -g root -m 0755 /var/lib/livekit
 install -o root -g root -m 0644 "$RELEASE_DIR/livekit.yaml" "$LIVEKIT_CONFIG"
 install -o root -g root -m 0644 "$RELEASE_DIR/livekit.service" /etc/systemd/system/livekit.service
 install -o root -g root -m 0644 "$RELEASE_DIR/Caddyfile.space" "$CADDY_CONFIG"
+install_caddy_import
+caddy validate --config "$CADDY_MAIN_CONFIG"
 systemctl stop gaia-space
 install -o root -g root -m 0644 "$RELEASE_DIR/gaia-space.service" /etc/systemd/system/gaia-space.service
 systemctl daemon-reload

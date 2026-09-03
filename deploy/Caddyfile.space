@@ -3,10 +3,15 @@ handle /space/api/* {
 	uri strip_prefix /space
 	reverse_proxy 127.0.0.1:8090
 }
-# Must precede the SPA catch-all: browser LiveKit WebSockets stay proxied, not static.
+# These protected routes must precede the SPA catch-all.
+handle /space/hooks/* {
+	uri strip_prefix /space
+	reverse_proxy 127.0.0.1:8093
+}
+# Browser LiveKit WebSockets stay proxied, not static.
 handle /space/livekit/* {
-uri strip_prefix /space/livekit
-reverse_proxy 127.0.0.1:7880
+	uri strip_prefix /space/livekit
+	reverse_proxy 127.0.0.1:7880
 }
 handle_path /space/* {
 	root * /var/www/gaia-space
