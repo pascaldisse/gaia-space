@@ -10,6 +10,7 @@
     "check": "tsc --noEmit",
     "serve": "vite preview",
     "test": "bun test",
+    "shot": "bun tools/screenshot.ts",
     "tauri": "tauri"
   },
   "license": "MIT",
