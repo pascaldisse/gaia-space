@@ -40,8 +40,15 @@ export type DocKind = "markdown" | "sheet";
 /** The single question the create form asks: prose in one of its flavours, or a table. */
 export type DocumentCreateType = DocumentBodyFormat | "sheet";
 
-export type SheetColumnType = "text" | "number" | "date";
-export type SheetColumn = { id: string; label: string; type: SheetColumnType };
+export type SheetColumnType = "text" | "number" | "date" | "person" | "formula";
+export type SheetAggregate = "sum" | "avg" | "min" | "max" | "count" | "none";
+export type SheetColumn = {
+  id: string;
+  label: string;
+  type: SheetColumnType;
+  formula?: string;
+  aggregate?: SheetAggregate;
+};
 export type SheetRow = { id: string; cells: Record<string, string> };
 /** The body of a `sheet` document, verbatim as it is stored (JSON string in `body`).
  *  Ids are stable and never reused, so two versions diff cell by cell. */
@@ -62,7 +69,8 @@ export function emptySheet(): SheetDoc {
   return { columns, rows };
 }
 
-const COLUMN_TYPES: SheetColumnType[] = ["text", "number", "date"];
+const COLUMN_TYPES: SheetColumnType[] = ["text", "number", "date", "person", "formula"];
+const AGGREGATES: SheetAggregate[] = ["sum", "avg", "min", "max", "count", "none"];
 
 /** Tolerant on the way in: an unreadable or empty body opens a usable grid rather than
  *  an error page. Strictness lives on the write path, where the server refuses garbage. */
@@ -81,7 +89,9 @@ export function parseSheet(body: string | null | undefined): SheetDoc {
         const column = entry as Partial<SheetColumn>;
         if (!column || typeof column.id !== "string" || !column.id.trim()) return [];
         const type = COLUMN_TYPES.includes(column.type as SheetColumnType) ? (column.type as SheetColumnType) : "text";
-        return [{ id: column.id, label: typeof column.label === "string" ? column.label : "", type }];
+        const formula = type === "formula" && typeof column.formula === "string" ? column.formula : undefined;
+const aggregate = AGGREGATES.includes(column.aggregate as SheetAggregate) ? column.aggregate as SheetAggregate : undefined;
+return [{ id: column.id, label: typeof column.label === "string" ? column.label : "", type, ...(formula === undefined ? {} : { formula }), ...(aggregate === undefined ? {} : { aggregate }) }];
       })
     : [];
   if (!columns.length) return emptySheet();
@@ -92,7 +102,7 @@ export function parseSheet(body: string | null | undefined): SheetDoc {
         if (!row || typeof row.id !== "string" || !row.id.trim()) return [];
         const cells: Record<string, string> = {};
         for (const [columnId, value] of Object.entries(row.cells ?? {})) {
-          if (known.has(columnId) && typeof value === "string") cells[columnId] = value;
+          if (known.has(columnId) && !columns.find((column) => column.id === columnId && column.type === "formula") && typeof value === "string") cells[columnId] = value;
         }
         return [{ id: row.id, cells }];
       })
@@ -138,12 +148,12 @@ export function versionSnippet(kind: string | null | undefined, body: string | n
 /** Exactly the shape `documents.rs` validates — no extra keys, no undefined cells. */
 export function serializeSheet(sheet: SheetDoc): string {
   return JSON.stringify({
-    columns: sheet.columns.map((column) => ({ id: column.id, label: column.label, type: column.type })),
+    columns: sheet.columns.map((column) => ({ id: column.id, label: column.label, type: column.type, ...(column.type === "formula" && column.formula !== undefined ? { formula: column.formula } : {}), ...(column.aggregate !== undefined ? { aggregate: column.aggregate } : {}) })),
     rows: sheet.rows.map((row) => ({
       id: row.id,
       cells: Object.fromEntries(
         sheet.columns
-          .filter((column) => (row.cells[column.id] ?? "") !== "")
+          .filter((column) => column.type !== "formula" && (row.cells[column.id] ?? "") !== "")
           .map((column) => [column.id, row.cells[column.id]]),
       ),
     })),
