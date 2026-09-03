@@ -138,6 +138,13 @@ const PATHS = {
      already spoken for by a rail mode (layers = Projects, target = Development), and
      a category wearing the Projects icon would have read as a second project field. */
   tag: () => <><path d="M3 12.5V4.5A1.5 1.5 0 0 1 4.5 3h8L21 11.5 13.5 19 3 12.5Z" /><circle cx="7.5" cy="7.5" r="1.2" /></>,
+  /* Fetch: bring the remote's tips down without touching the working tree —
+     one clean arc back to where it started, the shape every OS uses for "sync". */
+  refresh: () => <><path d="M20 12a8 8 0 1 1-2.6-5.9" /><path d="M20 4v5h-5" /></>,
+  /* Pull: fetch, then land the change here. */
+  "arrow-down": () => <path d="M12 4v14M6 12l6 6 6-6" />,
+  /* Push: send the local commit up to the remote. */
+  "arrow-up": () => <path d="M12 20V6M6 12l6-6 6 6" />,
 } satisfies Record<string, () => JSX.Element>;
 
 export type IconName = keyof typeof PATHS;

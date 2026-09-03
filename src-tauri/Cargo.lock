@@ -1347,6 +1347,7 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-dialog",
  "tauri-plugin-opener",
+ "tempfile",
  "tokio",
  "tower",
  "tungstenite",
@@ -1542,6 +1543,7 @@ dependencies = [
  "libc",
  "libgit2-sys",
  "log",
+ "url",
 ]
 
 [[package]]
