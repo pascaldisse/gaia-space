@@ -30,6 +30,15 @@ export type StashEntry = { index: number; message: string };
 export type TreeEntry = { name: string; path: string; is_dir: boolean; id: string };
 export type CommitFile = { path: string; status: string };
 export type WorktreeInfo = { name: string; path: string };
+export type HostedRepository = {
+  id: string;
+  project_id: string;
+  name: string;
+  description: string | null;
+  default_branch: string;
+  created_at: number;
+  created_by: string | null;
+};
 
 export const api = {
   repoList: () => invoke<RepoRef[]>("repo_list"),
@@ -69,6 +78,12 @@ export const api = {
   repoUnstage: (path: string, files: string[]) =>
     invoke<void>("repo_unstage", { path, files }),
   repoWorktrees: (path: string) => invoke<WorktreeInfo[]>("repo_worktrees", { path }),
+  listHostedRepos: (projectId: string) =>
+    invoke<HostedRepository[]>("list_hosted_repos", { projectId }),
+  createHostedRepo: (projectId: string, name: string, defaultBranch: string) =>
+    invoke<HostedRepository>("create_hosted_repo", { projectId, name, description: null, defaultBranch }),
+  hostedRepoCloneUrl: (baseUrl: string, project: string, name: string) =>
+    invoke<string>("hosted_repo_clone_url", { baseUrl, project, name }),
   listProjects: () => invoke<Project[]>("list_projects"),
   listProfiles: () => invoke<Profile[]>("list_profiles"),
   listIssues: () => invoke<Issue[]>("list_issues"),

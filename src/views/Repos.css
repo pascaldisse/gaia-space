@@ -257,6 +257,13 @@
 .ref-list li.head { color: var(--accent-text, var(--accent)); }
 .ref-list li.hint { color: var(--text-faint, #5a6478); cursor: default; }
 .ref-list .stash-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.hosted-project-picker { padding: 0 10px 6px; }
+.hosted-project-picker .pill-select { width: 100%; }
+.hosted-repo-row { display: flex; align-items: center; gap: 8px; }
+.hosted-repo-row > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.hosted-repo-row .icon-button { flex: 0 0 auto; }
+.hosted-repo-form { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto auto; gap: 4px; padding: 4px 10px 8px; }
+.hosted-repo-form input { min-width: 0; border: 1px solid var(--line, #243050); border-radius: 6px; padding: 4px 6px; background: var(--wash-2, #141d30); color: var(--text); font: inherit; font-size: 0.85em; }
 
 /* ── REF BADGES (branch/tag/HEAD pills on a commit row) ──────────────────────
    Colour reuses the accent already used for the current branch everywhere else

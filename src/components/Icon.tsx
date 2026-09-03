@@ -132,6 +132,7 @@ const PATHS = {
   send: () => <path d="M5 12h13M12.5 5.5 19 12l-6.5 6.5" />,
   trash: () => <path d="M5 7h14M10 7V5h4v2M6.5 7l1 13h9l1-13M10 10.5v6M14 10.5v6" />,
   plus: () => <path d="M12 5v14M5 12h14" />,
+  copy: () => <><rect x="9" y="9" width="10" height="10" rx="1" /><path d="M15 9V6a1 1 0 0 0-1-1H6a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h3" /></>,
   menu: () => <path d="M4 7h16M4 12h16M4 17h16" />,
   close: () => <path d="m6 6 12 12M18 6 6 18" />,
   /* A category IS a tag, so it is drawn as one. Every other glyph in this set was

@@ -7,7 +7,7 @@ import { Resizer, paneWidth } from "../components/Resizer";
 import "../App.css";
 import "./Repos.css";
 import EmptyState from "../components/EmptyState";
-import { GhostPill, IconButton, PillMenu, QuietSearch } from "../components/controls";
+import { GhostPill, IconButton, PillMenu, PillSelect, QuietSearch } from "../components/controls";
 import { Icon } from "../components/Icon";
 import PageHeader, { Chip } from "../components/PageHeader";
 import ContentHead from "../components/ContentHead";
@@ -226,6 +226,41 @@ export default function App() {
   const [tags, { refetch: refetchTags }] = createResource(active, (p) => api.repoTags(p));
   const [stashes, { refetch: refetchStashes }] = createResource(active, (p) => api.repoStashList(p));
   const [worktrees, { refetch: refetchWorktrees }] = createResource(active, (p) => api.repoWorktrees(p));
+  const [projects] = createResource(() => api.listProjects());
+  const [hostedProjectId, setHostedProjectId] = createSignal("");
+  const [hostedRepos, { refetch: refetchHostedRepos }] = createResource(hostedProjectId, (projectId) => api.listHostedRepos(projectId));
+  const [newHosted, setNewHosted] = createSignal(false);
+  const [hostedName, setHostedName] = createSignal("");
+  const [hostedBranch, setHostedBranch] = createSignal("main");
+
+  createEffect(() => {
+    if (!hostedProjectId() && projects()?.length) setHostedProjectId(projects()![0].id);
+  });
+  const hostedProject = createMemo(() => projects()?.find((project) => project.id === hostedProjectId()) ?? null);
+
+  async function createHostedRepo(event: SubmitEvent) {
+    event.preventDefault();
+    const projectId = hostedProjectId();
+    if (!projectId || !hostedName().trim() || !hostedBranch().trim()) {
+      setError("A project, repository name, and default branch are required.");
+      return;
+    }
+    await run("Creating hosted repository…", async () => {
+      await api.createHostedRepo(projectId, hostedName().trim(), hostedBranch().trim());
+      setHostedName("");
+      setHostedBranch("main");
+      setNewHosted(false);
+      await refetchHostedRepos();
+    });
+  }
+  function copyHostedCloneUrl(name: string) {
+    const project = hostedProject();
+    if (!project) return;
+    run("Copying clone URL…", async () => {
+      const url = await api.hostedRepoCloneUrl(window.location.origin, project.id, name);
+      await navigator.clipboard.writeText(url);
+    });
+  }
 
   function refetchAll() {
     refetchInfo();
@@ -241,6 +276,7 @@ export default function App() {
   const [leftView, setLeftView] = createSignal<"commits" | "changes">("commits");
   const [filter, setFilter] = createSignal("");
   const [groupsOpen, setGroupsOpen] = createSignal({
+    hosted: true,
     branches: true,
     remotes: false,
     tags: false,
@@ -578,6 +614,35 @@ export default function App() {
 
               <QuietSearch label="Filter commits and branches" placeholder="Filter…" value={filter()} onInput={setFilter} class="side-filter" />
 
+              <Group title="HOSTED" count={hostedRepos()?.length ?? 0} open={groupsOpen().hosted} onToggle={() => toggleGroup("hosted")}>
+                <Show when={projects()?.length} fallback={<EmptyState title="No projects" hint="Create a project before creating a hosted repository." />}>
+                  <div class="hosted-project-picker">
+                    <PillSelect label="Hosted repository project" value={hostedProjectId()} onChange={setHostedProjectId}>
+                      <For each={projects()}>{(project) => <option value={project.id}>{project.name}</option>}</For>
+                    </PillSelect>
+                  </div>
+                  <ul class="ref-list hosted-repo-list">
+                    <For each={hostedRepos()} fallback={<li class="hint">No hosted repositories.</li>}>
+                      {(repo) => (
+                        <li class="hosted-repo-row">
+                          <span>{repo.name}</span>
+                          <IconButton label={`Copy clone URL for ${repo.name}`} onClick={() => copyHostedCloneUrl(repo.name)} disabled={!!busy()}>
+                            <Icon name="copy" size={14} />
+                          </IconButton>
+                        </li>
+                      )}
+                    </For>
+                  </ul>
+                  <Show when={newHosted()} fallback={<GhostPill onClick={() => setNewHosted(true)}>New hosted repository…</GhostPill>}>
+                    <form class="hosted-repo-form" onSubmit={createHostedRepo}>
+                      <input aria-label="Hosted repository name" value={hostedName()} onInput={(event) => setHostedName(event.currentTarget.value)} placeholder="Repository name" />
+                      <input aria-label="Default branch" value={hostedBranch()} onInput={(event) => setHostedBranch(event.currentTarget.value)} placeholder="Default branch" />
+                      <GhostPill disabled={!!busy()}>Create</GhostPill>
+                      <IconButton label="Cancel hosted repository" onClick={() => setNewHosted(false)}><Icon name="close" size={12} /></IconButton>
+                    </form>
+                  </Show>
+                </Show>
+              </Group>
               <Group title="Branches" count={localBranches().length} open={groupsOpen().branches} onToggle={() => toggleGroup("branches")}>
                 <ul class="ref-list">
                   <For each={localBranches().filter((b) => matchesFilter(b.name))} fallback={<li class="hint">No branches.</li>}>
