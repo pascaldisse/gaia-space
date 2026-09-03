@@ -82,7 +82,7 @@ const inspect = async page => page.evaluate(async () => {
     tiles: [...document.querySelectorAll(".call-tile")].map(x => x.getAttribute("aria-label")),
     videos: document.querySelectorAll(".call-tile video").length,
     remoteVideos: [...document.querySelectorAll(".call-tile video")].filter(x => !x.muted).length,
-    ws: window.__callsProofWebSockets ?? [],
+    ws: (window.__callsProofWebSockets ?? []).map(({ url, opened, errors, closes }) => ({ url: url.replace(/\?.*$/, ""), opened, errors, closes })),
     ice,
     peerDiagnostics: (window.__callsProofPeers ?? []).map(({ timeline, candidates }) => ({ timeline, candidates }))
   };
