@@ -1,0 +1,17 @@
+# Production web Call join transcript (redacted)
+UTC: 2026-09-03T19:42:12.858603+00:00
+base: https://paloptic.com/space
+credential: existing service-account personal access token [REDACTED]
+meeting_id: calls-proof-1788464531-54576722
+
+POST /api/cmd/create_meeting: HTTP 200
+create.ok: True
+
+POST /api/cmd/join_meeting_call (authenticated): HTTP 200
+join.ok: True
+join.value.url: wss://paloptic.com/space/livekit
+join.value.room: meeting-calls-proof-1788464531-54576722
+join.value.token: [REDACTED; present=True]
+
+POST /api/cmd/join_meeting_call (anonymous): HTTP 401
+anonymous.response: {'error': 'unauthorized', 'ok': False}
