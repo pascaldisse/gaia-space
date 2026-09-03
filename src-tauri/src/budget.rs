@@ -120,7 +120,7 @@ fn split_ids(raw: &str, members: &[String]) -> Result<Vec<String>> {
     Ok(ids)
 }
 
-fn rows_and_members<'a>(body: &'a Value) -> Result<(&'a [Value], Vec<String>)> {
+fn rows_and_members(body: &Value) -> Result<(&[Value], Vec<String>)> {
     let members = body
         .get("members")
         .and_then(Value::as_array)
@@ -587,7 +587,7 @@ mod tests {
             ("2026-09-04", "dan", "6.04", "D", "ada,eve"),
         ]);
         let s = statement_on(&c, "budget", None).unwrap();
-        assert!(s.transfers.len() <= s.members.len() - 1);
+        assert!(s.transfers.len() < s.members.len());
         for member in &s.members {
             let transferred: i64 = s
                 .transfers
