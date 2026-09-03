@@ -133,7 +133,11 @@ try {
   if (pages.b) await pages.b.screenshot({ path: "proof/calls-web-2peers-b.png", fullPage: false }).catch(() => {});
   const detailUrl = `${base}/meetings/${encodeURIComponent(meetingId)}`;
   const safeError = String(error).replaceAll(aToken, "[REDACTED]");
-  await writeFile("proof/calls-web-2peers.txt", ["# Production browser two-peer LiveKit proof — FAILED", `UTC: ${new Date().toISOString()}`, `base: ${base}`, `direct_meeting_url: ${detailUrl}`, `meeting_id: ${meetingId}`, `stage: ${stage}`, `error: ${safeError}`, `A: ${JSON.stringify(results.a)}`, `B: ${JSON.stringify(results.b)}`, ...await Promise.all(Object.entries(pages).map(async ([side, page]) => `${side}_body: ${JSON.stringify((await page.locator("body").innerText().catch(() => "")).replaceAll(aToken, "[REDACTED]")}`)), "screenshots: proof/calls-web-2peers-a.png, proof/calls-web-2peers-b.png", ""].join("\n"));
+  const bodies = await Promise.all(Object.entries(pages).map(async ([side, page]) => {
+    const body = (await page.locator("body").innerText().catch(() => "")).replaceAll(aToken, "[REDACTED]");
+    return `${side}_body: ${JSON.stringify(body)}`;
+  }));
+  await writeFile("proof/calls-web-2peers.txt", ["# Production browser two-peer LiveKit proof — FAILED", `UTC: ${new Date().toISOString()}`, `base: ${base}`, `direct_meeting_url: ${detailUrl}`, `meeting_id: ${meetingId}`, `stage: ${stage}`, `error: ${safeError}`, `A: ${JSON.stringify(results.a)}`, `B: ${JSON.stringify(results.b)}`, ...bodies, "screenshots: proof/calls-web-2peers-a.png, proof/calls-web-2peers-b.png", ""].join("\n"));
   console.error(safeError); process.exitCode = 1;
 } finally {
   await Promise.all(Object.values(contexts).map(context => context.close()));
