@@ -18,7 +18,7 @@ import { platformApi } from "../api/platform";
 import { currentUser, isWeb, profileId, profiles, reloadProfiles, projects, reloadProjects, workspaceId, workspaces } from "../session";
 import { attentionCount, attentionFilterCount, asActivityFilter, setAttentionProfile, unreadChannelTotal, type ActivityFilter } from "../attention";
 import { isViewAvailable, linkEntity, linkProps, navigate, route, type Route } from "../router";
-import { NAV_GROUPS, hiddenGroups, railModeOfRoute, railModeOfView, viewLabel, type RailMode } from "../nav";
+import { MOBILE_RAIL_MODES, NAV_GROUPS, hiddenGroups, mobileNavPlacement, navPlacement, railModeOfRoute, railModeOfView, showDevelopment, viewLabel, type RailMode } from "../nav";
 
 /**
  * Communication-first shell (GAIA Space redesign, stage 1).
@@ -34,19 +34,15 @@ export type ShellView = { name: string; icon: IconName };
 
 /** The rail is a set of MODES. `landing` is the view the mode opens on when no more
  *  specific object is known — a mode must never land on a naked sidebar. */
-const RAIL: { mode: RailMode; label: string; landing: string; icon: IconName; badge?: "chat" | "mentions" }[] = [
+const RAIL: { mode: Exclude<RailMode, "more">; label: string; landing: string; icon: IconName; badge?: "chat" | "mentions" }[] = [
   { mode: "home", label: "Home", landing: "Home", icon: "home" },
   { mode: "chats", label: "Chats", landing: "Chat", icon: "chat", badge: "chat" },
-  { mode: "activity", label: "Activity", landing: "Inbox", icon: "inbox", badge: "mentions" },
-  // "Tasks" lands on the PRIVATE list (My tasks); Team Tasks — everybody's running
-  // project work — is the second entry of that mode's sidebar.
-  { mode: "tasks", label: "Tasks", landing: "To-Do", icon: "check" },
   { mode: "projects", label: "Projects", landing: "Projects", icon: "layers" },
-  { mode: "calendar", label: "Calendar", landing: "Calendar", icon: "calendar" },
-  { mode: "knowledge", label: "Library", landing: "Documents", icon: "book-nav" },
+  { mode: "library", label: "Library", landing: "Documents", icon: "book-nav" },
   { mode: "development", label: "Development", landing: "Development", icon: "target" },
 ];
-
+const mobileRail = () => RAIL.filter((entry) => MOBILE_RAIL_MODES.includes(entry.mode));
+const desktopRail = () => RAIL.filter((entry) => entry.mode !== "development" || showDevelopment());
 /** A sidebar entry names an OBJECT of the current mode. `filter` marks the entries that
  *  NARROW the current pane instead of moving: Activity's worklist filters, which live in
  *  the route (`/inbox/<filter>`) so exactly one of them can read as active, a deep link
@@ -76,32 +72,13 @@ const MODE_LINKS: Record<RailMode, SideEntry[]> = {
   // Activity's objects are the things waiting for you, so its sidebar lists FILTERS over
   // the one worklist — each one a group of `AttentionKind` (see ACTIVITY_FILTERS in
   // attention.ts). No entry leaves the mode, and no entry exists without kinds behind it.
-  activity: [
-    { label: "All", view: "Inbox", icon: "inbox", strong: true, filter: "all" },
-    { label: "Mentions", view: "Inbox", icon: "chat", filter: "mentions" },
-    { label: "Messages", view: "Inbox", icon: "chat", filter: "messages" },
-    { label: "Assigned", view: "Inbox", icon: "check", filter: "assigned" },
-    { label: "Reviews", view: "Inbox", icon: "review", filter: "reviews" },
-    { label: "Updates", view: "Inbox", icon: "inbox", filter: "updates" },
-  ],
-  tasks: [
-    { label: "My tasks", view: "To-Do", icon: "check", strong: true },
-    { label: "Team tasks", view: "Team Tasks", icon: "users" },
-  ],
   // Projects lists the PROJECTS, the way Chats lists the channels — they are this
   // mode's objects. "All projects" is the only fixed entry; everything else is data.
   projects: [{ label: "All projects", view: "Projects", icon: "layers", strong: true }],
-  calendar: [
-    { label: "Calendar", view: "Calendar", icon: "calendar", strong: true },
-    { label: "Meetings", view: "Meetings", icon: "calendar-nav" },
-    { label: "People", view: "Members", icon: "org" },
-    { label: "Locations", view: "Locations", icon: "org" },
-    { label: "Time off", view: "Absences", icon: "clock-nav" },
-  ],
   // Knowledge's objects are the LIBRARIES, and every one of them is DATA (the personal
   // container, the organization's books, each project's library), so none of them can be
   // written here: the mode's column is built below, from what exists.
-  knowledge: [],
+  library: [],
   development: [
     { label: "Overview", view: "Development", icon: "target", strong: true },
     { label: "Tickets", view: "Issues", icon: "target" },
@@ -121,10 +98,8 @@ const MODE_LINKS: Record<RailMode, SideEntry[]> = {
 };
 
 const MODE_TITLE: Record<RailMode, string> = {
-  home: "Home", chats: "Chats", activity: "Activity",
-  tasks: "Tasks", projects: "Projects", calendar: "Calendar", knowledge: "Knowledge", development: "Development", more: "More",
+  home: "Home", chats: "Chats", projects: "Projects", library: "Library", development: "Development", more: "More",
 };
-
 /** linkProps() is evaluated ONCE when a node is created, so a plain spread freezes the
  *  href at first render: the rail's links were still `/dashboard` (the fallback, from
  *  before registerViews ran), and the Chats landing could never see channels that load
@@ -151,6 +126,7 @@ export default function SpaceShell(props: {
 }): JSX.Element {
   const [moreOpen, setMoreOpen] = createSignal(false);
   const [sidebarCollapsed, setSidebarCollapsed] = createSignal(false);
+const [mobileSidebarOpen, setMobileSidebarOpen] = createSignal(false);
   const [filter, setFilter] = createSignal("");
   /** `undefined` = closed; a string (possibly "") = open, bound to that project. */
   const [newChannelFor, setNewChannelFor] = createSignal<string | undefined>();
@@ -368,7 +344,7 @@ export default function SpaceShell(props: {
   const showsChannels = createMemo(() => mode() === "chats" || mode() === "home");
   // Knowledge lists libraries, all of them data, so it keeps its column too — before
   // this it was the one mode where the second bar disappeared mid-navigation.
-  const hasSidebar = createMemo(() => MODE_LINKS[mode()].length > 0 || showsChannels() || mode() === "knowledge");
+  const hasSidebar = createMemo(() => MODE_LINKS[mode()].length > 0 || showsChannels() || mode() === "library");
 
   /** A profile's display name, for labelling a direct message with the OTHER person. */
   const displayNameOf = (id: string) => (profiles() ?? []).find((person) => person.id === id)?.display_name;
@@ -507,7 +483,7 @@ export default function SpaceShell(props: {
   );
 
   return (
-    <div class="space-chat-shell theme-space-light" classList={{ "no-sidebar": !hasSidebar(), "sidebar-collapsed": sidebarCollapsed() }}>
+    <div class="space-chat-shell theme-space-light" data-nav-placement={navPlacement()} data-mobile-nav-placement={mobileNavPlacement()} classList={{ "no-sidebar": !hasSidebar(), "sidebar-collapsed": sidebarCollapsed(), "mobile-sidebar-open": mobileSidebarOpen() }}>
       <Show when={channelMenu()}>
         {(menu) => <ContextMenu x={menu().x} y={menu().y} items={menu().items} onClose={() => setChannelMenu(null)} />}
       </Show>
@@ -657,50 +633,10 @@ export default function SpaceShell(props: {
           </div>
         </Show>
 
-        {/* THE PROJECTS ARE WHERE WORK IS FILED. Tasks lists them for the same reason
-            Knowledge lists its libraries: to go there, and to have somewhere to drop
-            what you are carrying. */}
-        <Show when={mode() === "tasks"}>
-          <div class="section">
-            <div class="section-head"><span>Projects</span></div>
-            <For each={projectList()}>
-              {(project) => (
-                <a
-                  class="side-link"
-                  classList={{
-                    active: route().projectId === project.id,
-                    "drop-into": dropTarget() === `task-project:${project.id}`,
-                  }}
-                  onDragOver={(event) => {
-                    if (!carries(event, "application/x-gaia-task")) return;
-                    event.preventDefault();
-                    setDropTarget(`task-project:${project.id}`);
-                  }}
-                  onDragLeave={() => setDropTarget((current) => (current === `task-project:${project.id}` ? null : current))}
-                  onDrop={(event) => {
-                    const payload = readPayload<{ id: string; title: string }>(event, "application/x-gaia-task");
-                    setDropTarget(null);
-                    if (!payload) return;
-                    event.preventDefault();
-                    void fileTaskIntoProject(payload.id, project.id, project.name ?? "this project");
-                  }}
-                  {...navLink(() => ({ view: "Project Tasks", projectId: project.id }))}
-                >
-                  <span class="side-icon" aria-hidden="true"><Icon name="layers" size={15} /></span>
-                  {project.name}
-                </a>
-              )}
-            </For>
-            <Show when={!projectList().length}>
-              <div class="side-empty">No projects yet.</div>
-            </Show>
-          </div>
-        </Show>
-
         {/* One library per row, the organization's above the projects' — the same shape
             Chats uses for channels. Choosing a source happens HERE now, so the Documents
             page no longer carries a second picker of its own (one act, one place). */}
-        <Show when={mode() === "knowledge"}>
+        <Show when={mode() === "library"}>
           {/* The personal container is the anchor and carries its OWN container in the
               link: arriving from a project library must actually switch the source. */}
           <a
