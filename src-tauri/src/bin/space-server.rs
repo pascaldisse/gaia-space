@@ -153,9 +153,12 @@ fn git_response(content_type: String, bytes: Vec<u8>) -> axum::response::Respons
 
 async fn git_info_refs(
     headers: HeaderMap,
-    Path((project, repo)): Path<(String, String)>,
+    Path((project, path)): Path<(String, String)>,
     Query(query): Query<HashMap<String, String>>,
 ) -> axum::response::Response {
+    let Some(repo) = path.strip_suffix(".git/info/refs") else {
+        return err(StatusCode::NOT_FOUND, "unknown git route").into_response();
+    };
     // Projects have no public visibility field in the current schema; therefore no project
     // is anonymously readable. This mirrors project_readable rather than inventing a public fallback.
     if let Err(response) = registry_auth(&headers) {
@@ -188,9 +191,16 @@ async fn git_info_refs(
 
 async fn git_rpc(
     headers: HeaderMap,
-    Path((project, repo, service)): Path<(String, String, String)>,
+    Path((project, path)): Path<(String, String)>,
     body: Bytes,
 ) -> axum::response::Response {
+    let Some((repo_git, service)) = path.rsplit_once('/') else {
+        return err(StatusCode::NOT_FOUND, "unknown git route").into_response();
+    };
+    let Some(repo) = repo_git.strip_suffix(".git") else {
+        return err(StatusCode::NOT_FOUND, "unknown git route").into_response();
+    };
+    let service = service.to_string();
     if !matches!(service.as_str(), "git-upload-pack" | "git-receive-pack") {
         return err(StatusCode::NOT_FOUND, "unknown git service").into_response();
     }
@@ -6358,8 +6368,7 @@ async fn main() {
                 .post(registry_oci_post)
                 .get(registry_oci_get),
         )
-        .route("/git/{project}/{repo}.git/info/refs", get(git_info_refs))
-        .route("/git/{project}/{repo}.git/{service}", post(git_rpc))
+        .route("/git/{project}/{*path}", get(git_info_refs).post(git_rpc))
         .route("/oauth/authorize", post(oauth_authorize))
         .route("/oauth/token", post(oauth_token))
         .route("/api/cmd/{command}", post(cmd))
