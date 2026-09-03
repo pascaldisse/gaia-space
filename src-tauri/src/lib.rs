@@ -43,6 +43,8 @@ pub mod finance;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod git;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
+pub mod git_hosting;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod ics;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod issues;
@@ -204,6 +206,10 @@ pub fn run() {
             applications::list_ui_extensions,
             applications::save_ui_extension,
             applications::delete_ui_extension,
+            git_hosting::create_hosted_repo,
+            git_hosting::list_hosted_repos,
+            git_hosting::delete_hosted_repo,
+            git_hosting::hosted_repo_clone_url,
             git::repo_list,
             git::repo_add,
             git::repo_remove,
