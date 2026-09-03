@@ -6669,6 +6669,9 @@ mod tests {
         setup();
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
+        // Accept the probe: CI's TCP backlog is not a LiveKit server, but it must
+        // answer the exact reachability check the production join path performs.
+        let probe = std::thread::spawn(move || listener.accept().unwrap());
         std::env::set_var("LIVEKIT_HOST", "127.0.0.1");
         std::env::set_var("LIVEKIT_PORT", port.to_string());
         std::env::set_var(
@@ -6718,7 +6721,7 @@ mod tests {
         std::env::remove_var("LIVEKIT_HOST");
         std::env::remove_var("LIVEKIT_PORT");
         std::env::remove_var("LIVEKIT_PUBLIC_URL");
-        drop(listener);
+        let _ = probe.join();
     }
     #[tokio::test]
     async fn permanent_tokens_are_minted_listed_and_owner_revocable_over_http() {
@@ -6885,6 +6888,9 @@ mod tests {
             let first = work.join("first"); let second = work.join("second");
             let run = |args: &[&str]| { let out = std::process::Command::new("git").args(args).output().unwrap(); assert!(out.status.success(), "git {:?}: {}", args, String::from_utf8_lossy(&out.stderr)); };
             run(&["clone", &url, first.to_str().unwrap()]);
+            // An empty bare repository has no checked-out branch. Name the first
+            // local branch explicitly so this test does not inherit Git's init.defaultBranch.
+            run(&["-C", first.to_str().unwrap(), "branch", "-M", "main"]);
             run(&["-C", first.to_str().unwrap(), "config", "user.email", "test@example.test"]);
             run(&["-C", first.to_str().unwrap(), "config", "user.name", "Smart HTTP Test"]);
             std::fs::write(first.join("README"), "smart HTTP\n").unwrap();
