@@ -1,6 +1,6 @@
 import { UI_LOCALE } from "../calendar";
 import { createEffect, createSignal, For, onCleanup, Show } from "solid-js";
-import { Room, RoomEvent, Track, type Participant } from "livekit-client";
+import { ParticipantEvent, Room, RoomEvent, Track, type Participant } from "livekit-client";
 import { meetingsApi, type CallJoin, type CallRecording, type CallTranscriptSegment, type Meeting } from "../api/meetings";
 import { newId } from "../api/ids";
 
@@ -15,17 +15,40 @@ const sourceFor = (participant: Participant) => participant.getTrackPublication(
   : Track.Source.Camera;
 
 function VideoTile(props: { participant: Participant }) {
-  let video: HTMLVideoElement | undefined;
+  const [version, setVersion] = createSignal(0);
+  const [video, setVideo] = createSignal<HTMLVideoElement>();
   let audio: HTMLAudioElement | undefined;
   const source = () => sourceFor(props.participant);
-  const publication = () => props.participant.getTrackPublication(source());
-  createEffect(() => {
-    const track = publication()?.videoTrack;
-    if (!track || !video) return;
-    track.attach(video);
-    onCleanup(() => track.detach(video));
+  const publication = () => { version(); return props.participant.getTrackPublication(source()); };
+  const refresh = () => setVersion(current => current + 1);
+  props.participant.on(ParticipantEvent.TrackSubscribed, refresh);
+  props.participant.on(ParticipantEvent.TrackUnsubscribed, refresh);
+  props.participant.on(ParticipantEvent.TrackPublished, refresh);
+  props.participant.on(ParticipantEvent.TrackUnpublished, refresh);
+  props.participant.on(ParticipantEvent.LocalTrackPublished, refresh);
+  props.participant.on(ParticipantEvent.LocalTrackUnpublished, refresh);
+  props.participant.on(ParticipantEvent.TrackMuted, refresh);
+  props.participant.on(ParticipantEvent.TrackUnmuted, refresh);
+  onCleanup(() => {
+    props.participant.off(ParticipantEvent.TrackSubscribed, refresh);
+    props.participant.off(ParticipantEvent.TrackUnsubscribed, refresh);
+    props.participant.off(ParticipantEvent.TrackPublished, refresh);
+    props.participant.off(ParticipantEvent.TrackUnpublished, refresh);
+    props.participant.off(ParticipantEvent.LocalTrackPublished, refresh);
+    props.participant.off(ParticipantEvent.LocalTrackUnpublished, refresh);
+    props.participant.off(ParticipantEvent.TrackMuted, refresh);
+    props.participant.off(ParticipantEvent.TrackUnmuted, refresh);
   });
   createEffect(() => {
+    version();
+    const track = publication()?.videoTrack;
+    const element = video();
+    if (!track || !element) return;
+    track.attach(element);
+    onCleanup(() => track.detach(element));
+  });
+  createEffect(() => {
+    version();
     const track = props.participant.getTrackPublication(Track.Source.Microphone)?.audioTrack;
     if (!track || !audio || props.participant.isLocal) return;
     track.attach(audio);
@@ -35,12 +58,11 @@ function VideoTile(props: { participant: Participant }) {
   return <article class="call-tile" aria-label={`${name()}${props.participant.isLocal ? ", you" : ""}`}>
     <audio ref={audio} autoplay />
     <Show when={publication()?.videoTrack} fallback={<div class="call-avatar" aria-hidden="true">{name().slice(0, 1).toUpperCase()}</div>}>
-      <video ref={video} autoplay muted={props.participant.isLocal} playsinline />
+      <video ref={setVideo} autoplay muted={props.participant.isLocal} playsinline />
     </Show>
     <div class="call-tile-meta"><strong>{name()}</strong><small>{source() === Track.Source.ScreenShare ? "Screen sharing" : props.participant.isLocal ? "You" : "Connected"}</small></div>
   </article>;
 }
-
 function DevicePicker(props: { label: string; kind: DeviceKind; devices: MediaDeviceInfo[]; disabled: boolean; onChange: (deviceId: string) => void }) {
   return <label class="call-device-picker"><span>{props.label}</span><select aria-label={`Select ${props.label.toLowerCase()}`} disabled={props.disabled || props.devices.length === 0} onChange={event => props.onChange(event.currentTarget.value)}>
     <option value="">{props.devices.length ? `Default ${props.label.toLowerCase()}` : "No devices found"}</option>
