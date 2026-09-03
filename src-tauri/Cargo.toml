@@ -45,7 +45,7 @@ path = "src/bin/space-server.rs"
 # means the iOS build never has to cross-compile libgit2/sqlite at all.
 [target.'cfg(not(any(target_os = "ios", target_os = "android")))'.dependencies]
 rusqlite = { version = "0.32", features = ["bundled"] }
-git2 = { version = "0.21.0", default-features = false, features = ["vendored-libgit2"] }
+git2 = { version = "0.21.0", default-features = false, features = ["vendored-libgit2", "cred"] }
 dirs = "6.0.0"
 chrono = "0.4"
 jsonwebtoken = "9"
@@ -74,3 +74,4 @@ block2 = "0.6"
 # so route wiring — method/path, not just handler bodies — is covered.
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }
+tempfile = "3"
