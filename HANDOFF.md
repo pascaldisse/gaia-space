@@ -1,3 +1,13 @@
+# KB tables + budget — merge lane
+- branch=`feat/kb-tables-budget` · base=`master@92b6083` · merges=`8f1f058`(sheet-v2) → `8702ab2`(budget-core) → `8dbd690`(budget-ui)
+- fixes=`379c5e5`(baseline clippy) · `5ad03e7`(budget test assertion) · live=`977c945`.
+- contracts: sheet-v2=`text|number|date|person|formula` · formulas client-only/no stored formula cells · Rust shape limits=`64 cols/5000 rows/512 formula chars`; budget=`EUR`+ordered members+five locked columns+integer-cent settlement.
+- settlement: empty split→all · remainder→member order · creditor/debtor greedy transfers · document read/edit ACL reuse · quick-add transaction/version/event path · export=new markdown document.
+- merge resolutions: `src-tauri/src/documents.rs`→sheet-v2 constants/validator + `KIND_BUDGET`/budget validation; `src/components/SheetEditor.tsx`→sheet-v2 locked-column implementation, readonly prop; `src/api/documents.ts`→v2 types + `budget`; `src/views/Documents.tsx`→sheet + budget paths.
+- gate: cargo test=`485 lib + 81 server + 1 + 6 + 13 + 2`, pass · clippy `-D warnings`, clean · tsc, pass · bun test=`720 pass/0 fail` · build, pass; chunk-size warning only.
+- live: `proof/kb-budget-live.txt` · copied dev DB → one free-port `space-server` → HTTP login/project/two profiles/budget/3 adds/statement/export/get-document/formula sheet + bogus refusal; statement=`A paid 3501/share 2251/net 1250; B paid 1000/share 2250/net -1250; B→A 1250`.
+- UNVERIFIED: interactive browser rendering/person-select/formula footer; live concurrent quick-add race.
+
 # HANDOFF — w11-chat ☀Surya
 
 枝=feat/w11-chat·樹=/Users/pascaldisse/projects/gs-w11-chat。
