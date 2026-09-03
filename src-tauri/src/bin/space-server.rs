@@ -6291,15 +6291,8 @@ fn spawn_webhook_ticker() {
     });
 }
 
-#[tokio::main]
-async fn main() {
-    let p = env::var("SPACE_DB").unwrap_or_else(|_| "/var/lib/gaia-space/space.db".into());
-    db::set_db_path(PathBuf::from(p));
-    bootstrap();
-    spawn_webhook_ticker();
-    spawn_pipeline_schedule_ticker();
-    spawn_chat_schedule_ticker();
-    let app = Router::new()
+fn app_router() -> Router {
+    Router::new()
         .route("/caldav/", any(caldav_home))
         .route("/caldav/{calendar_id}/", any(caldav_collection))
         .route("/caldav/{calendar_id}/calendar.ics", any(caldav_calendar))
@@ -6395,7 +6388,18 @@ async fn main() {
         .layer(DefaultBodyLimit::max(document_upload_max_bytes(
             env::var("SPACE_DOCUMENT_UPLOAD_MAX_BYTES").ok().as_deref(),
         )))
-        .with_state(App::new());
+        .with_state(App::new())
+}
+
+#[tokio::main]
+async fn main() {
+    let p = env::var("SPACE_DB").unwrap_or_else(|_| "/var/lib/gaia-space/space.db".into());
+    db::set_db_path(PathBuf::from(p));
+    bootstrap();
+    spawn_webhook_ticker();
+    spawn_pipeline_schedule_ticker();
+    spawn_chat_schedule_ticker();
+    let app = app_router();
     let port = env::var("SPACE_PORT")
         .ok()
         .and_then(|x| x.parse().ok())
@@ -6740,6 +6744,47 @@ mod tests {
         c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('pa','alice','Alice',1),('pb','bob','Bob',1),('pc','server-admin','Server Admin',1),('pd','dora','Dora',1)", []).unwrap();
         c.execute("INSERT INTO users(id,username,password_hash,display_name,profile_id,role,active,created_at) VALUES('ua','alice','x','Alice','pa','member',1,1),('ub','bob','x','Bob','pb','member',1,1),('uc','server-admin','x','Server Admin','pc','admin',1,1),('ud','dora','x','Dora','pd','member',1,1)", []).unwrap();
         c.execute("INSERT INTO sessions(token,user_id,created_at,expires_at) VALUES('ta','ua',unixepoch(),unixepoch()+3600),('tb','ub',unixepoch(),unixepoch()+3600),('tc','uc',unixepoch(),unixepoch()+3600),('td','ud',unixepoch(),unixepoch()+3600)", []).unwrap();
+    }
+
+    #[tokio::test]
+    async fn git_smart_http_clone_and_push_roundtrip() {
+        let _serial = test_lock();
+        setup();
+        set_password("server-admin", "smart-http-password");
+        let suffix = format!("{}", std::process::id());
+        let private_project = format!("git-private-{suffix}");
+        let public_project = format!("git-public-{suffix}");
+        let c = db::conn().unwrap();
+        c.execute("INSERT INTO projects(id,name,key,created_by,created_at,visibility) VALUES(?1,'Private Git',?2,'pc',unixepoch(),'private'),(?3,'Public Git',?4,'pc',unixepoch(),'public')", params![private_project, format!("PR{suffix}"), public_project, format!("PU{suffix}")]).unwrap();
+        drop(c);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server =
+            tokio::spawn(async move { axum::serve(listener, app_router()).await.unwrap() });
+        tokio::task::spawn_blocking(move || {
+            let base = format!("http://{address}");
+            let client = reqwest::blocking::Client::new();
+            for (project_id, name) in [(&private_project, "private"), (&public_project, "public")] {
+                let response = client.post(format!("{base}/api/cmd/create_hosted_repo")).header(header::COOKIE, "space_session=tc").json(&json!({"project_id":project_id,"name":name,"description":null,"default_branch":"main"})).send().unwrap();
+                assert!(response.status().is_success(), "create hosted repo: {}", response.text().unwrap());
+            }
+            assert_eq!(client.get(format!("{base}/git/{private_project}/private.git/info/refs?service=git-upload-pack")).send().unwrap().status(), StatusCode::UNAUTHORIZED);
+            assert_eq!(client.get(format!("{base}/git/{public_project}/public.git/info/refs?service=git-upload-pack")).send().unwrap().status(), StatusCode::OK);
+            let work = std::env::temp_dir().join(format!("gaia-space-git-smart-http-{suffix}"));
+            std::fs::create_dir_all(&work).unwrap();
+            let url = format!("http://server-admin:smart-http-password@{address}/git/{private_project}/private.git");
+            let first = work.join("first"); let second = work.join("second");
+            let run = |args: &[&str]| { let out = std::process::Command::new("git").args(args).output().unwrap(); assert!(out.status.success(), "git {:?}: {}", args, String::from_utf8_lossy(&out.stderr)); };
+            run(&["clone", &url, first.to_str().unwrap()]);
+            run(&["-C", first.to_str().unwrap(), "config", "user.email", "test@example.test"]);
+            run(&["-C", first.to_str().unwrap(), "config", "user.name", "Smart HTTP Test"]);
+            std::fs::write(first.join("README"), "smart HTTP\n").unwrap();
+            run(&["-C", first.to_str().unwrap(), "add", "README"]); run(&["-C", first.to_str().unwrap(), "commit", "-m", "smart HTTP"]); run(&["-C", first.to_str().unwrap(), "push", "origin", "main"]); run(&["clone", &url, second.to_str().unwrap()]);
+            let log = std::process::Command::new("git").args(["-C", second.to_str().unwrap(), "log", "-1", "--format=%s"]).output().unwrap(); assert_eq!(String::from_utf8_lossy(&log.stdout).trim(), "smart HTTP");
+            assert_eq!(client.post(format!("{base}/git/{private_project}/private.git/git-receive-pack")).body(Vec::new()).send().unwrap().status(), StatusCode::UNAUTHORIZED);
+            let _ = std::fs::remove_dir_all(work);
+        }).await.unwrap();
+        server.abort();
     }
 
     fn bearer(token: &str) -> HeaderMap {
