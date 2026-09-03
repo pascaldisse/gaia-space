@@ -11,6 +11,7 @@ type Options = {
   evaluation?: string;
   wait: number;
   login?: { username: string; password: string };
+  click?: string;
 };
 
 const DEFAULT_URL = "http://localhost:5173";
@@ -19,7 +20,7 @@ const DEFAULT_HEIGHT = 900;
 const DEFAULT_WAIT_MS = 0;
 
 function usage(): never {
-  throw new Error("Usage: bun run shot -- --out <path> [--url <url>] [--width <px>] [--height <px>] [--mobile] [--login <user:pass>] [--eval <js>] [--wait <ms>]");
+  throw new Error("Usage: bun run shot -- --out <path> [--url <url>] [--width <px>] [--height <px>] [--mobile] [--login <user:pass>] [--eval <js>] [--click <selector>] [--wait <ms>]");
 }
 
 function numberOption(name: string, value: string | undefined, fallback: number): number {
@@ -38,6 +39,7 @@ function parseArgs(args: string[]): Options {
   let evaluation: string | undefined;
   let wait = DEFAULT_WAIT_MS;
   let login: Options["login"];
+  let click: string | undefined;
 
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
@@ -56,13 +58,14 @@ function parseArgs(args: string[]): Options {
         break;
       }
       case "--eval": evaluation = value(); break;
+      case "--click": click = value(); break;
       case "--wait": wait = numberOption("--wait", value(), DEFAULT_WAIT_MS); break;
       default: usage();
     }
   }
 
   if (!out || width <= 0 || height <= 0) usage();
-  return { url, out, width, height, mobile, evaluation, wait, login };
+  return { url, out, width, height, mobile, evaluation, wait, login, click };
 }
 
 const options = parseArgs(Bun.argv.slice(2));
@@ -87,6 +90,7 @@ try {
     // evaluation so localStorage/session mutations are reflected in the shot.
     await page.reload({ waitUntil: "networkidle" });
   }
+  if (options.click) await page.locator(options.click).click();
   if (options.wait > 0) await page.waitForTimeout(options.wait);
 
   const out = resolve(options.out);
