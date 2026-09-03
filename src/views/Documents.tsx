@@ -35,7 +35,8 @@ import {
 import { chatApi, newId as newMessageId, type MessageView } from "../api/chat";
 import { channelFeedsApi } from "../api/channel-feeds";
 import { profileId as sessionProfileId, profileLocked, isWeb } from "../session";
-import { parseBudget, serializeBudget, type BudgetDoc } from "../api/budget";
+import { emptyBudget, parseBudget, serializeBudget, type BudgetDoc } from "../api/budget";
+import { personalApi } from "../api/personal";
 import { actingProfileId as chatActingProfileId } from "../chatIdentity";
 import { applyMarkdownCommand, sanitizeRichHtml, type MarkdownCommand } from "../richtext";
 import { blogsApi, type BlogPost } from "../api/blogs";
@@ -596,6 +597,13 @@ const [newDocBodyFormat, setNewDocBodyFormat] = createSignal<DocumentCreateType>
     const cid = containerId();
     if (!title || !cid) return;
     const id = newId("doc");
+    // A project budget starts with its actual roster (owner + project_members), not
+    // the organization directory. Personal/KB budgets start with their creator.
+    const budgetMembers = newDocBodyFormat() === "budget"
+      ? activeContainer() === "project"
+        ? await personalApi.projectMemberIds(cid)
+        : (actingProfileId() ? [actingProfileId()!] : [])
+      : [];
     const document: Document = {
       id,
       container_type: activeContainer(),
@@ -606,10 +614,10 @@ const [newDocBodyFormat, setNewDocBodyFormat] = createSignal<DocumentCreateType>
       doc_type: "text",
       // A table is a document KIND, not a text flavour: it keeps the plain body format
       // and carries its grid as the body the same versioning writes for prose.
-      body_format: newDocBodyFormat() === "sheet" ? "text" : (newDocBodyFormat() as DocumentBodyFormat),
-      kind: newDocBodyFormat() === "sheet" ? "sheet" : "markdown",
+      body_format: newDocBodyFormat() === "sheet" || newDocBodyFormat() === "budget" ? "text" : (newDocBodyFormat() as DocumentBodyFormat),
+      kind: newDocBodyFormat() === "sheet" ? "sheet" : newDocBodyFormat() === "budget" ? "budget" : "markdown",
       title,
-      body: newDocBodyFormat() === "sheet" ? serializeSheet(emptySheet()) : "",
+      body: newDocBodyFormat() === "sheet" ? serializeSheet(emptySheet()) : newDocBodyFormat() === "budget" ? serializeBudget(emptyBudget(budgetMembers)) : "",
       version: 1,
       archived: false,
       created_by: actingProfileId(),
