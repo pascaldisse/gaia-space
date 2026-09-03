@@ -1,10 +1,10 @@
-import { expect, test, describe, afterEach, mock } from "bun:test";
+import { expect, test, describe, afterEach, beforeEach, mock } from "bun:test";
 import { invoke } from "../api/invoke";
 mock.module("@tauri-apps/api/core", () => ({ invoke }));
 import { render } from "solid-js/web";
 import Documents, { documentTreeLoading } from "./Documents";
 import { setProfileId, setProjectId } from "../session";
-import { navigate, registerViews } from "../router";
+import { navigate, registerViews, setAvailableViews } from "../router";
 
 // The Documents workspace is session-locked in web mode: the personal container is the
 // session's own profile, the UI offers no way to act as anybody else, and a forged
@@ -23,6 +23,13 @@ afterEach(() => {
   window.history.replaceState({}, "", "/");
 });
 
+// Router state is process-global. Each case begins at the personal library rather
+// than inheriting an earlier file's document container or an earlier case's deep link.
+beforeEach(() => {
+  registerViews(["Documents"]);
+  setAvailableViews(null);
+  navigate({ view: "Documents", containerType: "my-docs" });
+});
 type Reply = { ok: true; value: unknown } | { status: number; body: unknown };
 const serve = (table: Record<string, Reply>) => {
   globalThis.fetch = (async (url: any) => {
