@@ -1,0 +1,34 @@
+# Production web two-browser call attempt — UNVERIFIED
+UTC: 2026-09-03T19:42Z
+base: https://paloptic.com/space
+meeting_id: calls-proof-1788464531-54576722
+
+## Actual browser run
+Chromium Playwright; one browser process, two isolated contexts, two different accounts:
+- A: existing Room Link Bridge PAT [REDACTED]
+- B: newly created GlobalMember service account; session cookie [REDACTED]
+Both Chromium launch arguments: --use-fake-ui-for-media-stream --use-fake-device-for-media-stream.
+
+A loaded the actual Meetings detail, clicked CallPanel "Join call", then failed before media:
+- state: disconnected
+- participant text: State: disconnected
+- tiles: 0
+- RTCPeerConnection states: ['new']
+- selected ICE candidate pairs: []
+- UI error: Could not join this call: ConnectionError: could not establish signal connection: Encountered websocket error during connection establishment
+- browser WebSocket upgrade: Unexpected response code: 200 (access token redacted)
+
+B loaded as the distinct account:
+- visible meeting rows: 0
+- CallPanel state: None
+- tiles: 0
+- selected ICE candidate pairs: []
+The private meeting was not listed for B. The attempted authenticated invitation instead recorded A as the participant: `invite_meeting_participant` is MeetingWrite and generic web identity binding rewrites `profileId` to the caller before dispatch. This is a production access-path blocker for the requested second CallPanel join.
+
+## Transport diagnosis only — no fix/deploy
+- Browser WebSocket upgrade at /space/livekit/rtc/v1 received HTTP 200, not 101; A cannot establish LiveKit signalling.
+- Direct HTTP Upgrade probe: HTTP 200.
+- `nc -vz -w 5 paloptic.com 7881`: succeeded (TCP reachable from this Mac).
+- Repo deployment Caddy source routes `/space/livekit/*` to `127.0.0.1:7880` after stripping `/space/livekit`; inspect deployed Caddy/runtime configuration and LiveKit WebSocket upgrade handling next. Also inspect UDP firewall range and `use_external_ip` then retest.
+
+Result: no 2-peer connection, no remote video track, no participant count of 2, and no selected ICE type can be claimed.
