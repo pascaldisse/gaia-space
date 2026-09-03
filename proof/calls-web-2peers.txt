@@ -32,3 +32,79 @@ The private meeting was not listed for B. The attempted authenticated invitation
 - Repo deployment Caddy source routes `/space/livekit/*` to `127.0.0.1:7880` after stripping `/space/livekit`; inspect deployed Caddy/runtime configuration and LiveKit WebSocket upgrade handling next. Also inspect UDP firewall range and `use_external_ip` then retest.
 
 Result: no 2-peer connection, no remote video track, no participant count of 2, and no selected ICE type can be claimed.
+# Production browser two-peer LiveKit proof — FAILED
+UTC: 2026-09-03T20:28:14.176Z
+base: https://paloptic.com/space
+meeting_id: not-created
+error: TimeoutError: waitFor: Timeout 20000ms exceeded.
+Call log:
+  - waiting for getByLabel('Meetings') to be visible
+
+A: {"state":null,"tiles":0,"body":"G\nHome\nChats\n99\nProjects\nLibrary\nDevelopment\nMore\n◀\nSidebar\nCP\nGAIA Organization\nPROJECT-B94264E9-5C1C-4F69-882F-6F45797141B1\n+\n#\nGaia Space\n1\nPROJECT-C103673C-FD61-44F5-8BC5-D6AE45473B50\n+\n#\nMVP Talk\n1\nPROJECT-C761A223-90C9-4964-9C78-FE05CE5D722A\n+\n#\nAcademy\n#\nPaloptic Academy\nPROJECT-E91B812C-1B54-4658-954C-D1674B51D8A4\n+\n#\nEXIST\n1\n#\nFunding - General\n6\n#\nroom-link-live-proof\n3\nOTHER CHANNELS\n+\n#\nFounders Chat\n1\n#\nFundings\n1\n#\nGAIA Space\n2\n#\nIdeas\n#\nLOI Page\n15\n#\nWebsite\n#\ngaia\n7\n#\npushes\n#\npushes\n#\npushes\n61\nSearch messages, tasks, dates and tickets\nNew message\nGAIA ORGANIZATION\nHome\nYour day, your tasks and open messages\n3\nselected\n0\nMeetings\n0\ntasks today\nYour month\n\nMeetings and project deadlines you are part of. Pick a day to see it in full.\n\nSeptember 2026\n‹\n›\nS\nM\nT\nW\nT\nF\nS\n30\n31\n1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n13\n14\n15\n16\n17\n18\n19\n20\n21\n22\n23\n24\n25\n26\n27\n28\n29\n30\n1\n2\n3\n4\n5\n6\n7\n8\n9\n10\nThursday, September 3\n0 Meetings · 0 tasks · 0 open messages\nCALENDAR\n\nNothing scheduled on this da","ws":[]}
+B: {"state":null,"tiles":0,"body":"","ws":[]}
+
+# Production browser two-peer failure diagnostics
+UTC: 2026-09-03T20:28:40Z
+browser: no LiveKit WebSocket opened; CallPanel was not reached (Meetings navigation locator timeout).
+local TCP:
+Connection to paloptic.com port 7881 [tcp/*] succeeded!
+remote livekit journal:
+Journal file /var/log/journal/7eaa7468ab8548759f60069bbd343086/system@00000000000000000000000000000000-0000000000000000-0000000000000000.journal corrupted, ignoring file.
+Sep 03 19:22:15 scw-bold-gauss sh[1628276]: 2026-09-03T19:22:15.801Z        INFO        livekit        rtcconfig/webrtc_config.go:284        failed to get external ip        {"local": "2001:bc8:1d90:2ac0:dc00:ff:fe2e:4935", "err": "context canceled"}
+Sep 03 19:22:15 scw-bold-gauss sh[1628276]: 2026-09-03T19:22:15.802Z        INFO        livekit        rtcconfig/webrtc_config.go:102        using external IPs        {"ips": ["fe80::dc00:ff:fe2e:4935/fe80::dc00:ff:fe2e:4935", "151.115.73.182/151.115.73.182", "2001:bc8:1d90:2ac0:dc00:ff:fe2e:4935/2001:bc8:1d90:2ac0:dc00:ff:fe2e:4935"]}
+Sep 03 19:22:15 scw-bold-gauss sh[1628276]: 2026-09-03T19:22:15.807Z        INFO        livekit        service/server.go:265        starting LiveKit server        {"portHttp": 7880, "nodeID": "ND_EE3okKR5RZT7", "nodeIP": "151.115.73.182", "version": "1.10.0", "bindAddresses": ["127.0.0.1"], "rtc.portTCP": 7881, "rtc.portUDP": {"Start":50000,"End":50100}}
+Sep 03 19:28:54 scw-bold-gauss systemd[1]: Stopping livekit.service - LiveKit media server (pinned v1.10.0)...
+Sep 03 19:28:54 scw-bold-gauss sh[1628276]: 2026-09-03T19:28:54.561Z        INFO        livekit        server/main.go:314        exit requested, shutting down        {"signal": "terminated", "force": false}
+Sep 03 19:28:54 scw-bold-gauss systemd[1]: livekit.service: Deactivated successfully.
+Sep 03 19:28:54 scw-bold-gauss systemd[1]: Stopped livekit.service - LiveKit media server (pinned v1.10.0).
+Sep 03 19:28:54 scw-bold-gauss systemd[1]: Started livekit.service - LiveKit media server (pinned v1.10.0).
+Sep 03 19:28:54 scw-bold-gauss livekit-server[1628843]: could not parse config: yaml: unmarshal errors:
+Sep 03 19:28:54 scw-bold-gauss livekit-server[1628843]:   line 2: cannot unmarshal !!str `${LIVEK...` into uint32
+Sep 03 19:28:54 scw-bold-gauss livekit-server[1628843]:   line 8: cannot unmarshal !!str `${LIVEK...` into uint32
+Sep 03 19:28:54 scw-bold-gauss livekit-server[1628843]:   line 9: cannot unmarshal !!str `${LIVEK...` into uint32
+Sep 03 19:28:54 scw-bold-gauss livekit-server[1628843]:   line 10: cannot unmarshal !!str `${LIVEK...` into uint32
+Sep 03 19:28:54 scw-bold-gauss systemd[1]: livekit.service: Deactivated successfully.
+Sep 03 19:38:57 scw-bold-gauss systemd[1]: Started livekit.service - LiveKit media server (pinned v1.10.0).
+Sep 03 19:38:58 scw-bold-gauss sh[1629853]: 2026-09-03T19:38:58.211Z        INFO        livekit        hwstats/memory_linux.go:74        failed reading cgroup specific memory stats, falling back to system wide implementation
+Sep 03 19:38:58 scw-bold-gauss sh[1629853]: 2026-09-03T19:38:58.212Z        INFO        livekit        routing/interfaces.go:180        using single-node routing
+Sep 03 19:38:58 scw-bold-gauss sh[1629853]: 2026-09-03T19:38:58.221Z        INFO        livekit        rtcconfig/webrtc_config.go:284        failed to get external ip        {"local": "fe80::dc00:ff:fe2e:4935", "err": "dial udp [fe80::dc00:ff:fe2e:4935]:50050->[2001:4860:4864:5:8000::1]:19302: bind: invalid argument"}
+Sep 03 19:38:58 scw-bold-gauss sh[1629853]: 2026-09-03T19:38:58.269Z        INFO        livekit        rtcconfig/ip.go:206        found external IP via STUN        {"localAddr": "151.115.73.182:50050", "stunServer": "global.stun.twilio.com:3478", "externalIP": "151.115.73.182"}
+Sep 03 19:38:59 scw-bold-gauss sh[1629853]: 2026-09-03T19:38:59.288Z        INFO        livekit        rtcconfig/webrtc_config.go:284        failed to get external ip        {"local": "2001:bc8:1d90:2ac0:dc00:ff:fe2e:4935", "err": "context canceled"}
+Sep 03 19:38:59 scw-bold-gauss sh[1629853]: 2026-09-03T19:38:59.288Z        INFO        livekit        rtcconfig/webrtc_config.go:102        using external IPs        {"ips": ["151.115.73.182/151.115.73.182", "2001:bc8:1d90:2ac0:dc00:ff:fe2e:4935/2001:bc8:1d90:2ac0:dc00:ff:fe2e:4935", "fe80::dc00:ff:fe2e:4935/fe80::dc00:ff:fe2e:4935"]}
+Sep 03 19:38:59 scw-bold-gauss sh[1629853]: 2026-09-03T19:38:59.291Z        INFO        livekit        service/server.go:265        starting LiveKit server        {"portHttp": 7880, "nodeID": "ND_p4J2ckQeBV5H", "nodeIP": "151.115.73.182", "version": "1.10.0", "bindAddresses": ["127.0.0.1"], "rtc.portTCP": 7881, "rtc.portUDP": {"Start":50000,"End":50100}}
+Sep 03 19:56:47 scw-bold-gauss sh[1629853]: 2026-09-03T19:56:47.103Z        WARN        livekit        service/utils.go:54        error handling request        {"status": 401, "method": "GET", "path": "/rtc/validate", "error": "invalid authorization token=[REDACTED]
+Sep 03 19:57:44 scw-bold-gauss sh[1629853]: 2026-09-03T19:57:44.776Z        WARN        livekit        service/utils.go:54        error handling request        {"status": 401, "method": "GET", "path": "/rtc/validate", "error": "invalid authorization token=[REDACTED]
+Sep 03 20:07:14 scw-bold-gauss systemd[1]: Stopping livekit.service - LiveKit media server (pinned v1.10.0)...
+Sep 03 20:07:14 scw-bold-gauss sh[1629853]: 2026-09-03T20:07:14.104Z        INFO        livekit        server/main.go:314        exit requested, shutting down        {"signal": "terminated", "force": false}
+Sep 03 20:07:14 scw-bold-gauss systemd[1]: livekit.service: Deactivated successfully.
+Sep 03 20:07:14 scw-bold-gauss systemd[1]: Stopped livekit.service - LiveKit media server (pinned v1.10.0).
+Sep 03 20:07:14 scw-bold-gauss systemd[1]: livekit.service: Consumed 2.006s CPU time over 28min 16.140s wall clock time, 14.7M memory peak.
+Sep 03 20:07:14 scw-bold-gauss systemd[1]: Started livekit.service - LiveKit media server (pinned v1.10.0).
+Sep 03 20:07:14 scw-bold-gauss sh[1631606]: 2026-09-03T20:07:14.374Z        INFO        livekit        hwstats/memory_linux.go:74        failed reading cgroup specific memory stats, falling back to system wide implementation
+Sep 03 20:07:14 scw-bold-gauss sh[1631606]: 2026-09-03T20:07:14.374Z        INFO        livekit        routing/interfaces.go:180        using single-node routing
+Sep 03 20:07:14 scw-bold-gauss sh[1631606]: 2026-09-03T20:07:14.378Z        INFO        livekit        rtcconfig/webrtc_config.go:284        failed to get external ip        {"local": "fe80::dc00:ff:fe2e:4935", "err": "dial udp [fe80::dc00:ff:fe2e:4935]:50026->[2001:4860:4864:5:8000::1]:19302: bind: invalid argument"}
+Sep 03 20:07:14 scw-bold-gauss sh[1631606]: 2026-09-03T20:07:14.426Z        INFO        livekit        rtcconfig/ip.go:206        found external IP via STUN        {"localAddr": "151.115.73.182:50026", "stunServer": "global.stun.twilio.com:3478", "externalIP": "151.115.73.182"}
+Sep 03 20:07:15 scw-bold-gauss sh[1631606]: 2026-09-03T20:07:15.440Z        INFO        livekit        rtcconfig/webrtc_config.go:284        failed to get external ip        {"local": "2001:bc8:1d90:2ac0:dc00:ff:fe2e:4935", "err": "context canceled"}
+Sep 03 20:07:15 scw-bold-gauss sh[1631606]: 2026-09-03T20:07:15.441Z        INFO        livekit        rtcconfig/webrtc_config.go:102        using external IPs        {"ips": ["151.115.73.182/151.115.73.182", "2001:bc8:1d90:2ac0:dc00:ff:fe2e:4935/2001:bc8:1d90:2ac0:dc00:ff:fe2e:4935", "fe80::dc00:ff:fe2e:4935/fe80::dc00:ff:fe2e:4935"]}
+Sep 03 20:07:15 scw-bold-gauss sh[1631606]: 2026-09-03T20:07:15.443Z        INFO        livekit        service/server.go:265        starting LiveKit server        {"portHttp": 7880, "nodeID": "ND_k9Sa8H6ZjWmn", "nodeIP": "151.115.73.182", "version": "1.10.0", "bindAddresses": ["127.0.0.1"], "rtc.portTCP": 7881, "rtc.portUDP": {"Start":50000,"End":50100}}
+Sep 03 20:18:13 scw-bold-gauss sh[1631606]: 2026-09-03T20:18:13.022Z        INFO        livekit        server/main.go:314        exit requested, shutting down        {"signal": "terminated", "force": false}
+Sep 03 20:18:13 scw-bold-gauss systemd[1]: Stopping livekit.service - LiveKit media server (pinned v1.10.0)...
+Sep 03 20:18:13 scw-bold-gauss systemd[1]: livekit.service: Deactivated successfully.
+Sep 03 20:18:13 scw-bold-gauss systemd[1]: Stopped livekit.service - LiveKit media server (pinned v1.10.0).
+Sep 03 20:18:13 scw-bold-gauss systemd[1]: Started livekit.service - LiveKit media server (pinned v1.10.0).
+Sep 03 20:18:13 scw-bold-gauss sh[1632403]: 2026-09-03T20:18:13.291Z        INFO        livekit        hwstats/memory_linux.go:74        failed reading cgroup specific memory stats, falling back to system wide implementation
+Sep 03 20:18:13 scw-bold-gauss sh[1632403]: 2026-09-03T20:18:13.292Z        INFO        livekit        routing/interfaces.go:180        using single-node routing
+Sep 03 20:18:13 scw-bold-gauss sh[1632403]: 2026-09-03T20:18:13.296Z        INFO        livekit        rtcconfig/webrtc_config.go:284        failed to get external ip        {"local": "fe80::dc00:ff:fe2e:4935", "err": "dial udp [fe80::dc00:ff:fe2e:4935]:50074->[2001:4860:4864:5:8000::1]:19302: bind: invalid argument"}
+Sep 03 20:18:13 scw-bold-gauss sh[1632403]: 2026-09-03T20:18:13.345Z        INFO        livekit        rtcconfig/ip.go:206        found external IP via STUN        {"localAddr": "151.115.73.182:50074", "stunServer": "global.stun.twilio.com:3478", "externalIP": "151.115.73.182"}
+Sep 03 20:18:14 scw-bold-gauss sh[1632403]: 2026-09-03T20:18:14.358Z        INFO        livekit        rtcconfig/webrtc_config.go:284        failed to get external ip        {"local": "2001:bc8:1d90:2ac0:dc00:ff:fe2e:4935", "err": "context canceled"}
+Sep 03 20:18:14 scw-bold-gauss sh[1632403]: 2026-09-03T20:18:14.358Z        INFO        livekit        rtcconfig/webrtc_config.go:102        using external IPs        {"ips": ["151.115.73.182/151.115.73.182", "2001:bc8:1d90:2ac0:dc00:ff:fe2e:4935/2001:bc8:1d90:2ac0:dc00:ff:fe2e:4935", "fe80::dc00:ff:fe2e:4935/fe80::dc00:ff:fe2e:4935"]}
+Sep 03 20:18:14 scw-bold-gauss sh[1632403]: 2026-09-03T20:18:14.360Z        INFO        livekit        service/server.go:265        starting LiveKit server        {"portHttp": 7880, "nodeID": "ND_4GbRGTjdNx3o", "nodeIP": "151.115.73.182", "version": "1.10.0", "bindAddresses": ["127.0.0.1"], "rtc.portTCP": 7881, "rtc.portUDP": {"Start":50000,"End":50100}}
+Sep 03 20:22:41 scw-bold-gauss sh[1632403]: 2026-09-03T20:22:41.808Z        WARN        livekit        service/utils.go:54        error handling request        {"status": 400, "method": "GET", "path": "/rtc/v1", "error": "join_request is required"}
+remote UDP firewall:
+bash: line 1: ufw: command not found
+bash: line 1: firewall-cmd: command not found
+remote livekit external IP:
+2:port: ${LIVEKIT_PORT}
+7:rtc:
+8:  tcp_port: ${LIVEKIT_RTC_TCP_PORT}
+11:  use_external_ip: true
