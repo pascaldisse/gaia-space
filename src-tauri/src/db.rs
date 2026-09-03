@@ -2530,7 +2530,6 @@ mod tests {
             version, SCHEMA_VERSION,
             "schema version is monotonic and lands on head"
         );
-        assert_eq!(SCHEMA_VERSION, 140);
         let notes: Option<String> = conn
             .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
                 r.get(0)
@@ -2571,8 +2570,7 @@ mod tests {
             println!("MIGRATION PROOF {label}: user_version={version}");
             version
         };
-        assert_eq!(head("after climb from 100"), 140);
-        assert_eq!(SCHEMA_VERSION, 140);
+        assert_eq!(head("after climb from 100"), SCHEMA_VERSION);
         // Every rung the merge touched exists exactly once, and by name.
         for (table, column) in [
             ("projects", "lead_id"),
@@ -2593,7 +2591,7 @@ mod tests {
         }
         assert!(table_exists(&conn, "channel_notes").expect("channel_notes"));
         migrate(&conn).expect("migrate() is idempotent at head");
-        assert_eq!(head("after second run at head"), 140);
+        assert_eq!(head("after second run at head"), SCHEMA_VERSION);
     }
 
     #[test]
@@ -3586,7 +3584,7 @@ mod v133_contract_tests {
         assert_eq!(
             conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
                 .unwrap(),
-            140
+            SCHEMA_VERSION
         );
         let before: String = conn.query_row("SELECT group_concat(sql, '\n') FROM sqlite_master WHERE type IN ('index','trigger') ORDER BY name", [], |r| r.get(0)).unwrap();
         migrate(&conn).unwrap();
