@@ -36,41 +36,48 @@ fn git_http_name(value: &str) -> bool {
     gaia_space_lib::git_hosting::valid_name(value)
 }
 
-fn hosted_project_public(project: &str) -> Result<bool, axum::response::Response> {
-    let conn =
-        db::conn().map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e).into_response())?;
+fn hosted_project_public(project: &str) -> Result<bool, Box<axum::response::Response>> {
+    let conn = db::conn()
+        .map_err(|e| Box::new(err(StatusCode::INTERNAL_SERVER_ERROR, &e).into_response()))?;
     conn.query_row(
         "SELECT visibility='public' FROM projects WHERE id=?1",
         [project],
         |r| r.get(0),
     )
     .optional()
-    .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response())
+    .map_err(|e| Box::new(err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response()))
     .map(|value| value.unwrap_or(false))
 }
 
-fn hosted_git_path(project: &str, repo: &str) -> Result<PathBuf, axum::response::Response> {
+fn hosted_git_path(project: &str, repo: &str) -> Result<PathBuf, Box<axum::response::Response>> {
     if !git_http_name(project) || !git_http_name(repo) {
-        return Err(err(StatusCode::BAD_REQUEST, "invalid git repository path").into_response());
+        return Err(Box::new(
+            err(StatusCode::BAD_REQUEST, "invalid git repository path").into_response(),
+        ));
     }
-    let conn =
-        db::conn().map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e).into_response())?;
+    let conn = db::conn()
+        .map_err(|e| Box::new(err(StatusCode::INTERNAL_SERVER_ERROR, &e).into_response()))?;
     let exists: bool = conn
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM hosted_repositories WHERE project_id=?1 AND name=?2)",
             params![project, repo],
             |r| r.get(0),
         )
-        .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response())?;
+        .map_err(|e| {
+            Box::new(err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response())
+        })?;
     if !exists {
-        return Err(err(StatusCode::NOT_FOUND, "hosted repository not found").into_response());
+        return Err(Box::new(
+            err(StatusCode::NOT_FOUND, "hosted repository not found").into_response(),
+        ));
     }
     gaia_space_lib::git_hosting::hosted_repo_path(
-        &db::data_dir().map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e).into_response())?,
+        &db::data_dir()
+            .map_err(|e| Box::new(err(StatusCode::INTERNAL_SERVER_ERROR, &e).into_response()))?,
         project,
         repo,
     )
-    .map_err(|e| err(StatusCode::BAD_REQUEST, &e).into_response())
+    .map_err(|e| Box::new(err(StatusCode::BAD_REQUEST, &e).into_response()))
 }
 
 async fn git_service(
@@ -130,7 +137,10 @@ async fn git_service(
     Ok(output)
 }
 
-fn git_request_body(headers: &HeaderMap, body: Bytes) -> Result<Vec<u8>, axum::response::Response> {
+fn git_request_body(
+    headers: &HeaderMap,
+    body: Bytes,
+) -> Result<Vec<u8>, Box<axum::response::Response>> {
     if headers
         .get(header::CONTENT_ENCODING)
         .and_then(|v| v.to_str().ok())
@@ -140,11 +150,13 @@ fn git_request_body(headers: &HeaderMap, body: Bytes) -> Result<Vec<u8>, axum::r
         flate2::read::GzDecoder::new(body.as_ref())
             .read_to_end(&mut output)
             .map_err(|e| {
-                err(
-                    StatusCode::BAD_REQUEST,
-                    &format!("invalid gzip Git request: {e}"),
+                Box::new(
+                    err(
+                        StatusCode::BAD_REQUEST,
+                        &format!("invalid gzip Git request: {e}"),
+                    )
+                    .into_response(),
                 )
-                .into_response()
             })?;
         Ok(output)
     } else {
@@ -181,16 +193,16 @@ async fn git_info_refs(
     let write = service == "git-receive-pack";
     let public = match hosted_project_public(&project) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return *response,
     };
     if write || !public {
         if let Err(response) = registry_auth(&headers) {
             return response;
         }
     }
-    let path = match hosted_git_path(&project, &repo) {
+    let path = match hosted_git_path(&project, repo) {
         Ok(path) => path,
-        Err(response) => return response,
+        Err(response) => return *response,
     };
     match git_service(&path, service, true, Vec::new()).await {
         Ok(mut advertised) => {
@@ -220,20 +232,20 @@ async fn git_rpc(
     }
     let public = match hosted_project_public(&project) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return *response,
     };
     if service == "git-receive-pack" || !public {
         if let Err(response) = registry_auth(&headers) {
             return response;
         }
     }
-    let path = match hosted_git_path(&project, &repo) {
+    let path = match hosted_git_path(&project, repo) {
         Ok(path) => path,
-        Err(response) => return response,
+        Err(response) => return *response,
     };
     let input = match git_request_body(&headers, body) {
         Ok(body) => body,
-        Err(response) => return response,
+        Err(response) => return *response,
     };
     let before = if service == "git-receive-pack" {
         git_ref_tips(&path)
