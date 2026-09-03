@@ -14,6 +14,7 @@ on:
       - "src-tauri/**"
       - "package.json"
       - "bun.lock"
+      - "deploy/**"
       - ".github/workflows/deploy-space.yml"
   workflow_dispatch:
 
@@ -117,7 +118,7 @@ jobs:
           ssh "$USER@$HOST" "rm -rf /tmp/gaia-space-$GITHUB_SHA && mkdir -p /tmp/gaia-space-$GITHUB_SHA/static"
           rsync -az --delete dist-web/ "$USER@$HOST:/tmp/gaia-space-$GITHUB_SHA/static/"
           rsync -az src-tauri/target/release/space-server "$USER@$HOST:/tmp/gaia-space-$GITHUB_SHA/space-server"
-          scp deploy/rollout.sh deploy/gaia-space.service "$USER@$HOST:/tmp/gaia-space-$GITHUB_SHA/"
+          scp deploy/rollout.sh deploy/gaia-space.service deploy/livekit.service deploy/livekit.yaml deploy/Caddyfile.space "$USER@$HOST:/tmp/gaia-space-$GITHUB_SHA/"
 
       - name: Backup, install, migrate, verify, roll back on failure
         if: steps.state.outputs.state == 'RUN'

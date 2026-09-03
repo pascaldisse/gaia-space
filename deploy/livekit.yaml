@@ -1,0 +1,11 @@
+# Values are expanded by livekit-server from /etc/livekit/livekit.env.
+port: ${LIVEKIT_PORT}
+bind_addresses:
+  - 127.0.0.1
+keys:
+  ${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}
+rtc:
+  tcp_port: ${LIVEKIT_RTC_TCP_PORT}
+  port_range_start: ${LIVEKIT_RTC_UDP_PORT_START}
+  port_range_end: ${LIVEKIT_RTC_UDP_PORT_END}
+  use_external_ip: true

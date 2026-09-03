@@ -2856,8 +2856,6 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         "update_document_access" => CommandPolicy::DocumentAccessWrite,
         "create_document" => CommandPolicy::DocumentCreate,
         "app_info"
-        | "join_meeting_call"
-        | "end_meeting_call"
         | "start_livekit_server"
         | "trigger_pipeline_script"
         | "trigger_pipeline_on_push"
@@ -2876,6 +2874,7 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         "archive_document" => CommandPolicy::DocumentOwnerWrite,
         "delete_document" => CommandPolicy::DocumentOwnerDelete,
         "archive_meeting" | "attach_meeting_channel" | "delete_meeting" => CommandPolicy::MeetingWrite,
+        "join_meeting_call" | "end_meeting_call" => CommandPolicy::MeetingRead,
         "archive_issue" | "archive_role" | "archive_sprint" | "archive_team" => {
             CommandPolicy::Session
         }
@@ -3371,6 +3370,8 @@ fn meeting_id(body: &Value, name: &str) -> Option<String> {
         "invite_meeting_participant"
             | "set_meeting_participant_status"
             | "list_meeting_participants"
+            | "join_meeting_call"
+            | "end_meeting_call"
     ) {
         arg(body, "meeting_id").ok()
     } else {
@@ -5615,6 +5616,31 @@ async fn cmd(
     if name == "delete_absence" {
         return absence_delete(&user, &body);
     }
+    // The body names only a meeting. Identity/display name come from the authenticated session.
+    if name == "join_meeting_call" {
+        let meeting_id: String = match arg(&body, "meeting_id") {
+            Ok(value) => value,
+            Err(error) => return err(StatusCode::BAD_REQUEST, &error).into_response(),
+        };
+        return match calls::join_web_meeting_call(
+            meeting_id,
+            user.profile_id.clone(),
+            user.display_name.clone(),
+        ) {
+            Ok(value) => Json(json!({"ok":true,"value":value})).into_response(),
+            Err(error) => err(StatusCode::BAD_REQUEST, &error).into_response(),
+        };
+    }
+    if name == "end_meeting_call" {
+        let meeting_id: String = match arg(&body, "meeting_id") {
+            Ok(value) => value,
+            Err(error) => return err(StatusCode::BAD_REQUEST, &error).into_response(),
+        };
+        return match calls::end_web_meeting_call(meeting_id, user.profile_id.clone()) {
+            Ok(value) => Json(json!({"ok":true,"value":value})).into_response(),
+            Err(error) => err(StatusCode::BAD_REQUEST, &error).into_response(),
+        };
+    }
     dispatch!(name.as_str(), body, {
     "create_hosted_repo" => git_hosting::create_hosted_repo(project_id: String, name: String, description: Option<String>, default_branch: String),
     "delete_hosted_repo" => git_hosting::delete_hosted_repo(id: String),
@@ -6635,6 +6661,64 @@ mod tests {
                 .into_response(),
         )
         .await
+    }
+
+    #[tokio::test]
+    async fn web_call_join_is_session_bound_and_private_scope_checked() {
+        let _serial = test_lock();
+        setup();
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::env::set_var("LIVEKIT_HOST", "127.0.0.1");
+        std::env::set_var("LIVEKIT_PORT", port.to_string());
+        std::env::set_var(
+            "LIVEKIT_PUBLIC_URL",
+            "wss://calls.example.test/space/livekit",
+        );
+        db::conn().unwrap().execute(
+            "INSERT INTO meetings(id,title,starts_at,ends_at,organizer_id,visibility,video_provider,video_status,archived) VALUES('call-private','Private call',1,2,'pa','private','livekit','scheduled',0)",
+            [],
+        ).unwrap();
+        let (status, joined) = call(
+            cookie("ta"),
+            "join_meeting_call",
+            json!({"meetingId":"call-private","profileId":"pb","displayName":"Forged"}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{joined}");
+        assert_eq!(
+            joined["value"]["url"],
+            "wss://calls.example.test/space/livekit"
+        );
+        let token = joined["value"]["token"].as_str().unwrap();
+        use base64::Engine as _;
+        let payload = token.split('.').nth(1).unwrap();
+        let claims: Value = serde_json::from_slice(
+            &base64::engine::general_purpose::URL_SAFE_NO_PAD
+                .decode(payload)
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(claims["sub"], "pa");
+        assert_eq!(claims["name"], "Alice");
+        let (status, _) = call(
+            HeaderMap::new(),
+            "join_meeting_call",
+            json!({"meetingId":"call-private"}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        let (status, _) = call(
+            cookie("tb"),
+            "join_meeting_call",
+            json!({"meetingId":"call-private"}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        std::env::remove_var("LIVEKIT_HOST");
+        std::env::remove_var("LIVEKIT_PORT");
+        std::env::remove_var("LIVEKIT_PUBLIC_URL");
+        drop(listener);
     }
     #[tokio::test]
     async fn permanent_tokens_are_minted_listed_and_owner_revocable_over_http() {
