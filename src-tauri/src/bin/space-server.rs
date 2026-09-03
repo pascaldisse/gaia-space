@@ -6377,6 +6377,64 @@ mod tests {
         )
         .await
     }
+
+    #[tokio::test]
+    async fn web_call_join_is_session_bound_and_private_scope_checked() {
+        let _serial = test_lock();
+        setup();
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::env::set_var("LIVEKIT_HOST", "127.0.0.1");
+        std::env::set_var("LIVEKIT_PORT", port.to_string());
+        std::env::set_var(
+            "LIVEKIT_PUBLIC_URL",
+            "wss://calls.example.test/space/livekit",
+        );
+        db::conn().unwrap().execute(
+            "INSERT INTO meetings(id,title,starts_at,ends_at,organizer_id,visibility,video_provider,video_status,archived) VALUES('call-private','Private call',1,2,'pa','private','livekit','scheduled',0)",
+            [],
+        ).unwrap();
+        let (status, joined) = call(
+            cookie("ta"),
+            "join_meeting_call",
+            json!({"meetingId":"call-private","profileId":"pb","displayName":"Forged"}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{joined}");
+        assert_eq!(
+            joined["value"]["url"],
+            "wss://calls.example.test/space/livekit"
+        );
+        let token = joined["value"]["token"].as_str().unwrap();
+        use base64::Engine as _;
+        let payload = token.split('.').nth(1).unwrap();
+        let claims: Value = serde_json::from_slice(
+            &base64::engine::general_purpose::URL_SAFE_NO_PAD
+                .decode(payload)
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(claims["sub"], "pa");
+        assert_eq!(claims["name"], "Alice");
+        let (status, _) = call(
+            HeaderMap::new(),
+            "join_meeting_call",
+            json!({"meetingId":"call-private"}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        let (status, _) = call(
+            cookie("tb"),
+            "join_meeting_call",
+            json!({"meetingId":"call-private"}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        std::env::remove_var("LIVEKIT_HOST");
+        std::env::remove_var("LIVEKIT_PORT");
+        std::env::remove_var("LIVEKIT_PUBLIC_URL");
+        drop(listener);
+    }
     #[tokio::test]
     async fn permanent_tokens_are_minted_listed_and_owner_revocable_over_http() {
         let _serial = test_lock();
