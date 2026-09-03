@@ -3267,6 +3267,25 @@ fn bind_session_identity(value: &mut Value, profile_id: &str) {
     }
 }
 
+/// An invite has two identities: the authorized actor (the session) and the
+/// participant target (`profile_id`). Preserve only that top-level target while
+/// rebinding every actor-shaped field before command dispatch.
+fn bind_meeting_invite_identity(body: &mut Value, profile_id: &str) {
+    let target = match body {
+        Value::Object(object) => (object.remove("profile_id"), object.remove("profileId")),
+        _ => (None, None),
+    };
+    bind_session_identity(body, profile_id);
+    if let Value::Object(object) = body {
+        if let Some(value) = target.0 {
+            object.insert("profile_id".into(), value);
+        }
+        if let Some(value) = target.1 {
+            object.insert("profileId".into(), value);
+        }
+    }
+}
+
 fn bind_required_object_identity(
     body: &mut Value,
     object_name: &str,
@@ -3604,7 +3623,10 @@ fn authorize_command(
             object.insert("user_id".to_string(), json!(user.profile_id));
         }
     }
-    if (!matches!(policy, CommandPolicy::AbsenceWrite) || user.role != "GlobalAdmin")
+    if name == "invite_meeting_participant" {
+        // The session authorizes the invite, while the body names its recipient.
+        bind_meeting_invite_identity(body, &user.profile_id);
+    } else if (!matches!(policy, CommandPolicy::AbsenceWrite) || user.role != "GlobalAdmin")
         && policy != CommandPolicy::DocumentAccessWrite
         && policy != CommandPolicy::MeetingParticipantWrite
     {
@@ -6723,6 +6745,110 @@ mod tests {
         std::env::remove_var("LIVEKIT_PUBLIC_URL");
         let _ = probe.join();
     }
+    #[tokio::test]
+    async fn web_meeting_invite_preserves_target_and_binds_inviter_to_session() {
+        let _serial = test_lock();
+        setup();
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let probe = std::thread::spawn(move || listener.accept().unwrap());
+        std::env::set_var("LIVEKIT_HOST", "127.0.0.1");
+        std::env::set_var("LIVEKIT_PORT", port.to_string());
+        std::env::set_var(
+            "LIVEKIT_PUBLIC_URL",
+            "wss://calls.example.test/space/livekit",
+        );
+        let c = db::conn().unwrap();
+        c.execute(
+            "INSERT INTO meetings(id,title,starts_at,ends_at,organizer_id,visibility,video_provider,video_status,archived) VALUES('invite-private','Private invite',1,2,'pa','participants','livekit','scheduled',0)",
+            [],
+        )
+        .unwrap();
+
+        let (status, value) = call(
+            cookie("ta"),
+            "invite_meeting_participant",
+            json!({"meetingId":"invite-private","profileId":"pb","actor":"pd","organizerId":"pd"}),
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::OK,
+            "invite_meeting_participant: {value}"
+        );
+        let participant: String = c
+            .query_row(
+                "SELECT profile_id FROM meeting_participants WHERE meeting_id='invite-private'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(participant, "pb", "the body participant must be retained");
+        let organizer: String = c
+            .query_row(
+                "SELECT organizer_id FROM meetings WHERE id='invite-private'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            organizer, "pa",
+            "a forged invite actor cannot replace the session actor"
+        );
+
+        let (status, participants) = call(
+            cookie("ta"),
+            "list_meeting_participants",
+            json!({"meetingId":"invite-private"}),
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::OK,
+            "list_meeting_participants: {participants}"
+        );
+        assert_eq!(participants["value"][0]["profile_id"], "pb");
+        let (status, meeting) =
+            call(cookie("tb"), "get_meeting", json!({"id":"invite-private"})).await;
+        assert_eq!(
+            status,
+            StatusCode::OK,
+            "invited participant get_meeting: {meeting}"
+        );
+        let (status, value) = call(
+            cookie("tb"),
+            "set_meeting_participant_status",
+            json!({"meetingId":"invite-private","profileId":"pb","status":"accepted"}),
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::OK,
+            "participant accepts own RSVP: {value}"
+        );
+        let (status, joined) = call(
+            cookie("tb"),
+            "join_meeting_call",
+            json!({"meetingId":"invite-private"}),
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::OK,
+            "invited participant join_meeting_call: {joined}"
+        );
+        let (status, _) = call(cookie("td"), "get_meeting", json!({"id":"invite-private"})).await;
+        assert_eq!(
+            status,
+            StatusCode::FORBIDDEN,
+            "uninvited participant is denied"
+        );
+        std::env::remove_var("LIVEKIT_HOST");
+        std::env::remove_var("LIVEKIT_PORT");
+        std::env::remove_var("LIVEKIT_PUBLIC_URL");
+        let _ = probe.join();
+    }
+
     #[tokio::test]
     async fn permanent_tokens_are_minted_listed_and_owner_revocable_over_http() {
         let _serial = test_lock();
