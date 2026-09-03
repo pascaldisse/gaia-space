@@ -14,6 +14,7 @@ on:
       - "src-tauri/**"
       - "package.json"
       - "bun.lock"
+      - "deploy/**"
       - ".github/workflows/deploy-space.yml"
   workflow_dispatch:
 
