@@ -6860,6 +6860,9 @@ mod tests {
             let first = work.join("first"); let second = work.join("second");
             let run = |args: &[&str]| { let out = std::process::Command::new("git").args(args).output().unwrap(); assert!(out.status.success(), "git {:?}: {}", args, String::from_utf8_lossy(&out.stderr)); };
             run(&["clone", &url, first.to_str().unwrap()]);
+            // An empty bare repository has no checked-out branch. Name the first
+            // local branch explicitly so this test does not inherit Git's init.defaultBranch.
+            run(&["-C", first.to_str().unwrap(), "branch", "-M", "main"]);
             run(&["-C", first.to_str().unwrap(), "config", "user.email", "test@example.test"]);
             run(&["-C", first.to_str().unwrap(), "config", "user.name", "Smart HTTP Test"]);
             std::fs::write(first.join("README"), "smart HTTP\n").unwrap();
