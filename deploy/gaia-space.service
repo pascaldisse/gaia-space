@@ -7,8 +7,8 @@ Type=simple
 User=gaia-space
 Group=gaia-space
 EnvironmentFile=/etc/gaia-space.env
-# Quest owns this store. Space gets a read-only group grant solely to render
-# admin-gated contact leads; browser clients never read this path themselves.
+# Quest owns this store. Space has a group-scoped write grant solely for
+# admin-gated erasure; browser clients never receive this path themselves.
 Environment=SPACE_LEADS_PATH=/var/lib/paloptic-quest/leads.json
 WorkingDirectory=/var/lib/gaia-space
 ExecStart=/opt/gaia-space/bin/space-server
@@ -19,8 +19,7 @@ PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
 SupplementaryGroups=paloptic
-ReadWritePaths=/var/lib/gaia-space
-ReadOnlyPaths=/var/lib/paloptic-quest/leads.json
+ReadWritePaths=/var/lib/gaia-space /var/lib/paloptic-quest
 
 [Install]
 WantedBy=multi-user.target
