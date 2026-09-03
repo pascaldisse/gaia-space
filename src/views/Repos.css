@@ -152,6 +152,301 @@
 .repos-panes > .detail > .empty-lead,
 .repos-panes > .center > .empty-lead { margin: auto; background: transparent; }
 
+/* ── TOP TOOLBAR (Fetch/Pull/Push/Stash/branch/Finder) ───────────────────────
+   Sits between ContentHead and the three panes; same hairline language as the
+   panes below it, same controls (`IconButton`/`PillMenu`) the rest of the shell
+   already uses — no new button shape is invented for git actions. */
+.repo-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 var(--view-pad-x) 12px;
+  padding: 6px 8px;
+  border: 1px solid var(--line, #243050);
+  border-radius: 12px;
+  background: var(--paper, #0e1626);
+}
+.repo-toolbar-spacer { flex: 1; }
+.repo-toolbar-busy {
+  font-size: 0.82em;
+  color: var(--text-muted, #7a7a7a);
+  white-space: nowrap;
+}
+.repo-toolbar .pill-menu-trigger { min-width: 96px; }
+.repo-toolbar-branch .pill-menu-trigger { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+/* ── LEFT SIDEBAR: Local Changes / All Commits nav + filter + groups ────────── */
+.side-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 8px 8px 6px;
+}
+.side-nav-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 10px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.side-nav-row:hover { background: var(--wash-2, #141d30); }
+.side-nav-row.active { background: var(--accent-soft); color: var(--accent-text, var(--accent)); }
+.side-nav-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--line-strong, #3a4a6b);
+  flex-shrink: 0;
+}
+.side-nav-dot.dirty { background: var(--attn-amber, #f0a742); }
+.side-nav-badge {
+  margin-left: auto;
+  font-size: 0.78em;
+  color: var(--text-muted, #7a7a7a);
+  background: var(--wash-2, #141d30);
+  border-radius: 8px;
+  padding: 0 6px;
+  min-width: 1.4em;
+  text-align: center;
+}
+.side-filter { margin: 0 8px 8px; width: calc(100% - 16px); }
+
+.side-group { margin-bottom: 2px; }
+.side-group-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 6px 10px;
+  border: 0;
+  background: none;
+  color: var(--text-muted, #7a7a7a);
+  font: inherit;
+  font-size: 0.85em;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  text-align: left;
+}
+.side-group-head:hover { color: var(--text, inherit); }
+.side-group-chevron { transition: transform 0.12s ease; }
+.side-group-chevron.open { transform: rotate(90deg); }
+.side-group-title { flex: 1; }
+.side-group-count {
+  font-size: 0.9em;
+  color: var(--text-faint, #5a6478);
+}
+.side-group-body { padding-bottom: 4px; }
+.ref-list { list-style: none; margin: 0; padding: 0; }
+.ref-list li {
+  padding: 4px 14px 4px 26px;
+  font-size: 0.9em;
+  cursor: default;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ref-list li:not(.hint) { cursor: pointer; }
+.ref-list li:not(.hint):hover { background: var(--wash-2, #141d30); }
+.ref-list li.head { color: var(--accent-text, var(--accent)); }
+.ref-list li.hint { color: var(--text-faint, #5a6478); cursor: default; }
+.ref-list .stash-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.hosted-project-picker { padding: 0 10px 6px; }
+.hosted-project-picker .pill-select { width: 100%; }
+.hosted-repo-row { display: flex; align-items: center; gap: 8px; }
+.hosted-repo-row > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.hosted-repo-row .icon-button { flex: 0 0 auto; }
+.hosted-repo-form { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto auto; gap: 4px; padding: 4px 10px 8px; }
+.hosted-repo-form input { min-width: 0; border: 1px solid var(--line, #243050); border-radius: 6px; padding: 4px 6px; background: var(--wash-2, #141d30); color: var(--text); font: inherit; font-size: 0.85em; }
+
+/* ── REF BADGES (branch/tag/HEAD pills on a commit row) ──────────────────────
+   Colour reuses the accent already used for the current branch everywhere else
+   in the shell, plus the existing muted/line tokens — no new hues. */
+.ref-badge {
+  display: inline-block;
+  font-size: 0.72em;
+  line-height: 1.6;
+  padding: 0 6px;
+  margin-right: 6px;
+  border-radius: 6px;
+  border: 1px solid var(--line-strong, #3a4a6b);
+  color: var(--text-muted, #7a7a7a);
+  vertical-align: middle;
+}
+.ref-badge.ref-head { border-color: var(--accent, #00c2a8); color: var(--accent-text, var(--accent)); font-weight: 600; }
+.ref-badge.ref-branch { color: var(--text, inherit); }
+.ref-badge.ref-remote { font-style: italic; }
+.ref-badge.ref-tag { border-color: var(--attn-amber, #f0a742); color: var(--attn-amber-text, var(--attn-amber)); }
+
+/* ── COMMIT GRAPH (center pane, "All Commits") ──────────────────────────────
+   One flex row per commit: SVG lane column, flexible summary/ref badges, then
+   fixed SHA/date. The SVG itself only turns the already-computed lanes
+   (`gitGraph.ts`) into pixels; no layout math lives here. */
+.graph-table { flex: 1; overflow-y: auto; }
+.graph-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  height: 30px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--line, #141d30);
+}
+.graph-row:hover { background: var(--wash-2, #141d30); }
+.graph-row.active { background: var(--accent-soft); }
+.graph-cell { flex: 0 1 64px; max-width: 64px; display: block; }
+.graph-summary {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.graph-sha {
+  flex: 0 0 7ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--text-muted, #7a7a7a);
+  font-size: 0.82em;
+}
+.graph-date {
+  flex: 0 0 5ch;
+  color: var(--text-faint, #5a6478);
+  font-size: 0.82em;
+  white-space: nowrap;
+  min-width: 6ch;
+  text-align: right;
+}
+
+/* ── LOCAL CHANGES (center pane, when the sidebar picks it) ──────────────────
+   Unstaged/staged lists with per-file stage/unstage, then the existing commit
+   compose box (kept, just re-homed here from the old single-list layout). */
+.local-changes { flex: 1; overflow-y: auto; display: flex; flex-direction: column; }
+.lc-section { border-bottom: 1px solid var(--line, #243050); }
+.lc-section-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  font-size: 0.85em;
+  color: var(--text-muted, #7a7a7a);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.lc-count {
+  background: var(--wash-2, #141d30);
+  border-radius: 8px;
+  padding: 0 6px;
+  font-size: 0.95em;
+}
+.lc-section-head .ghost-pill, .lc-section-head .ghost { margin-left: auto; }
+.lc-file-list { list-style: none; margin: 0; padding: 0 0 6px; }
+.lc-file-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px;
+  cursor: pointer;
+}
+.lc-file-list li:hover { background: var(--wash-2, #141d30); }
+.lc-file-list li.active { background: var(--accent-soft); }
+.lc-file-list li .icon-button { margin-left: auto; opacity: 0; }
+.lc-file-list li:hover .icon-button, .lc-file-list li.active .icon-button { opacity: 1; }
+.lc-file-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.9em;
+}
+
+/* ── DETAIL PANE TABS (Commit / Changes / File Tree) ─────────────────────── */
+.detail-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 8px 10px 0;
+  border-bottom: 1px solid var(--line, #243050);
+}
+.detail-tabs button {
+  border: 0;
+  background: none;
+  color: var(--text-muted, #7a7a7a);
+  font: inherit;
+  font-size: 0.9em;
+  padding: 6px 12px;
+  border-radius: 8px 8px 0 0;
+  cursor: pointer;
+}
+.detail-tabs button:disabled { opacity: 0.4; cursor: default; }
+.detail-tabs button.active { color: var(--accent-text, var(--accent)); background: var(--accent-soft); }
+.detail-body { flex: 1; overflow-y: auto; display: flex; flex-direction: column; }
+
+/* ── Commit tab: metadata + file list ────────────────────────────────────── */
+.commit-meta { padding: 14px; }
+.commit-meta h3 { margin: 0 0 10px; font-size: 1.05em; }
+.commit-meta dl { margin: 0 0 14px; display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; font-size: 0.88em; }
+.commit-meta dt { color: var(--text-muted, #7a7a7a); }
+.commit-meta dd { margin: 0; overflow-wrap: anywhere; }
+.commit-meta dd.mono, .commit-meta .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.link-sha {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  border: 0;
+  background: none;
+  color: var(--accent-text, var(--accent));
+  cursor: pointer;
+  padding: 0;
+  margin-right: 8px;
+  text-decoration: underline;
+}
+.file-list { list-style: none; margin: 0; padding: 0; }
+.file-list li { display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: 0.9em; }
+.file-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.2em;
+  height: 1.2em;
+  border-radius: 3px;
+  font-size: 0.75em;
+  background: var(--wash-2, #243050);
+}
+.file-badge.A, .file-badge.C { color: #7cd68a; }
+.file-badge.M, .file-badge.T { color: var(--attn-amber, #f0a742); }
+.file-badge.D { color: #e0605e; }
+.file-badge.R { color: #7ab8f5; }
+
+/* ── File Tree tab ────────────────────────────────────────────────────────── */
+.file-tree { padding: 10px 14px; }
+.file-tree-crumbs { display: flex; align-items: center; gap: 4px; margin-bottom: 10px; font-size: 0.88em; flex-wrap: wrap; }
+.file-tree-crumbs button {
+  border: 0;
+  background: none;
+  color: var(--accent-text, var(--accent));
+  cursor: pointer;
+  padding: 0;
+  font: inherit;
+}
+.file-tree-crumbs .crumb-sep { color: var(--text-faint, #5a6478); }
+.file-tree-list { list-style: none; margin: 0; padding: 0; }
+.file-tree-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 4px;
+  font-size: 0.9em;
+}
+.file-tree-list li.dir { cursor: pointer; }
+.file-tree-list li.dir:hover { background: var(--wash-2, #141d30); }
+
 /* ── THE INTRODUCTION KEEPS ITS RHYTHM ───────────────────────────────────────
    This view's root carries no padding of its own, so PageHeader.css gives the header
    the page inset with a `padding: … 0` shorthand — and that shorthand also lands on

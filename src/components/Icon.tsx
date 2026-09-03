@@ -132,12 +132,20 @@ const PATHS = {
   send: () => <path d="M5 12h13M12.5 5.5 19 12l-6.5 6.5" />,
   trash: () => <path d="M5 7h14M10 7V5h4v2M6.5 7l1 13h9l1-13M10 10.5v6M14 10.5v6" />,
   plus: () => <path d="M12 5v14M5 12h14" />,
+  copy: () => <><rect x="9" y="9" width="10" height="10" rx="1" /><path d="M15 9V6a1 1 0 0 0-1-1H6a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h3" /></>,
   menu: () => <path d="M4 7h16M4 12h16M4 17h16" />,
   close: () => <path d="m6 6 12 12M18 6 6 18" />,
   /* A category IS a tag, so it is drawn as one. Every other glyph in this set was
      already spoken for by a rail mode (layers = Projects, target = Development), and
      a category wearing the Projects icon would have read as a second project field. */
   tag: () => <><path d="M3 12.5V4.5A1.5 1.5 0 0 1 4.5 3h8L21 11.5 13.5 19 3 12.5Z" /><circle cx="7.5" cy="7.5" r="1.2" /></>,
+  /* Fetch: bring the remote's tips down without touching the working tree —
+     one clean arc back to where it started, the shape every OS uses for "sync". */
+  refresh: () => <><path d="M20 12a8 8 0 1 1-2.6-5.9" /><path d="M20 4v5h-5" /></>,
+  /* Pull: fetch, then land the change here. */
+  "arrow-down": () => <path d="M12 4v14M6 12l6 6 6-6" />,
+  /* Push: send the local commit up to the remote. */
+  "arrow-up": () => <path d="M12 20V6M6 12l6-6 6 6" />,
 } satisfies Record<string, () => JSX.Element>;
 
 export type IconName = keyof typeof PATHS;

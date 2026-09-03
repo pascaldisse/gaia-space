@@ -24,6 +24,21 @@ export type Branch = {
   target: string | null;
 };
 export type StatusEntry = { path: string; status: string; staged: boolean };
+export type Tag = { name: string; target: string };
+export type RemoteInfo = { name: string; url: string };
+export type StashEntry = { index: number; message: string };
+export type TreeEntry = { name: string; path: string; is_dir: boolean; id: string };
+export type CommitFile = { path: string; status: string };
+export type WorktreeInfo = { name: string; path: string };
+export type HostedRepository = {
+  id: string;
+  project_id: string;
+  name: string;
+  description: string | null;
+  default_branch: string;
+  created_at: number;
+  created_by: string | null;
+};
 
 export const api = {
   repoList: () => invoke<RepoRef[]>("repo_list"),
@@ -40,6 +55,35 @@ export const api = {
     invoke<void>("repo_stage", { path, files }),
   repoCommit: (path: string, message: string) =>
     invoke<string>("repo_commit", { path, message }),
+  repoFetch: (path: string, remote?: string) =>
+    invoke<void>("repo_fetch", { path, remote: remote ?? null }),
+  repoPull: (path: string) => invoke<string>("repo_pull", { path }),
+  repoPush: (path: string, remote?: string, branch?: string) =>
+    invoke<void>("repo_push", { path, remote: remote ?? null, branch: branch ?? null }),
+  repoCheckout: (path: string, branch: string) =>
+    invoke<void>("repo_checkout", { path, branch }),
+  repoBranchCreate: (path: string, name: string, from?: string) =>
+    invoke<void>("repo_branch_create", { path, name, from: from ?? null }),
+  repoTags: (path: string) => invoke<Tag[]>("repo_tags", { path }),
+  repoRemotes: (path: string) => invoke<RemoteInfo[]>("repo_remotes", { path }),
+  repoStashSave: (path: string, message?: string) =>
+    invoke<string>("repo_stash_save", { path, message: message ?? null }),
+  repoStashPop: (path: string, index?: number) =>
+    invoke<void>("repo_stash_pop", { path, index: index ?? null }),
+  repoStashList: (path: string) => invoke<StashEntry[]>("repo_stash_list", { path }),
+  repoCommitFiles: (path: string, id: string) =>
+    invoke<CommitFile[]>("repo_commit_files", { path, id }),
+  repoTree: (path: string, id: string, dir?: string) =>
+    invoke<TreeEntry[]>("repo_tree", { path, id, dir: dir ?? null }),
+  repoUnstage: (path: string, files: string[]) =>
+    invoke<void>("repo_unstage", { path, files }),
+  repoWorktrees: (path: string) => invoke<WorktreeInfo[]>("repo_worktrees", { path }),
+  listHostedRepos: (projectId: string) =>
+    invoke<HostedRepository[]>("list_hosted_repos", { projectId }),
+  createHostedRepo: (projectId: string, name: string, defaultBranch: string) =>
+    invoke<HostedRepository>("create_hosted_repo", { projectId, name, description: null, defaultBranch }),
+  hostedRepoCloneUrl: (baseUrl: string, project: string, name: string) =>
+    invoke<string>("hosted_repo_clone_url", { baseUrl, project, name }),
   listProjects: () => invoke<Project[]>("list_projects"),
   listProfiles: () => invoke<Profile[]>("list_profiles"),
   listIssues: () => invoke<Issue[]>("list_issues"),

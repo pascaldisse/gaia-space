@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 140;
+pub const SCHEMA_VERSION: i64 = 142;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -871,17 +871,30 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if version < 132 && table_exists(&tx, "projects")? {
         add_column_if_missing(&tx, "projects", "lead_id", "TEXT REFERENCES profiles(id)")?;
     }
+    // V142: project visibility gates anonymous hosted Git reads. Existing projects remain private.
+    if version < 142 && table_exists(&tx, "projects")? {
+        add_column_if_missing(
+            &tx,
+            "projects",
+            "visibility",
+            "TEXT NOT NULL DEFAULT 'private' CHECK(visibility IN ('private','public'))",
+        )?;
+    }
+    // V141: durable hosted Git repository metadata; bare objects live under data_dir/git/.
+    if version < 141 && table_exists(&tx, "projects")? {
+        tx.execute_batch(SCHEMA_V141)?;
+    }
     // V140: completion is distinct from archival. Existing projects are open by default;
-// no row is moved or rewritten during this additive migration.
-if version < 140 && table_exists(&tx, "projects")? {
-add_column_if_missing(
-&tx,
-"projects",
-"status",
-"TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','done'))",
-)?;
-}
-// V133: work created out of a conversation must keep pointing back at it. Todos
+    // no row is moved or rewritten during this additive migration.
+    if version < 140 && table_exists(&tx, "projects")? {
+        add_column_if_missing(
+            &tx,
+            "projects",
+            "status",
+            "TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','done'))",
+        )?;
+    }
+    // V133: work created out of a conversation must keep pointing back at it. Todos
     // already carry the generic `(source_entity_type, source_entity_id)` anchor; issues
     // and meetings did not, so a ticket or a date born in a channel lost its origin the
     // moment it was saved. Two nullable TEXT columns each, deliberately UNCONSTRAINED
@@ -1218,7 +1231,20 @@ pub(crate) const SCHEMA_V98: &str = r#"
 CREATE TABLE IF NOT EXISTS profile_email_statuses (profile_id TEXT PRIMARY KEY REFERENCES profiles(id) ON DELETE CASCADE, status TEXT NOT NULL DEFAULT 'unverified' CHECK(status IN ('unverified','verified','bounced')), verified_at INTEGER);
 CREATE TABLE IF NOT EXISTS profile_messenger_contacts (id TEXT PRIMARY KEY, profile_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE, contact_type TEXT NOT NULL, login TEXT NOT NULL, deep_link TEXT, UNIQUE(profile_id,contact_type,login));
 "#;
-/// V99: durable principal identity abstraction.
+/// V141: durable hosted Git repository metadata.
+pub(crate) const SCHEMA_V141: &str = r#"
+CREATE TABLE IF NOT EXISTS hosted_repositories (
+ id TEXT PRIMARY KEY,
+ project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+ name TEXT NOT NULL,
+ description TEXT,
+ default_branch TEXT NOT NULL,
+ created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+ created_by TEXT REFERENCES profiles(id),
+ UNIQUE(project_id,name)
+);
+CREATE INDEX IF NOT EXISTS hosted_repositories_project ON hosted_repositories(project_id, name);
+"#;
 /// V130: per-profile document favourites (pointer rows, cascade with both sides).
 pub(crate) const SCHEMA_V130: &str = r#"
 CREATE TABLE IF NOT EXISTS document_favorites (
@@ -1246,6 +1272,7 @@ CREATE INDEX IF NOT EXISTS applications_owner_profile ON applications(owner_prof
 CREATE INDEX IF NOT EXISTS applications_owner_application ON applications(owner_application_id);
 "#;
 
+/// V99: durable principal identity abstraction.
 pub(crate) const SCHEMA_V99: &str = r#"
 CREATE TABLE IF NOT EXISTS principals (id TEXT PRIMARY KEY, kind TEXT NOT NULL CHECK(kind IN ('profile','application','external')), profile_id TEXT REFERENCES profiles(id) ON DELETE CASCADE, label TEXT NOT NULL, UNIQUE(profile_id));
 INSERT OR IGNORE INTO principals(id,kind,profile_id,label) SELECT 'profile:'||id,'profile',id,display_name FROM profiles;
@@ -2468,10 +2495,18 @@ mod tests {
         let conn = open_at(&temp).expect("database");
         migrate(&conn).expect("migrate to head");
         seed(&conn).expect("seed");
-        conn.execute("INSERT INTO projects(id,name,key,created_at) VALUES('legacy','Legacy','LEG',1)", []).unwrap();
+        conn.execute(
+            "INSERT INTO projects(id,name,key,created_at) VALUES('legacy','Legacy','LEG',1)",
+            [],
+        )
+        .unwrap();
         conn.pragma_update(None, "user_version", 139).unwrap();
         migrate(&conn).expect("v140");
-        let status: String = conn.query_row("SELECT status FROM projects WHERE id='legacy'", [], |r| r.get(0)).unwrap();
+        let status: String = conn
+            .query_row("SELECT status FROM projects WHERE id='legacy'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
         assert_eq!(status, "open");
         migrate(&conn).expect("v140 idempotent");
     }
