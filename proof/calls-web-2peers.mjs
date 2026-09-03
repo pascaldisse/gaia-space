@@ -103,6 +103,7 @@ try {
 
   browser = await chromium.launch({ headless: true, args: ["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream"] });
   contexts = { a: await browser.newContext(), b: await browser.newContext() };
+  await Promise.all(Object.values(contexts).map(context => context.grantPermissions(["camera", "microphone"], { origin: new URL(base).origin })));
   const addSession = async (context, cookie) => context.addCookies([{ name: cookie.split("=")[0], value: cookie.slice(cookie.indexOf("=") + 1), domain: new URL(base).hostname, path: "/", httpOnly: true, secure: true, sameSite: "Lax" }]);
   await Promise.all([addSession(contexts.a, aPeer.cookie), addSession(contexts.b, bPeer.cookie)]);
   pages = { a: await contexts.a.newPage(), b: await contexts.b.newPage() };
