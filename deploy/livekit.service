@@ -8,7 +8,11 @@ Type=simple
 User=root
 Group=root
 EnvironmentFile=/etc/livekit/livekit.env
-ExecStart=/opt/livekit/livekit-server --config /etc/livekit/livekit.yaml
+RuntimeDirectory=livekit
+RuntimeDirectoryMode=0755
+# LiveKit does not expand ${VAR} in YAML itself; render the secret-only config
+# into systemd's private runtime directory before the daemon starts.
+ExecStart=/bin/sh -ec '/usr/bin/envsubst < /etc/livekit/livekit.yaml > /run/livekit/livekit.yaml; exec /opt/livekit/livekit-server --config /run/livekit/livekit.yaml'
 Restart=on-failure
 RestartSec=2
 NoNewPrivileges=true
