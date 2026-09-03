@@ -30,9 +30,13 @@ export type GraphParentLink = { id: string; lane: number };
 export type LaneNode = {
   id: string;
   lane: number;
-  /** Lanes are assigned before parent links are resolved, so this is the
-   *  highest lane index in use at or after this row — the renderer's column count. */
   parentLanes: GraphParentLink[];
+  /** Lanes that are alive (waiting for a not-yet-visited commit) when this row is
+   *  drawn, OTHER than this row's own lane. The renderer draws these as a plain
+   *  unbroken vertical through the row's full height — an unrelated branch just
+   *  passing by — as distinct from `parentLanes`, which are this commit's own
+   *  diagonal connectors down to its parents. */
+  passthroughLanes: number[];
 };
 
 export type GraphLayout = {
@@ -63,6 +67,10 @@ export function assignLanes(commits: GraphCommit[]): GraphLayout {
   };
 
   for (const commit of commits) {
+    // Snapshot BEFORE this row touches anything: every lane still waiting for a
+    // commit it hasn't reached yet, as of the moment this row starts drawing.
+    const entering = active.slice();
+
     const lane = claim(commit.id);
     active[lane] = null; // this commit is now resolved; the slot is free until a parent re-claims it
 
@@ -89,7 +97,12 @@ export function assignLanes(commits: GraphCommit[]): GraphLayout {
       else owner.set(id, i);
     }
 
-    nodes.push({ id: commit.id, lane, parentLanes });
+    const passthroughLanes = entering.reduce<number[]>((acc, id, index) => {
+      if (id !== null && index !== lane) acc.push(index);
+      return acc;
+    }, []);
+
+    nodes.push({ id: commit.id, lane, parentLanes, passthroughLanes });
   }
 
   return { nodes, laneCount };
