@@ -10,6 +10,12 @@
    Colour law (briefing): teal = action/open, amber = due soon/waiting,
    red = critical/blocked. Nothing else may use those three. */
 .theme-space-light {
+/* Responsive navigation geometry — consumer rules read these defaults. */
+--nav-mobile-breakpoint: 720px;
+--nav-rail-size: 68px;
+--nav-sidebar-size: 304px;
+--nav-bar-size: 58px;
+--nav-mobile-bar-size: 64px;
   --ink: #1f2328;
   --muted: #68717d;
   --quiet: #8a929d;

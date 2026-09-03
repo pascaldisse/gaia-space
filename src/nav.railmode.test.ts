@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { railModeOfRoute, railModeOfView, viewsInMode, type RailMode } from "./nav";
+import { MOBILE_RAIL_MODES, navPlacement, railModeOfRoute, railModeOfView, setNavPlacement, setShowDevelopment, viewsInMode, type RailMode } from "./nav";
 import { parsePath, registerViews, setAvailableViews } from "./router";
 
 // The rail selects a mode; the sidebar shows that mode's objects. The mode is DERIVED
@@ -23,15 +23,15 @@ describe("rail mode derived from the view", () => {
   it("maps each rail destination to its own mode", () => {
     expect(railModeOfView("Home")).toBe("home");
     expect(railModeOfView("Chat")).toBe("chats");
-    expect(railModeOfView("Inbox")).toBe("activity");
-    expect(railModeOfView("To-Do")).toBe("tasks");
-    expect(railModeOfView("Calendar")).toBe("calendar");
-    expect(railModeOfView("Documents")).toBe("knowledge");
+    expect(railModeOfView("Inbox")).toBe("home");
+    expect(railModeOfView("To-Do")).toBe("home");
+    expect(railModeOfView("Calendar")).toBe("home");
+    expect(railModeOfView("Documents")).toBe("library");
     expect(railModeOfView("Development")).toBe("development");
   });
 
   it("puts every view in EXACTLY ONE mode", () => {
-    const modes: RailMode[] = ["home", "chats", "activity", "tasks", "projects", "calendar", "knowledge", "development", "more"];
+    const modes: RailMode[] = ["home", "chats", "projects", "library", "development", "more"];
     const seen = new Map<string, RailMode>();
     for (const mode of modes)
       for (const view of viewsInMode(mode)) {
@@ -45,14 +45,14 @@ describe("rail mode derived from the view", () => {
     // the four project surfaces no longer pile up in the drawer for the homeless.
     for (const view of ["Admin", "Settings", "A Brand New View"])
       expect(railModeOfView(view)).toBe("more");
-    expect(railModeOfView("Documents")).toBe("knowledge");
-    expect(railModeOfView("Blogs")).toBe("knowledge");
+    expect(railModeOfView("Documents")).toBe("library");
+    expect(railModeOfView("Blogs")).toBe("library");
   });
 
   it("keeps people/locations with the calendars and Dashboard with Home", () => {
-    expect(railModeOfView("Members")).toBe("calendar");
-    expect(railModeOfView("Locations")).toBe("calendar");
-    expect(railModeOfView("Absences")).toBe("calendar");
+    expect(railModeOfView("Members")).toBe("home");
+    expect(railModeOfView("Locations")).toBe("home");
+    expect(railModeOfView("Absences")).toBe("home");
     expect(railModeOfView("Dashboard")).toBe("home");
   });
 });
@@ -93,21 +93,21 @@ describe("deep links arrive with the right mode", () => {
   });
 
   it("a document URL is Knowledge", () => {
-    expect(modeOfPath("documents/d-1")).toBe("knowledge");
-    expect(modeOfPath("documents/project/p-1/d-1")).toBe("knowledge");
+    expect(modeOfPath("documents/d-1")).toBe("library");
+    expect(modeOfPath("documents/project/p-1/d-1")).toBe("library");
   });
 
   it("task and calendar URLs keep their mode across project scoping", () => {
     // A project-scoped task surface belongs to the project, not to the personal
     // task list: it is reached from inside a project and must not switch the mode.
     expect(modeOfPath("projects/p-1/tasks")).toBe("projects");
-    expect(modeOfPath("team-tasks")).toBe("tasks");
-    expect(modeOfPath("to-do")).toBe("tasks");
+    expect(modeOfPath("team-tasks")).toBe("home");
+    expect(modeOfPath("to-do")).toBe("home");
     // The project's calendar is the project's Calendar TAB, so it stays in the
     // projects mode: leaving for the calendar sidebar would lose the project.
     expect(modeOfPath("projects/p-1/calendar")).toBe("projects");
-    expect(modeOfPath("calendar")).toBe("calendar");
-    expect(modeOfPath("meetings/m-1")).toBe("calendar");
+    expect(modeOfPath("calendar")).toBe("home");
+    expect(modeOfPath("meetings/m-1")).toBe("home");
   });
 
   it("the entity type wins over a shared view name", () => {
@@ -117,4 +117,10 @@ describe("deep links arrive with the right mode", () => {
   it("an unparseable route degrades with the fallback view, never to a wrong sidebar", () => {
     expect(modeOfPath("nope/nothing")).toBe(railModeOfView(parsePath("nope/nothing").view));
   });
+});
+
+describe("responsive rail preferences", () => {
+  it("defaults desktop placement to left", () => { expect(navPlacement()).toBe("left"); setNavPlacement("right"); expect(navPlacement()).toBe("right"); setNavPlacement("left"); });
+  it("folds development into More when hidden", () => { setShowDevelopment(false); expect(railModeOfView("Issues")).toBe("more"); setShowDevelopment(true); expect(railModeOfView("Issues")).toBe("development"); });
+  it("limits mobile rail to five destinations", () => { expect(MOBILE_RAIL_MODES).toEqual(["home", "chats", "projects", "library", "more"]); expect(MOBILE_RAIL_MODES.length).toBeLessThanOrEqual(5); });
 });

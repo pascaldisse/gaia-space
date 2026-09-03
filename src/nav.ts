@@ -52,24 +52,33 @@ export const financeVisible = () => FINANCE_FOR_EVERYONE || financeAllowed();
 const LAYOUT_KEY = "space.nav.layout";
 const HIDDEN_KEY = "space.nav.hidden";
 const DEFAULT_VIEW_KEY = "space.nav.defaultView";
-
+const PLACEMENT_KEY = "space.nav.placement";
+const MOBILE_PLACEMENT_KEY = "space.nav.mobilePlacement";
+const DEVELOPMENT_KEY = "space.nav.showDevelopment";
 const LAYOUTS: NavLayout[] = ["grouped", "flat", "chat-first"];
-const readLayout = (): NavLayout => {
-  const stored = localStorage.getItem(LAYOUT_KEY);
-  return LAYOUTS.includes(stored as NavLayout) ? (stored as NavLayout) : "chat-first";
+const PLACEMENTS: NavPlacement[] = ["left", "right", "top", "bottom"];
+const MOBILE_PLACEMENTS: MobileNavPlacement[] = ["top", "bottom"];
+const readChoice = <T extends string>(key: string, choices: readonly T[], fallback: T): T => {
+  const stored = localStorage.getItem(key);
+  return choices.includes(stored as T) ? stored as T : fallback;
 };
+const readBoolean = (key: string, fallback: boolean): boolean => {
+  const stored = localStorage.getItem(key);
+  return stored === null ? fallback : stored === "true";
+};
+const readLayout = (): NavLayout => readChoice(LAYOUT_KEY, LAYOUTS, "chat-first");
 const readHidden = (): string[] => { try { const raw = JSON.parse(localStorage.getItem(HIDDEN_KEY) ?? "[]"); return Array.isArray(raw) ? raw.filter((x): x is string => typeof x === "string") : []; } catch { return []; } };
-
 const [navLayout, setLayoutSignal] = createSignal<NavLayout>(readLayout());
 const [hiddenGroups, setHiddenSignal] = createSignal<string[]>(readHidden());
-// Chat-first opens on Home (the calendar start view of the briefing); the older layouts
-// keep their Dashboard landing. An explicit user choice always wins.
-const [defaultView, setDefaultSignal] = createSignal<string>(
-  localStorage.getItem(DEFAULT_VIEW_KEY) ?? (readLayout() === "chat-first" ? "Home" : "Dashboard"),
-);
-
-export { navLayout, hiddenGroups, defaultView };
+const [navPlacement, setPlacementSignal] = createSignal<NavPlacement>(readChoice(PLACEMENT_KEY, PLACEMENTS, "left"));
+const [mobileNavPlacement, setMobilePlacementSignal] = createSignal<MobileNavPlacement>(readChoice(MOBILE_PLACEMENT_KEY, MOBILE_PLACEMENTS, "bottom"));
+const [showDevelopment, setShowDevelopmentSignal] = createSignal(readBoolean(DEVELOPMENT_KEY, true));
+const [defaultView, setDefaultSignal] = createSignal<string>(localStorage.getItem(DEFAULT_VIEW_KEY) ?? (readLayout() === "chat-first" ? "Home" : "Dashboard"));
+export { navLayout, hiddenGroups, defaultView, navPlacement, mobileNavPlacement, showDevelopment };
 export function setNavLayout(next: NavLayout) { localStorage.setItem(LAYOUT_KEY, next); setLayoutSignal(next); }
+export function setNavPlacement(next: NavPlacement) { localStorage.setItem(PLACEMENT_KEY, next); setPlacementSignal(next); }
+export function setMobileNavPlacement(next: MobileNavPlacement) { localStorage.setItem(MOBILE_PLACEMENT_KEY, next); setMobilePlacementSignal(next); }
+export function setShowDevelopment(next: boolean) { localStorage.setItem(DEVELOPMENT_KEY, String(next)); setShowDevelopmentSignal(next); }
 export function setHiddenGroups(next: string[]) { localStorage.setItem(HIDDEN_KEY, JSON.stringify(next)); setHiddenSignal(next); }
 export function setDefaultView(next: string) { localStorage.setItem(DEFAULT_VIEW_KEY, next); setDefaultSignal(next); }
 export function toggleGroup(id: string) { const hidden = hiddenGroups(); setHiddenGroups(hidden.includes(id) ? hidden.filter(x => x !== id) : [...hidden, id]); }
@@ -100,7 +109,10 @@ export const viewLabel = (view: string) => VIEW_LABELS[view] ?? view;
 // to. Storing it would let the two disagree, which is exactly the defect this
 // mapping exists to prevent.
 // ---------------------------------------------------------------------------
-export type RailMode = "home" | "chats" | "activity" | "tasks" | "projects" | "calendar" | "knowledge" | "development" | "more";
+export type RailMode = "home" | "chats" | "projects" | "library" | "development" | "more";
+export type NavPlacement = "left" | "right" | "top" | "bottom";
+export type MobileNavPlacement = "top" | "bottom";
+export const MOBILE_RAIL_MODES: readonly RailMode[] = ["home", "chats", "projects", "library", "more"];
 
 /** Every view has EXACTLY ONE home mode. A view that is absent here belongs to
  *  "more", whose sidebar is built from the LIVE view registry — so a newly
@@ -109,9 +121,9 @@ const MODE_OF_VIEW: Record<string, RailMode> = {
   Home: "home",
   Dashboard: "home",
   Chat: "chats",
-  Inbox: "activity",
-  "To-Do": "tasks",
-  "Team Tasks": "tasks",
+  Inbox: "home",
+  "To-Do": "home",
+  "Team Tasks": "home",
   // Every project-scoped surface belongs to the PROJECTS mode, not to Tasks and not
   // to More. They were unmapped, so all four fell into More and piled up there as
   // "Projects, Project Overview, Project Steering, Project Settings" — four entries
@@ -125,13 +137,13 @@ const MODE_OF_VIEW: Record<string, RailMode> = {
   "Project Steering": "projects",
   "Project Settings": "projects",
   "Project Tasks": "projects",
-  Calendar: "calendar",
-  Meetings: "calendar",
-  Absences: "calendar",
-  Locations: "calendar",
-  Documents: "knowledge",
-  Blogs: "knowledge",
-  Members: "calendar",
+  Calendar: "home",
+  Meetings: "home",
+  Absences: "home",
+  Locations: "home",
+  Documents: "library",
+  Blogs: "library",
+  Members: "home",
   Development: "development",
   Issues: "development",
   Boards: "development",
@@ -142,7 +154,10 @@ const MODE_OF_VIEW: Record<string, RailMode> = {
   Packages: "development",
 };
 
-export const railModeOfView = (view: string): RailMode => MODE_OF_VIEW[view] ?? "more";
+export const railModeOfView = (view: string): RailMode => {
+  const mode = MODE_OF_VIEW[view] ?? "more";
+  return mode === "development" && !showDevelopment() ? "more" : mode;
+};
 
 /** Route -> mode. The entity type wins where a view is SHARED: a channel URL renders
  *  the Chat view, and a channel is always a conversation. Everything else is decided
@@ -161,4 +176,4 @@ export const railModeOfRoute = (route: { view: string; entityType?: string; proj
 /** Views that own a rail mode's landing surface — used to keep the More sidebar
  *  free of duplicates without hand-maintaining a second list. */
 export const viewsInMode = (mode: RailMode): string[] =>
-  Object.keys(MODE_OF_VIEW).filter((view) => MODE_OF_VIEW[view] === mode);
+  Object.keys(MODE_OF_VIEW).filter((view) => railModeOfView(view) === mode);

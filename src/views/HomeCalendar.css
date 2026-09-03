@@ -30,6 +30,9 @@
   --hc-shadow: var(--shadow, 0 18px 44px rgba(31, 35, 40, .08));
 
   color: var(--hc-ink);
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
   padding: 18px 28px 32px;
   display: grid;
   gap: 16px;
@@ -105,7 +108,7 @@
 /* ── layout ─────────────────────────────────────────────────────────────── */
 .home-cal .premium-home {
   display: grid;
-  grid-template-columns: minmax(520px, 1fr) 360px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 360px);
   gap: 18px;
   /* STRETCH, not start: a card that stops halfway down its neighbour reads as
      unfinished. It applies to BOTH rows — the month beside its day, and the two
@@ -115,6 +118,9 @@
 
 /* ── month ──────────────────────────────────────────────────────────────── */
 .home-cal .premium-month {
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
   background: var(--hc-paper);
   border: 1px solid var(--hc-line);
   border-radius: 20px;
@@ -149,10 +155,12 @@
 
 .home-cal .month-grid {
   display: grid;
-  grid-template-columns: repeat(7, 1fr);
-  gap: 8px 12px;
+  min-width: 0;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: clamp(4px, 2vw, 8px) clamp(4px, 3vw, 12px);
 }
 .home-cal .weekday {
+  min-width: 0;
   color: var(--hc-muted);
   font-size: 13px;
   font-weight: 680;
@@ -161,7 +169,9 @@
 }
 .home-cal .day {
   position: relative;
-  height: 43px;
+  min-width: 0;
+  width: 100%;
+  height: clamp(2rem, 11vw, 2.6875rem);
   border: 0;
   border-radius: 13px;
   background: transparent;
@@ -200,6 +210,9 @@
    the top, so an empty day is quiet space rather than stretched rows. */
 .home-cal .premium-agenda > .agenda-card.main { align-self: stretch; }
 .home-cal .agenda-card {
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
   background: var(--hc-paper);
   border: 1px solid var(--hc-line);
   border-radius: 20px;
@@ -321,7 +334,7 @@
 .home-cal .home-work {
   grid-column: 1 / -1;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
   gap: 18px;
   margin-top: 18px;
 }

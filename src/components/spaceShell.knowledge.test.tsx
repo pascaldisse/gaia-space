@@ -71,7 +71,7 @@ describe("knowledge sidebar", () => {
 
     const sidebar = host.querySelector(".space-sidebar");
     expect(sidebar).not.toBeNull();
-    expect(sidebar!.querySelector(".side-mode")?.getAttribute("data-mode")).toBe("knowledge");
+    expect(sidebar!.querySelector(".side-mode")?.getAttribute("data-mode")).toBe("library");
 
     const heads = [...sidebar!.querySelectorAll(".section-head span")].map((s) => s.textContent);
     expect(heads).toEqual(["Other organization libraries", "Project libraries"]);

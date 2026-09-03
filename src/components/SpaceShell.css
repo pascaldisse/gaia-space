@@ -13,6 +13,19 @@
   color: var(--ink);
 }
 
+
+/* Desktop placement is structural: the same DOM moves through named grid areas. */
+.space-chat-shell[data-nav-placement="right"] { grid-template-columns: minmax(0, 1fr) var(--nav-sidebar-size) var(--nav-rail-size); grid-template-areas: "main sidebar rail"; }
+.space-chat-shell[data-nav-placement="top"] { grid-template-columns: var(--nav-sidebar-size) minmax(0, 1fr); grid-template-rows: var(--nav-rail-size) minmax(0, 1fr); grid-template-areas: "rail rail" "sidebar main"; }
+.space-chat-shell[data-nav-placement="bottom"] { grid-template-columns: var(--nav-sidebar-size) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) var(--nav-rail-size); grid-template-areas: "sidebar main" "rail rail"; }
+.space-chat-shell[data-nav-placement="top"] .rail,
+.space-chat-shell[data-nav-placement="bottom"] .rail { flex-direction: row; justify-content: flex-start; padding: 10px max(10px, env(safe-area-inset-right)) 10px max(10px, env(safe-area-inset-left)); overflow-x: auto; overflow-y: hidden; }
+.space-chat-shell[data-nav-placement="top"] .rail .rail-spacer,
+.space-chat-shell[data-nav-placement="bottom"] .rail .rail-spacer { min-width: 12px; flex: 1; }
+.space-chat-shell[data-nav-placement="top"] .rail .mark,
+.space-chat-shell[data-nav-placement="bottom"] .rail .mark { margin-bottom: 0; }
+.space-chat-shell[data-nav-placement="right"] .space-sidebar { border-right: 0; border-left: 1px solid rgba(0, 0, 0, .2); }
+
 /* ── rail ─────────────────────────────────────────────────────────────── */
 .space-chat-shell .rail {
   background: var(--rail-gradient);
@@ -328,7 +341,7 @@
 
 /* The view itself. Existing views bring their own (dark) surfaces; new
    chat-first views inherit --wash from here. */
-.space-chat-shell .space-content { min-height: 0; min-width: 0; overflow: auto; display: flex; flex-direction: column; }
+.space-chat-shell .space-content { min-height: 0; min-width: 0; max-width: 100%; overflow: auto; display: flex; flex-direction: column; }
 .space-chat-shell .space-content > * { flex: 1 1 auto; min-height: 0; }
 
 /* Narrow windows: the sidebar narrows before it ever disappears. A channel list
@@ -447,4 +460,25 @@
   border: 1px solid var(--line, #e5ddd3); border-radius: 10px;
   background: var(--paper, #fff); color: var(--ink, #1f2328); font-size: 0.9rem;
   box-shadow: 0 10px 30px rgba(31, 35, 40, .16);
+}
+
+/* iOS enlarges fields below 16px after focus. Keep touch editing at the system scale. */
+@media (pointer: coarse) {
+  .space-chat-shell input,
+  .space-chat-shell select,
+  .space-chat-shell textarea { font-size: max(16px, var(--ctl-font-size, 16px)); }
+}
+
+/* Responsive placement + phone tab bar. */
+.space-chat-shell { grid-template-areas: "rail sidebar main"; }
+.space-chat-shell > .rail { grid-area: rail; }.space-chat-shell > .space-sidebar { grid-area: sidebar; }.space-chat-shell > .space-main { grid-area: main; }
+.mobile-rail,.mobile-sidebar-back{display:none}
+@media (max-width:720px){
+.space-chat-shell,.space-chat-shell[data-nav-placement]{width:100dvw;max-width:100dvw;grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr) var(--nav-mobile-bar-size);grid-template-areas:"main" "rail"}
+.space-chat-shell[data-mobile-nav-placement="top"]{grid-template-rows:var(--nav-mobile-bar-size) minmax(0,1fr);grid-template-areas:"rail" "main"}
+.space-chat-shell .desktop-rail{display:none}.space-chat-shell .mobile-rail{display:flex;flex-direction:row;justify-content:space-around;align-items:center;gap:0;padding:max(6px,env(safe-area-inset-top)) max(8px,env(safe-area-inset-right)) max(6px,env(safe-area-inset-bottom)) max(8px,env(safe-area-inset-left));overflow:hidden}
+.space-chat-shell .mobile-rail .rail-item{width:max(44px,18vw);min-height:44px;border-radius:10px}.space-chat-shell .mobile-rail .rail-label{width:auto;max-width:18vw;margin:0;font-size:10px;line-height:1.1}.space-chat-shell .mobile-rail .rail-badge{top:0;right:0}
+.space-chat-shell .space-main{min-width:0;max-width:100%}.space-chat-shell .commandbar{grid-template-columns:minmax(0,1fr);gap:0;padding:10px max(12px,env(safe-area-inset-right)) 10px max(12px,env(safe-area-inset-left))}.space-chat-shell .top-actions{display:none}.space-chat-shell .command-search{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.space-chat-shell .space-sidebar{display:flex;position:fixed;z-index:40;inset:0;width:100dvw;max-width:100dvw;padding:max(16px,env(safe-area-inset-top)) max(16px,env(safe-area-inset-right)) max(16px,env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left));transform:translateX(-100%);transition:transform .18s ease;border:0}.space-chat-shell.mobile-sidebar-open .space-sidebar{transform:translateX(0)}.space-chat-shell .mobile-sidebar-back{display:inline-flex;min-height:44px;align-items:center;width:max-content;margin-bottom:12px}
+.space-chat-shell .more-panel{left:max(12px,env(safe-area-inset-left));right:max(12px,env(safe-area-inset-right));width:auto;bottom:calc(var(--nav-mobile-bar-size) + 12px)}.space-chat-shell[data-mobile-nav-placement="top"] .more-panel{top:calc(var(--nav-mobile-bar-size) + 12px);bottom:auto}
 }

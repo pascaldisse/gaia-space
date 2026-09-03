@@ -64,9 +64,9 @@ describe("filter <-> route", () => {
 
   test("every filtered Activity route still resolves to the activity rail mode", () => {
     for (const filter of ["", ...activityFilters]) {
-      expect(railModeOfRoute(parsePath(`inbox/${filter}`))).toBe("activity");
+      expect(railModeOfRoute(parsePath(`inbox/${filter}`))).toBe("home");
     }
-    expect(railModeOfRoute(parsePath("inbox/nonsense"))).toBe("activity");
+    expect(railModeOfRoute(parsePath("inbox/nonsense"))).toBe("home");
   });
 });
 
