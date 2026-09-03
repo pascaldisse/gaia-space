@@ -329,6 +329,11 @@ fn ensure_server(config: LivekitConfig) -> Result<LivekitStatus> {
         }
         *server = None;
     }
+    // The web server joins an externally managed production daemon. Only desktop
+    // development starts a child when no configured LiveKit endpoint is listening.
+    if port_open(&config) {
+        return Ok(LivekitStatus { running: true, url: config.url(), pid: None });
+    }
     let path = config.server_path();
     let key_pair = format!("{}: {}", config.api_key(), config.api_secret());
     let host = config.host();
