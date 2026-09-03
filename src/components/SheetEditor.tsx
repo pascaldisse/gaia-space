@@ -30,6 +30,7 @@ export type SheetEditorProps = {
   sheet: SheetDoc;
   onChange: (sheet: SheetDoc) => void;
   disabled?: boolean;
+  lockedColumnIds?: readonly string[];
 };
 
 export const cellLabel = (column: SheetColumn, rowIndex: number) => `${column.label || "Column"} row ${rowIndex + 1}`;

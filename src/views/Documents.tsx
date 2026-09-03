@@ -6,6 +6,7 @@ import "../App.css";
 import "./Documents.css";
 import DocumentCreateDrawer, { type DocumentCreateMode } from "../components/DocumentCreateDrawer";
 import SheetEditor from "../components/SheetEditor";
+import Budget from "./Budget";
 import ConfirmDialog from "../components/ConfirmDialog";
 import PromptDialog from "../components/PromptDialog";
 import ContextMenu, { type ContextMenuItem } from "../components/ContextMenu";
@@ -34,6 +35,7 @@ import {
 import { chatApi, newId as newMessageId, type MessageView } from "../api/chat";
 import { channelFeedsApi } from "../api/channel-feeds";
 import { profileId as sessionProfileId, profileLocked, isWeb } from "../session";
+import { parseBudget, serializeBudget, type BudgetDoc } from "../api/budget";
 import { actingProfileId as chatActingProfileId } from "../chatIdentity";
 import { applyMarkdownCommand, sanitizeRichHtml, type MarkdownCommand } from "../richtext";
 import { blogsApi, type BlogPost } from "../api/blogs";
@@ -671,6 +673,7 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
   // A sheet edits a parsed grid; the text body stays its single serialized source, so
   // saving, versions and restore keep using the one document save path.
   const [sheet, setSheet] = createSignal<SheetDoc>(emptySheet());
+const [budget, setBudget] = createSignal<BudgetDoc>(parseBudget(null));
   const [showPreview, setShowPreview] = createSignal(true);
   // sync editor fields when the *selected document id* changes — not on every refetch,
   // so in-progress edits survive background polling/refetches.
@@ -681,6 +684,7 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
       setEditTitle(doc?.title ?? "");
       setEditBody(doc?.body ?? "");
       if (doc?.kind === "sheet") setSheet(parseSheet(doc.body));
+if (doc?.kind === "budget") setBudget(parseBudget(doc.body));
     }
     return id;
   }, null);
@@ -1195,13 +1199,16 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
       const body =
         doc.kind === "sheet"
           ? serializeSheet(sheet())
-          : doc.body_format === "rich-text"
+          : doc.kind === "budget"
+            ? serializeBudget(budget())
+            : doc.body_format === "rich-text"
             ? sanitizeRichHtml(editBody())
             : editBody();
       const saved = await documentsApi.saveDocument(doc.id, editTitle().trim() || doc.title, body, actingProfileId());
       setEditTitle(saved.title);
       setEditBody(saved.body ?? "");
       if (saved.kind === "sheet") setSheet(parseSheet(saved.body));
+if (saved.kind === "budget") setBudget(parseBudget(saved.body));
       await refetchDocuments();
       await refetchVersions();
     } catch (e) {
@@ -1235,6 +1242,7 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
     try {
       const restored = await documentsApi.restoreDocVersion(doc.id, version, actingProfileId());
       if (restored.kind === "sheet") setSheet(parseSheet(restored.body));
+if (restored.kind === "budget") setBudget(parseBudget(restored.body));
       // resync the editor fields directly from the returned document — the id-keyed
       // effect below only refires on document *selection* change, not on content
       // changes to the currently-open document (restore/save happen in place).
@@ -1919,9 +1927,8 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
                   >
                     {isFavorite(doc().id) ? "★ Favourite" : "☆ Favourite"}
                   </button>
-{/* A table has no text flavour and no preview: neither control would say anything
-    about it, so neither is on the page. */}
-<Show when={doc().kind !== "sheet"}>
+{/* Tables and budgets have no text flavour or preview. */}
+<Show when={doc().kind !== "sheet" && doc().kind !== "budget"}>
 <select aria-label="Document body type" value={doc().body_format} onChange={(e) => void changeBodyFormat(doc(), e.currentTarget.value as DocumentBodyFormat)}>
 <option value="text">Text / Markdown</option><option value="rich-text">Rich text</option><option value="checklist">Checklist</option><option value="code">Code</option>
 </select>
@@ -1929,7 +1936,7 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
                   <Show when={doc().archived}>
                     <span class="archived-chip">archived</span>
                   </Show>
-                  <Show when={doc().kind !== "sheet"}>
+                  <Show when={doc().kind !== "sheet" && doc().kind !== "budget"}>
                     <button class="ghost small" onClick={() => setShowPreview((v) => !v)}>
                       {showPreview() ? "hide preview" : "show preview"}
                     </button>
@@ -1988,10 +1995,27 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
                 </div>
 
                 <Show when={doc().doc_type === "file"} fallback={
-                  <Show when={doc().kind !== "sheet"} fallback={
-                    <div class="editor-panes">
-                      <SheetEditor sheet={sheet()} onChange={setSheet} disabled={doc().archived} />
-                    </div>
+                  <Show when={doc().kind !== "sheet" && doc().kind !== "budget"} fallback={
+                    <Show when={doc().kind === "budget"} fallback={
+                      <div class="editor-panes">
+                        <SheetEditor sheet={sheet()} onChange={setSheet} disabled={doc().archived} />
+                      </div>
+                    }>
+                      <Budget
+                        document={doc()}
+                        budget={budget()}
+                        profiles={profiles() ?? []}
+                        profileId={sessionProfileId() || actingProfileId()}
+                        disabled={doc().archived}
+                        onChange={setBudget}
+                        onReload={async () => {
+                          const fresh = await documentsApi.getDocument(doc().id);
+                          if (fresh?.kind === "budget") setBudget(parseBudget(fresh.body));
+                          await refetchDocuments();
+                        }}
+                        onOpenDocument={(id) => navigate(docRoute(id))}
+                      />
+                    </Show>
                   }>
                     <div class="editor-panes" classList={{ split: showPreview() }}>
                       <EditorSurface format={doc().body_format} />
