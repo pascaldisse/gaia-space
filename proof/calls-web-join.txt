@@ -1,0 +1,30 @@
+# Production web Call join transcript (redacted)
+UTC: 2026-09-03T19:42:12.858603+00:00
+base: https://paloptic.com/space
+credential: existing service-account personal access token [REDACTED]
+meeting_id: calls-proof-1788464531-54576722
+
+POST /api/cmd/create_meeting: HTTP 200
+create.ok: True
+
+POST /api/cmd/join_meeting_call (authenticated): HTTP 200
+join.ok: True
+join.value.url: wss://paloptic.com/space/livekit
+join.value.room: meeting-calls-proof-1788464531-54576722
+join.value.token: [REDACTED; present=True]
+
+POST /api/cmd/join_meeting_call (anonymous): HTTP 401
+anonymous.response: {'error': 'unauthorized', 'ok': False}
+
+# Production two-peer participant API transcript (redacted)
+UTC: 2026-09-03T20:26:21.550Z
+base: https://paloptic.com/space
+meeting_id: calls-proof3-1788467180-98ec19ee
+peer_profile_id: profile-6fab2895b258
+POST /api/cmd/create_meeting: HTTP 200; ok=true
+POST /api/cmd/invite_meeting_participant: HTTP 200; ok=true
+POST /api/cmd/get_meeting as B: HTTP 200; ok=true; identity=organizer-bound
+POST /api/cmd/set_meeting_participant_status as B: HTTP 200; ok=true; status=accepted
+POST /api/cmd/join_meeting_call as B: HTTP 200; ok=true; url=wss://paloptic.com/space/livekit; room=meeting-calls-proof3-1788467180-98ec19ee; token=[REDACTED; present=true]
+POST /api/cmd/join_meeting_call as A: HTTP 200; ok=true; url=wss://paloptic.com/space/livekit; room=meeting-calls-proof3-1788467180-98ec19ee; token=[REDACTED; present=true]
+
