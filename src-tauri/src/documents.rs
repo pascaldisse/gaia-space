@@ -121,6 +121,9 @@ fn default_body_format() -> String {
 }
 pub const KIND_MARKDOWN: &str = "markdown";
 pub const KIND_SHEET: &str = "sheet";
+pub const MAX_SHEET_COLUMNS: usize = 64;
+pub const MAX_SHEET_ROWS: usize = 5000;
+pub const MAX_FORMULA_LEN: usize = 512;
 fn default_kind() -> String {
     KIND_MARKDOWN.into()
 }
@@ -185,11 +188,19 @@ pub fn validate_sheet_body(body: &str) -> Result<()> {
         .get("columns")
         .and_then(|v| v.as_array())
         .ok_or_else(|| "sheet body needs a 'columns' array".to_string())?;
+    if columns.len() > MAX_SHEET_COLUMNS {
+        return Err(format!(
+            "sheet body has more than {MAX_SHEET_COLUMNS} columns"
+        ));
+    }
     let rows = value
         .get("rows")
         .and_then(|v| v.as_array())
         .ok_or_else(|| "sheet body needs a 'rows' array".to_string())?;
-    let mut column_ids: Vec<&str> = Vec::with_capacity(columns.len());
+    if rows.len() > MAX_SHEET_ROWS {
+        return Err(format!("sheet body has more than {MAX_SHEET_ROWS} rows"));
+    }
+    let mut column_ids: Vec<(&str, &str)> = Vec::with_capacity(columns.len());
     for column in columns {
         let id = column
             .get("id")
@@ -197,23 +208,49 @@ pub fn validate_sheet_body(body: &str) -> Result<()> {
             .map(str::trim)
             .filter(|id| !id.is_empty())
             .ok_or_else(|| "every sheet column needs a non-empty id".to_string())?;
-        if column_ids.contains(&id) {
+        if column_ids.iter().any(|(known, _)| *known == id) {
             return Err(format!("duplicate sheet column id '{id}'"));
         }
         column
             .get("label")
             .and_then(|v| v.as_str())
             .ok_or_else(|| format!("sheet column '{id}' needs a label"))?;
-        match column.get("type").and_then(|v| v.as_str()) {
-            Some("text") | Some("number") | Some("date") => {}
-            Some(other) => {
+        let kind = match column.get("type").and_then(|v| v.as_str()) {
+            Some(kind @ ("text" | "number" | "date" | "person" | "formula")) => kind,
+            Some(other) => return Err(format!("sheet column '{id}' has unknown type '{other}'")),
+            None => return Err(format!("sheet column '{id}' needs a type")),
+        };
+        match column.get("formula") {
+            Some(_) if kind != "formula" => {
                 return Err(format!(
-                    "sheet column '{id}' has unknown type '{other}' (expected text, number or date)"
+                    "sheet column '{id}' may only have a formula when type is formula"
                 ))
             }
-            None => return Err(format!("sheet column '{id}' needs a type")),
+            Some(formula) => {
+                let formula = formula
+                    .as_str()
+                    .ok_or_else(|| format!("sheet formula '{id}' must be a string"))?;
+                if formula.trim().is_empty() {
+                    return Err(format!("sheet formula '{id}' must not be empty"));
+                }
+                if formula.len() > MAX_FORMULA_LEN {
+                    return Err(format!(
+                        "sheet formula '{id}' exceeds {MAX_FORMULA_LEN} characters"
+                    ));
+                }
+            }
+            None if kind == "formula" => {
+                return Err(format!("sheet formula column '{id}' needs a formula"))
+            }
+            None => {}
         }
-        column_ids.push(id);
+        if let Some(aggregate) = column.get("aggregate") {
+            match aggregate.as_str() {
+                Some("sum" | "avg" | "min" | "max" | "count" | "none") => {}
+                _ => return Err(format!("sheet column '{id}' has invalid aggregate")),
+            }
+        }
+        column_ids.push((id, kind));
     }
     let mut row_ids: Vec<&str> = Vec::with_capacity(rows.len());
     for row in rows {
@@ -232,9 +269,16 @@ pub fn validate_sheet_body(body: &str) -> Result<()> {
             .and_then(|v| v.as_object())
             .ok_or_else(|| format!("sheet row '{id}' needs a 'cells' object"))?;
         for (column_id, cell) in cells {
-            if !column_ids.contains(&column_id.as_str()) {
+            let kind = column_ids
+                .iter()
+                .find(|(known, _)| *known == column_id)
+                .map(|(_, kind)| *kind)
+                .ok_or_else(|| {
+                    format!("sheet row '{id}' addresses unknown column '{column_id}'")
+                })?;
+            if kind == "formula" {
                 return Err(format!(
-                    "sheet row '{id}' addresses unknown column '{column_id}'"
+                    "sheet row '{id}' must not store formula cell '{column_id}'"
                 ));
             }
             if !cell.is_string() {
@@ -246,7 +290,6 @@ pub fn validate_sheet_body(body: &str) -> Result<()> {
     }
     Ok(())
 }
-
 /// What a sheet says in plain words: column labels and every cell value, so full-text
 /// search finds a sheet by its content and not by its JSON punctuation.
 pub fn sheet_search_text(body: &str) -> String {
@@ -756,7 +799,9 @@ pub fn ensure_organization_library_root() -> Result<DocumentFolder> {
     let c = db::conn()?;
     ensure_organization_library_root_on(&c)
 }
-pub(crate) fn ensure_organization_library_root_on(c: &rusqlite::Connection) -> Result<DocumentFolder> {
+pub(crate) fn ensure_organization_library_root_on(
+    c: &rusqlite::Connection,
+) -> Result<DocumentFolder> {
     c.execute(
         "INSERT OR IGNORE INTO document_folders(id,container_type,container_id,parent_id,name,description,archived) VALUES(?1,'kb',?1,NULL,'Library',NULL,0)",
         [ORGANIZATION_LIBRARY_ID],
@@ -764,7 +809,8 @@ pub(crate) fn ensure_organization_library_root_on(c: &rusqlite::Connection) -> R
     c.execute(
         "INSERT OR IGNORE INTO kb_book_owners(book_id,profile_id) VALUES(?1,'default-org')",
         [ORGANIZATION_LIBRARY_ID],
-    ).map_err(|e| e.to_string())?;
+    )
+    .map_err(|e| e.to_string())?;
     c.query_row(
         "SELECT id,container_type,container_id,parent_id,name,description,archived FROM document_folders WHERE id=?1",
         [ORGANIZATION_LIBRARY_ID], row_to_folder,
@@ -1276,9 +1322,13 @@ pub fn list_document_folders_scoped(profile_id: String) -> Result<Vec<DocumentFo
     let c = db::conn()?;
     list_document_folders_scoped_on(&c, &profile_id)
 }
-pub(crate) fn list_document_folders_scoped_on(c: &rusqlite::Connection, profile_id: &str) -> Result<Vec<DocumentFolder>> {
+pub(crate) fn list_document_folders_scoped_on(
+    c: &rusqlite::Connection,
+    profile_id: &str,
+) -> Result<Vec<DocumentFolder>> {
     let mut s = c.prepare(&format!("SELECT id,container_type,container_id,parent_id,name,description,archived FROM document_folders f WHERE {FOLDER_READ_SCOPE} ORDER BY name")).map_err(|e|e.to_string())?;
-    let rows = s.query_map([profile_id], row_to_folder)
+    let rows = s
+        .query_map([profile_id], row_to_folder)
         .map_err(|e| e.to_string())?
         .collect::<std::result::Result<_, _>>()
         .map_err(|e| e.to_string());
@@ -3211,15 +3261,22 @@ mod tests {
     fn organization_library_root_exists_once_and_every_active_member_can_list_it() {
         let c = test_conn();
         c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('member-a','a','A',1),('member-b','b','B',1),('former','f','Former',1)", []).unwrap();
-        c.execute("UPDATE profiles SET archived=1 WHERE id='former'", []).unwrap();
+        c.execute("UPDATE profiles SET archived=1 WHERE id='former'", [])
+            .unwrap();
         let root = ensure_organization_library_root_on(&c).unwrap();
         assert_eq!(root.id, ORGANIZATION_LIBRARY_ID);
         assert_eq!(root.name, "Library");
         assert_eq!(ensure_organization_library_root_on(&c).unwrap().id, root.id);
         for member in ["member-a", "member-b"] {
-            assert!(list_document_folders_scoped_on(&c, member).unwrap().iter().any(|folder| folder.id == ORGANIZATION_LIBRARY_ID));
+            assert!(list_document_folders_scoped_on(&c, member)
+                .unwrap()
+                .iter()
+                .any(|folder| folder.id == ORGANIZATION_LIBRARY_ID));
         }
-        assert!(!list_document_folders_scoped_on(&c, "former").unwrap().iter().any(|folder| folder.id == ORGANIZATION_LIBRARY_ID));
+        assert!(!list_document_folders_scoped_on(&c, "former")
+            .unwrap()
+            .iter()
+            .any(|folder| folder.id == ORGANIZATION_LIBRARY_ID));
     }
 
     /// A knowledge-base book is navigable to the profile that owns an article inside it,
@@ -3572,6 +3629,36 @@ mod tests {
     // ---- sheets ---------------------------------------------------------------
 
     const GRID: &str = r#"{"columns":[{"id":"c1","label":"Vendor","type":"text"},{"id":"c2","label":"Amount","type":"number"}],"rows":[{"id":"r1","cells":{"c1":"Contoso","c2":"120"}}]}"#;
+    #[test]
+    fn sheet_v2_validation_accepts_contract_and_refuses_each_limit() {
+        let valid = r#"{"columns":[{"id":"text","label":"Text","type":"text","aggregate":"none"},{"id":"number","label":"Number","type":"number","aggregate":"sum"},{"id":"date","label":"Date","type":"date"},{"id":"person","label":"Person","type":"person"},{"id":"formula","label":"Formula","type":"formula","formula":"[Number] * 2","aggregate":"avg"}],"rows":[{"id":"r1","cells":{"text":"hello","number":"2","date":"2026-01-01","person":"ada"}}]}"#;
+        assert!(validate_sheet_body(valid).is_ok());
+        for invalid in [
+            r#"{"columns":[{"id":"f","label":"F","type":"formula"}],"rows":[]}"#,
+            r#"{"columns":[{"id":"f","label":"F","type":"formula","formula":""}],"rows":[]}"#,
+            r#"{"columns":[{"id":"t","label":"T","type":"text","formula":"1"}],"rows":[]}"#,
+            r#"{"columns":[{"id":"f","label":"F","type":"formula","formula":7}],"rows":[]}"#,
+            r#"{"columns":[{"id":"t","label":"T","type":"text","aggregate":"total"}],"rows":[]}"#,
+            r#"{"columns":[{"id":"f","label":"F","type":"formula","formula":"1"}],"rows":[{"id":"r","cells":{"f":"1"}}]}"#,
+        ] {
+            assert!(validate_sheet_body(invalid).is_err(), "accepted {invalid}");
+        }
+        let long_formula = format!(
+            r#"{{"columns":[{{"id":"f","label":"F","type":"formula","formula":"{}"}}],"rows":[]}}"#,
+            "x".repeat(MAX_FORMULA_LEN + 1)
+        );
+        assert!(validate_sheet_body(&long_formula).is_err());
+        let columns = (0..=MAX_SHEET_COLUMNS)
+            .map(|i| format!(r#"{{"id":"c{i}","label":"C","type":"text"}}"#))
+            .collect::<Vec<_>>()
+            .join(",");
+        assert!(validate_sheet_body(&format!(r#"{{"columns":[{columns}],"rows":[]}}"#)).is_err());
+        let rows = (0..=MAX_SHEET_ROWS)
+            .map(|i| format!(r#"{{"id":"r{i}","cells":{{}}}}"#))
+            .collect::<Vec<_>>()
+            .join(",");
+        assert!(validate_sheet_body(&format!(r#"{{"columns":[],"rows":[{rows}]}}"#)).is_err());
+    }
 
     #[test]
     fn a_database_written_before_sheets_keeps_its_documents_and_gains_markdown() {

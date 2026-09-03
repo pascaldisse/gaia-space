@@ -1,4 +1,4 @@
-import { createSignal, For, Show, onCleanup, type JSX } from "solid-js";
+import { createResource, createSignal, For, Show, onCleanup, type JSX } from "solid-js";
 import {
   newColumnId,
   newRowId,
@@ -6,7 +6,9 @@ import {
   type SheetColumnType,
   type SheetDoc,
   type SheetRow,
+documentsApi,
 } from "../api/documents";
+import { evaluateSheet } from "../sheetFormula";
 import "./SheetEditor.css";
 
 /** ── WHY THIS EXISTS ────────────────────────────────────────────────────────
@@ -30,6 +32,7 @@ export type SheetEditorProps = {
   sheet: SheetDoc;
   onChange: (sheet: SheetDoc) => void;
   disabled?: boolean;
+lockedColumnIds?: string[];
 };
 
 export const cellLabel = (column: SheetColumn, rowIndex: number) => `${column.label || "Column"} row ${rowIndex + 1}`;
@@ -39,7 +42,10 @@ const COLUMN_TYPES: { value: SheetColumnType; label: string }[] = [
   { value: "text", label: "Text" },
   { value: "number", label: "Number" },
   { value: "date", label: "Date" },
+{ value: "person", label: "Person" },
+{ value: "formula", label: "Formula" },
 ];
+const AGGREGATES = ["none", "sum", "avg", "min", "max", "count"] as const;
 
 export function emptyRow(): SheetRow {
   return { id: newRowId(), cells: {} };
@@ -52,6 +58,12 @@ export function emptyColumn(index: number): SheetColumn {
 export default function SheetEditor(props: SheetEditorProps): JSX.Element {
   let grid: HTMLDivElement | undefined;
   const [openColumn, setOpenColumn] = createSignal<string | null>(null);
+const [profiles] = createResource(
+() => props.sheet.columns.some((column) => column.type === "person") ? "profiles" : null,
+() => documentsApi.listProfiles(),
+);
+const computed = () => evaluateSheet(props.sheet);
+const isLocked = (columnId: string) => props.lockedColumnIds?.includes(columnId) ?? false;
 
   /** Clicking anywhere else is an answer too: the menu closes without a verdict. */
   const onDocumentPointerDown = (event: MouseEvent) => {
@@ -79,10 +91,10 @@ export default function SheetEditor(props: SheetEditorProps): JSX.Element {
   const emit = (sheet: SheetDoc) => props.onChange(sheet);
 
   function focusCell(rowId: string, columnId: string) {
-    const target = grid?.querySelector<HTMLInputElement>(`[data-cell="${cellKey(rowId, columnId)}"]`);
+    const target = grid?.querySelector<HTMLElement>(`[data-cell="${cellKey(rowId, columnId)}"]`);
     if (!target) return;
     target.focus();
-    target.select();
+    if (target instanceof HTMLInputElement) target.select();
   }
 
   function setCell(rowId: string, columnId: string, value: string) {
@@ -97,7 +109,19 @@ export default function SheetEditor(props: SheetEditorProps): JSX.Element {
   }
 
   function retypeColumn(columnId: string, type: SheetColumnType) {
-    emit({ ...props.sheet, columns: columns().map((c) => (c.id === columnId ? { ...c, type } : c)) });
+    if (isLocked(columnId)) return;
+    emit({
+      ...props.sheet,
+      columns: columns().map((c) => (c.id === columnId
+        ? { ...c, type, ...(type === "formula" ? { formula: c.formula ?? "0" } : {}) }
+        : c)),
+    });
+  }
+  function setFormula(columnId: string, formula: string) {
+    emit({ ...props.sheet, columns: columns().map((c) => (c.id === columnId ? { ...c, formula } : c)) });
+  }
+  function setAggregate(columnId: string, aggregate: SheetColumn["aggregate"]) {
+    emit({ ...props.sheet, columns: columns().map((c) => (c.id === columnId ? { ...c, aggregate } : c)) });
   }
 
   function addColumn() {
@@ -107,6 +131,7 @@ export default function SheetEditor(props: SheetEditorProps): JSX.Element {
   /** Deleting a column deletes its values with it — nothing is left addressing a
    *  column that no longer exists, which the server would refuse anyway. */
   function removeColumn(columnId: string) {
+    if (isLocked(columnId)) return;
     const remaining = columns().filter((c) => c.id !== columnId);
     emit({
       columns: remaining,
@@ -215,23 +240,22 @@ export default function SheetEditor(props: SheetEditorProps): JSX.Element {
                             ref={(el) => setTimeout(() => { el.focus(); el.select(); }, 0)}
                             onInput={(event) => renameColumn(column.id, event.currentTarget.value)}
                           />
-                          <select
-                            class="sheet-column-type"
-                            aria-label={`Column ${columnIndex() + 1} type`}
-                            value={column.type}
-                            onChange={(event) => retypeColumn(column.id, event.currentTarget.value as SheetColumnType)}
-                          >
-                            <For each={COLUMN_TYPES}>{(option) => <option value={option.value}>{option.label}</option>}</For>
+                          <Show when={!isLocked(column.id)}>
+                            <select class="sheet-column-type" aria-label={`Column ${columnIndex() + 1} type`} value={column.type} onChange={(event) => retypeColumn(column.id, event.currentTarget.value as SheetColumnType)}>
+                              <For each={COLUMN_TYPES}>{(option) => <option value={option.value}>{option.label}</option>}</For>
+                            </select>
+                          </Show>
+                          <Show when={column.type === "formula"}>
+                            <textarea class="sheet-column-formula" aria-label={`Column ${columnIndex() + 1} formula`} value={column.formula ?? ""} onInput={(event) => setFormula(column.id, event.currentTarget.value)} />
+                          </Show>
+                          <select class="sheet-column-aggregate" aria-label={`Column ${columnIndex() + 1} aggregate`} value={column.aggregate ?? "none"} onChange={(event) => setAggregate(column.id, event.currentTarget.value as SheetColumn["aggregate"])}>
+                            <For each={AGGREGATES}>{(aggregate) => <option value={aggregate}>{aggregate}</option>}</For>
                           </select>
-                          <button
-                            type="button"
-                            class="ghost small sheet-column-delete"
-                            aria-label={`Delete column ${columnIndex() + 1}`}
-                            disabled={columns().length <= 1}
-                            onClick={() => { removeColumn(column.id); setOpenColumn(null); }}
-                          >
-                            Delete column
-                          </button>
+                          <Show when={!isLocked(column.id)}>
+                            <button type="button" class="ghost small sheet-column-delete" aria-label={`Delete column ${columnIndex() + 1}`} disabled={columns().length <= 1} onClick={() => { removeColumn(column.id); setOpenColumn(null); }}>
+                              Delete column
+                            </button>
+                          </Show>
                         </div>
                       </Show>
                     </div>
@@ -253,16 +277,11 @@ export default function SheetEditor(props: SheetEditorProps): JSX.Element {
                   <For each={columns()}>
                     {(column, columnIndex) => (
                       <td>
-                        <input
-                          class="sheet-cell"
-                          data-cell={cellKey(row.id, column.id)}
-                          aria-label={cellLabel(column, rowIndex())}
-                          type={column.type === "date" ? "date" : column.type === "number" ? "number" : "text"}
-                          value={row.cells[column.id] ?? ""}
-                          disabled={props.disabled}
-                          onInput={(event) => setCell(row.id, column.id, event.currentTarget.value)}
-                          onKeyDown={(event) => onCellKeyDown(event, rowIndex(), columnIndex())}
-                        />
+                        <Show when={column.type === "formula"} fallback={<Show when={column.type === "person"} fallback={<input class="sheet-cell" data-cell={cellKey(row.id, column.id)} aria-label={cellLabel(column, rowIndex())} type={column.type === "date" ? "date" : column.type === "number" ? "number" : "text"} value={row.cells[column.id] ?? ""} disabled={props.disabled} onInput={(event) => setCell(row.id, column.id, event.currentTarget.value)} onKeyDown={(event) => onCellKeyDown(event, rowIndex(), columnIndex())} />}>
+                          <select class="sheet-cell" data-cell={cellKey(row.id, column.id)} aria-label={cellLabel(column, rowIndex())} value={row.cells[column.id] ?? ""} disabled={props.disabled} onChange={(event) => setCell(row.id, column.id, event.currentTarget.value)} onKeyDown={(event) => onCellKeyDown(event, rowIndex(), columnIndex())}><option value="">—</option><For each={profiles() ?? []}>{(profile) => <option value={profile.id}>{profile.display_name || profile.username}</option>}</For></select>
+                        </Show>}>
+                          <span class="sheet-formula-cell" data-cell={cellKey(row.id, column.id)} aria-label={cellLabel(column, rowIndex())} tabindex="0" onKeyDown={(event) => onCellKeyDown(event, rowIndex(), columnIndex())}>{computed().cells[row.id]?.[column.id] ?? "#ERR"}</span>
+                        </Show>
                       </td>
                     )}
                   </For>
@@ -281,6 +300,9 @@ export default function SheetEditor(props: SheetEditorProps): JSX.Element {
               )}
             </For>
           </tbody>
+          <Show when={columns().some((column) => (column.aggregate ?? "none") !== "none")}>
+            <tfoot><tr><th class="sheet-gutter" scope="row">Σ</th><For each={columns()}>{(column) => <td class="sheet-aggregate-cell">{computed().aggregates[column.id] ?? ""}</td>}</For><td /></tr></tfoot>
+          </Show>
         </table>
       </div>
       <div class="sheet-foot">
