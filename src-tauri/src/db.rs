@@ -1231,9 +1231,7 @@ pub(crate) const SCHEMA_V98: &str = r#"
 CREATE TABLE IF NOT EXISTS profile_email_statuses (profile_id TEXT PRIMARY KEY REFERENCES profiles(id) ON DELETE CASCADE, status TEXT NOT NULL DEFAULT 'unverified' CHECK(status IN ('unverified','verified','bounced')), verified_at INTEGER);
 CREATE TABLE IF NOT EXISTS profile_messenger_contacts (id TEXT PRIMARY KEY, profile_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE, contact_type TEXT NOT NULL, login TEXT NOT NULL, deep_link TEXT, UNIQUE(profile_id,contact_type,login));
 "#;
-/// V99: durable principal identity abstraction.
-/// V130: per-profile document favourites (pointer rows, cascade with both sides).
-
+/// V141: durable hosted Git repository metadata.
 pub(crate) const SCHEMA_V141: &str = r#"
 CREATE TABLE IF NOT EXISTS hosted_repositories (
  id TEXT PRIMARY KEY,
@@ -1247,6 +1245,7 @@ CREATE TABLE IF NOT EXISTS hosted_repositories (
 );
 CREATE INDEX IF NOT EXISTS hosted_repositories_project ON hosted_repositories(project_id, name);
 "#;
+/// V130: per-profile document favourites (pointer rows, cascade with both sides).
 pub(crate) const SCHEMA_V130: &str = r#"
 CREATE TABLE IF NOT EXISTS document_favorites (
   profile_id  TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
@@ -1273,6 +1272,7 @@ CREATE INDEX IF NOT EXISTS applications_owner_profile ON applications(owner_prof
 CREATE INDEX IF NOT EXISTS applications_owner_application ON applications(owner_application_id);
 "#;
 
+/// V99: durable principal identity abstraction.
 pub(crate) const SCHEMA_V99: &str = r#"
 CREATE TABLE IF NOT EXISTS principals (id TEXT PRIMARY KEY, kind TEXT NOT NULL CHECK(kind IN ('profile','application','external')), profile_id TEXT REFERENCES profiles(id) ON DELETE CASCADE, label TEXT NOT NULL, UNIQUE(profile_id));
 INSERT OR IGNORE INTO principals(id,kind,profile_id,label) SELECT 'profile:'||id,'profile',id,display_name FROM profiles;
