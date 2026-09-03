@@ -278,9 +278,9 @@
 .ref-badge.ref-tag { border-color: var(--attn-amber, #f0a742); color: var(--attn-amber-text, var(--attn-amber)); }
 
 /* ── COMMIT GRAPH (center pane, "All Commits") ──────────────────────────────
-   One flex row per commit: SVG lane column, then summary/author/sha/date —
-   exactly the column set the spec asks for. The SVG itself only turns the
-   already-computed lanes (`gitGraph.ts`) into pixels; no layout math lives here. */
+   One flex row per commit: SVG lane column, flexible summary/ref badges, then
+   fixed SHA/date. The SVG itself only turns the already-computed lanes
+   (`gitGraph.ts`) into pixels; no layout math lives here. */
 .graph-table { flex: 1; overflow-y: auto; }
 .graph-row {
   display: flex;
@@ -295,26 +295,23 @@
 .graph-row.active { background: var(--accent-soft); }
 .graph-cell { flex-shrink: 0; display: block; }
 .graph-summary {
-  flex: 1;
+  flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.graph-author {
-  color: var(--text-muted, #7a7a7a);
-  font-size: 0.85em;
-  max-width: 14ch;
+.graph-sha {
+  flex: 0 0 8ch;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-.graph-sha {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   color: var(--text-muted, #7a7a7a);
   font-size: 0.82em;
 }
 .graph-date {
+  flex: 0 0 6ch;
   color: var(--text-faint, #5a6478);
   font-size: 0.82em;
   white-space: nowrap;

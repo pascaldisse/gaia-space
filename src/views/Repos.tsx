@@ -97,8 +97,8 @@ function Group(props: { title: string; count: number; open: boolean; onToggle: (
   );
 }
 
-/** One row of the commit graph: the SVG lane column, then summary/author/sha/date.
- *  Pure render over an already-computed `LaneNode` — all the graph MATH lives in
+/** One row of the commit graph: the SVG lane column, flexible summary/ref badges,
+ *  then fixed-width SHA/date. Pure render over an already-computed `LaneNode` — all the graph MATH lives in
  *  `gitGraph.ts` and is unit-tested there; this only turns lanes into pixels. */
 function GraphRow(props: {
   commit: Commit;
@@ -149,7 +149,6 @@ function GraphRow(props: {
         <For each={props.refs}>{(r) => <span class={`ref-badge ref-${r.kind}`}>{r.label}</span>}</For>
         {props.commit.summary || "(no summary)"}
       </span>
-      <span class="graph-author">{props.commit.author}</span>
       <span class="graph-sha">{props.commit.short_id}</span>
       <span class="graph-date" title={when(props.commit.time)}>{relativeTime(props.commit.time)}</span>
     </div>
@@ -577,7 +576,7 @@ export default function App() {
                 </button>
               </div>
 
-              <QuietSearch label="Filter commits and branches" placeholder="Filter\u2026" value={filter()} onInput={setFilter} class="side-filter" />
+              <QuietSearch label="Filter commits and branches" placeholder="Filter…" value={filter()} onInput={setFilter} class="side-filter" />
 
               <Group title="Branches" count={localBranches().length} open={groupsOpen().branches} onToggle={() => toggleGroup("branches")}>
                 <ul class="ref-list">
