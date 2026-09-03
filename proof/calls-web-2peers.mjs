@@ -4,6 +4,7 @@ import { chromium } from "playwright";
 const configPath = process.env.SPACE_PROOF_CONFIG ?? "/Users/pascaldisse/projects/gaia-space/bridge/room-link/config.json";
 const config = await Bun.file(configPath).json();
 const base = config.space.baseUrl.replace(/\/$/, "");
+const bundleHash = process.env.SPACE_PROOF_BUNDLE_HASH ?? "not-recorded";
 const aToken = config.space.personalAccessToken;
 if (!aToken) throw new Error("space.personalAccessToken is required");
 const suffix = `${Date.now()}-${crypto.randomUUID().slice(0, 8)}`;
@@ -82,13 +83,13 @@ const inspect = page => page.evaluate(async () => {
     const local = item.get(stat.localCandidateId); const remote = item.get(stat.remoteCandidateId);
     ice.push({ local: local?.candidateType ?? null, remote: remote?.candidateType ?? null, protocol: local?.protocol ?? null });
   }
-  const videos = [...document.querySelectorAll("video")].map(video => ({ muted: video.muted, srcObject: !!video.srcObject, readyState: video.readyState, videoWidth: video.videoWidth, videoHeight: video.videoHeight, paused: video.paused }));
+  const videos = [...document.querySelectorAll("video")].map(video => ({ remote: !video.closest(".call-tile")?.getAttribute("aria-label")?.includes(", you"), muted: video.muted, srcObject: !!video.srcObject, readyState: video.readyState, videoWidth: video.videoWidth, videoHeight: video.videoHeight, paused: video.paused }));
   return {
     state: document.querySelector("[data-call-state]")?.textContent?.trim() ?? null,
     participants: document.querySelectorAll(".call-tile").length,
     tiles: [...document.querySelectorAll(".call-tile")].map(x => x.getAttribute("aria-label")),
     videos,
-    remoteVideos: videos.filter(video => !video.muted),
+    remoteVideos: videos.filter(video => video.remote),
     media,
     ws: (window.__callsProofWebSockets ?? []).map(({ url, opened, errors, closes }) => ({ url: url.replace(/\?.*$/, ""), opened, errors, closes })),
     ice,
@@ -142,7 +143,7 @@ try {
     const first = samples[side][0]; const last = samples[side].at(-1);
     return last.media.video.inbound.framesDecoded > first.media.video.inbound.framesDecoded && last.media.video.inbound.framesDecoded > 0 && last.remoteVideos.some(video => video.videoWidth > 0 && video.videoHeight > 0);
   });
-  await appendFile("proof/calls-web-2peers.txt", [`\n## MEDIA run — ${new Date().toISOString()}`, `base: ${base}`, `direct_meeting_url: ${detailUrl}`, `meeting_id: ${meetingId}`, "launch: chromium headless=true --use-fake-ui-for-media-stream --use-fake-device-for-media-stream --autoplay-policy=no-user-gesture-required", `A_samples: ${JSON.stringify(samples.a)}`, `B_samples: ${JSON.stringify(samples.b)}`, "screenshots_fullpage: proof/calls-web-2peers-a.png, proof/calls-web-2peers-b.png", "screenshots_tiles: proof/calls-web-2peers-a-tiles.png, proof/calls-web-2peers-b-tiles.png", `verdict: ${valid ? "VERIFIED" : "UNVERIFIED"}`, ""].join("\n"));
+  await appendFile("proof/calls-web-2peers.txt", [`\n## MEDIA run — ${new Date().toISOString()}`, `base: ${base}`, `bundle_hash: ${bundleHash}`, `direct_meeting_url: ${detailUrl}`, `meeting_id: ${meetingId}`, "launch: chromium headless=true --use-fake-ui-for-media-stream --use-fake-device-for-media-stream --autoplay-policy=no-user-gesture-required", `A_samples: ${JSON.stringify(samples.a)}`, `B_samples: ${JSON.stringify(samples.b)}`, "screenshots_fullpage: proof/calls-web-2peers-a.png, proof/calls-web-2peers-b.png", "screenshots_tiles: proof/calls-web-2peers-a-tiles.png, proof/calls-web-2peers-b-tiles.png", `verdict: ${valid ? "VERIFIED" : "UNVERIFIED"}`, ""].join("\n"));
   console.log(JSON.stringify({ meetingId, detailUrl, samples, verdict: valid ? "VERIFIED" : "UNVERIFIED" }, null, 2));
   if (!valid) process.exitCode = 2;
 } catch (error) {
