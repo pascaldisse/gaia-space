@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 141;
+pub const SCHEMA_VERSION: i64 = 142;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -870,6 +870,15 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     // identical access with or without it (see `platform::Project::lead_id`).
     if version < 132 && table_exists(&tx, "projects")? {
         add_column_if_missing(&tx, "projects", "lead_id", "TEXT REFERENCES profiles(id)")?;
+    }
+    // V142: project visibility gates anonymous hosted Git reads. Existing projects remain private.
+    if version < 142 && table_exists(&tx, "projects")? {
+        add_column_if_missing(
+            &tx,
+            "projects",
+            "visibility",
+            "TEXT NOT NULL DEFAULT 'private' CHECK(visibility IN ('private','public'))",
+        )?;
     }
     // V141: durable hosted Git repository metadata; bare objects live under data_dir/git/.
     if version < 141 && table_exists(&tx, "projects")? {

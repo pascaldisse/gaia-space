@@ -36,6 +36,19 @@ fn git_http_name(value: &str) -> bool {
     gaia_space_lib::git_hosting::valid_name(value)
 }
 
+fn hosted_project_public(project: &str) -> Result<bool, axum::response::Response> {
+    let conn =
+        db::conn().map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e).into_response())?;
+    conn.query_row(
+        "SELECT visibility='public' FROM projects WHERE id=?1",
+        [project],
+        |r| r.get(0),
+    )
+    .optional()
+    .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response())
+    .map(|value| value.unwrap_or(false))
+}
+
 fn hosted_git_path(project: &str, repo: &str) -> Result<PathBuf, axum::response::Response> {
     if !git_http_name(project) || !git_http_name(repo) {
         return Err(err(StatusCode::BAD_REQUEST, "invalid git repository path").into_response());
@@ -159,11 +172,6 @@ async fn git_info_refs(
     let Some(repo) = path.strip_suffix(".git/info/refs") else {
         return err(StatusCode::NOT_FOUND, "unknown git route").into_response();
     };
-    // Projects have no public visibility field in the current schema; therefore no project
-    // is anonymously readable. This mirrors project_readable rather than inventing a public fallback.
-    if let Err(response) = registry_auth(&headers) {
-        return response;
-    }
     let Some(service) = query
         .get("service")
         .filter(|s| matches!(s.as_str(), "git-upload-pack" | "git-receive-pack"))
@@ -171,8 +179,14 @@ async fn git_info_refs(
         return err(StatusCode::BAD_REQUEST, "invalid git service").into_response();
     };
     let write = service == "git-receive-pack";
-    if write && registry_auth(&headers).is_err() {
-        return err(StatusCode::UNAUTHORIZED, "unauthorized").into_response();
+    let public = match hosted_project_public(&project) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    if write || !public {
+        if let Err(response) = registry_auth(&headers) {
+            return response;
+        }
     }
     let path = match hosted_git_path(&project, &repo) {
         Ok(path) => path,
@@ -204,8 +218,14 @@ async fn git_rpc(
     if !matches!(service.as_str(), "git-upload-pack" | "git-receive-pack") {
         return err(StatusCode::NOT_FOUND, "unknown git service").into_response();
     }
-    if let Err(response) = registry_auth(&headers) {
-        return response;
+    let public = match hosted_project_public(&project) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    if service == "git-receive-pack" || !public {
+        if let Err(response) = registry_auth(&headers) {
+            return response;
+        }
     }
     let path = match hosted_git_path(&project, &repo) {
         Ok(path) => path,
