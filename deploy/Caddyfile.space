@@ -1,4 +1,9 @@
 redir /space /space/ 308
+# Smart-HTTP must reach Space before the SPA catch-all.
+handle /space/git/* {
+	uri strip_prefix /space
+	reverse_proxy 127.0.0.1:8090
+}
 handle /space/api/* {
 	uri strip_prefix /space
 	reverse_proxy 127.0.0.1:8090
