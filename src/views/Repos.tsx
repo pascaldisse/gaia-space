@@ -564,6 +564,35 @@ export default function App() {
         >
           <aside class="sidebar">
             <div class="section-label">Repositories</div>
+              <Group title="HOSTED" count={hostedRepos()?.length ?? 0} open={groupsOpen().hosted} onToggle={() => toggleGroup("hosted")}>
+                <Show when={projects()?.length} fallback={<EmptyState title="No projects" hint="Create a project before creating a hosted repository." />}>
+                  <div class="hosted-project-picker">
+                    <PillSelect label="Hosted repository project" value={hostedProjectId()} onChange={setHostedProjectId}>
+                      <For each={projects()}>{(project) => <option value={project.id}>{project.name}</option>}</For>
+                    </PillSelect>
+                  </div>
+                  <ul class="ref-list hosted-repo-list">
+                    <For each={hostedRepos()} fallback={<li class="hint">No hosted repositories.</li>}>
+                      {(repo) => (
+                        <li class="hosted-repo-row">
+                          <span>{repo.name}</span>
+                          <IconButton label={`Copy clone URL for ${repo.name}`} onClick={() => copyHostedCloneUrl(repo.name)} disabled={!!busy()}>
+                            <Icon name="copy" size={14} />
+                          </IconButton>
+                        </li>
+                      )}
+                    </For>
+                  </ul>
+                  <Show when={newHosted()} fallback={<GhostPill onClick={() => setNewHosted(true)}>New hosted repository…</GhostPill>}>
+                    <form class="hosted-repo-form" onSubmit={createHostedRepo}>
+                      <input aria-label="Hosted repository name" value={hostedName()} onInput={(event) => setHostedName(event.currentTarget.value)} placeholder="Repository name" />
+                      <input aria-label="Default branch" value={hostedBranch()} onInput={(event) => setHostedBranch(event.currentTarget.value)} placeholder="Default branch" />
+                      <GhostPill disabled={!!busy()}>Create</GhostPill>
+                      <IconButton label="Cancel hosted repository" onClick={() => setNewHosted(false)}><Icon name="close" size={12} /></IconButton>
+                    </form>
+                  </Show>
+                </Show>
+              </Group>
             <ul class="repo-list dev-card-list">
               <For each={repos()}>
                 {(r) => (
@@ -614,35 +643,6 @@ export default function App() {
 
               <QuietSearch label="Filter commits and branches" placeholder="Filter…" value={filter()} onInput={setFilter} class="side-filter" />
 
-              <Group title="HOSTED" count={hostedRepos()?.length ?? 0} open={groupsOpen().hosted} onToggle={() => toggleGroup("hosted")}>
-                <Show when={projects()?.length} fallback={<EmptyState title="No projects" hint="Create a project before creating a hosted repository." />}>
-                  <div class="hosted-project-picker">
-                    <PillSelect label="Hosted repository project" value={hostedProjectId()} onChange={setHostedProjectId}>
-                      <For each={projects()}>{(project) => <option value={project.id}>{project.name}</option>}</For>
-                    </PillSelect>
-                  </div>
-                  <ul class="ref-list hosted-repo-list">
-                    <For each={hostedRepos()} fallback={<li class="hint">No hosted repositories.</li>}>
-                      {(repo) => (
-                        <li class="hosted-repo-row">
-                          <span>{repo.name}</span>
-                          <IconButton label={`Copy clone URL for ${repo.name}`} onClick={() => copyHostedCloneUrl(repo.name)} disabled={!!busy()}>
-                            <Icon name="copy" size={14} />
-                          </IconButton>
-                        </li>
-                      )}
-                    </For>
-                  </ul>
-                  <Show when={newHosted()} fallback={<GhostPill onClick={() => setNewHosted(true)}>New hosted repository…</GhostPill>}>
-                    <form class="hosted-repo-form" onSubmit={createHostedRepo}>
-                      <input aria-label="Hosted repository name" value={hostedName()} onInput={(event) => setHostedName(event.currentTarget.value)} placeholder="Repository name" />
-                      <input aria-label="Default branch" value={hostedBranch()} onInput={(event) => setHostedBranch(event.currentTarget.value)} placeholder="Default branch" />
-                      <GhostPill disabled={!!busy()}>Create</GhostPill>
-                      <IconButton label="Cancel hosted repository" onClick={() => setNewHosted(false)}><Icon name="close" size={12} /></IconButton>
-                    </form>
-                  </Show>
-                </Show>
-              </Group>
               <Group title="Branches" count={localBranches().length} open={groupsOpen().branches} onToggle={() => toggleGroup("branches")}>
                 <ul class="ref-list">
                   <For each={localBranches().filter((b) => matchesFilter(b.name))} fallback={<li class="hint">No branches.</li>}>
