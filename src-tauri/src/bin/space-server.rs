@@ -6644,6 +6644,9 @@ mod tests {
         setup();
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
+        // Accept the probe: CI's TCP backlog is not a LiveKit server, but it must
+        // answer the exact reachability check the production join path performs.
+        let probe = std::thread::spawn(move || listener.accept().unwrap());
         std::env::set_var("LIVEKIT_HOST", "127.0.0.1");
         std::env::set_var("LIVEKIT_PORT", port.to_string());
         std::env::set_var(
@@ -6693,7 +6696,7 @@ mod tests {
         std::env::remove_var("LIVEKIT_HOST");
         std::env::remove_var("LIVEKIT_PORT");
         std::env::remove_var("LIVEKIT_PUBLIC_URL");
-        drop(listener);
+        let _ = probe.join();
     }
     #[tokio::test]
     async fn permanent_tokens_are_minted_listed_and_owner_revocable_over_http() {
