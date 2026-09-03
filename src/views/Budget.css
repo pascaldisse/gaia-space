@@ -1,0 +1,16 @@
+/* Budget keeps the document and sheet vocabulary; these rules only arrange its panels. */
+.budget-view { display: grid; gap: 1rem; }
+.budget-view h2, .budget-view h3 { margin: 0 0 .65rem; }
+.budget-quick-add-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); gap: .7rem; }
+.budget-view label { display: grid; gap: .25rem; }
+.budget-split { margin: .8rem 0; border: 0; padding: 0; display: grid; gap: .4rem; }
+.budget-split > label, .budget-member-picks label { display: flex; align-items: center; gap: .35rem; }
+.budget-member-picks { display: flex; flex-wrap: wrap; gap: .6rem; }
+.budget-members ul, .budget-transfers { list-style: none; margin: 0 0 .65rem; padding: 0; display: grid; gap: .35rem; }
+.budget-members li { display: flex; justify-content: space-between; align-items: center; gap: .75rem; }
+.budget-members > div { display: flex; gap: .5rem; }
+.budget-statement-head { display: flex; justify-content: space-between; align-items: start; gap: 1rem; }
+.budget-statement-table { width: 100%; border-collapse: collapse; margin: .6rem 0; }
+.budget-statement-table th, .budget-statement-table td { padding: .4rem; text-align: right; border-bottom: 1px solid var(--border, #ddd); }
+.budget-statement-table th:first-child { text-align: left; }
+@media (max-width: 36rem) { .budget-statement-head { display: grid; } }

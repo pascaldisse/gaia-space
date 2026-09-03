@@ -35,10 +35,10 @@ export type DocumentBodyFormat = "text" | "rich-text" | "checklist" | "code";
 
 /** What a document IS, not how its text is styled: prose or a grid.
  *  Older rows carry no kind at all and read back as "markdown" (see documents.rs). */
-export type DocKind = "markdown" | "sheet";
+export type DocKind = "markdown" | "sheet" | "budget";
 
 /** The single question the create form asks: prose in one of its flavours, or a table. */
-export type DocumentCreateType = DocumentBodyFormat | "sheet";
+export type DocumentCreateType = DocumentBodyFormat | "sheet" | "budget";
 
 export type SheetColumnType = "text" | "number" | "date" | "person" | "formula";
 export type SheetAggregate = "sum" | "avg" | "min" | "max" | "count" | "none";

@@ -80,6 +80,7 @@ export default function DocumentCreateDrawer(props: DocumentCreateDrawerProps): 
                   { value: "checklist", label: "Checklist" },
                   { value: "code", label: "Code" },
                   { value: "sheet", label: "Table" },
+                  { value: "budget", label: "Budget" },
                 ]}
               />
             </div>
