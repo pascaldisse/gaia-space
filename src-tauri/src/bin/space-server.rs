@@ -11557,12 +11557,11 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::OK, "{added}");
-        assert_eq!(
+        assert!(
             added["value"]["body"]
                 .as_str()
                 .unwrap()
                 .contains("\"paid_by\":\"pa\""),
-            true,
             "the actor is session-bound"
         );
     }
