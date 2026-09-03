@@ -109,7 +109,7 @@ export default function Budget(props: BudgetProps): JSX.Element {
       <p class="hint">Member changes save with the document’s Save version button.</p>
     </section>
 
-    <section class="budget-grid" aria-label="Budget grid">
+    <section class="budget-grid" aria-label="Budget grid" data-locked-column-ids={BUDGET_COLUMNS.map((column) => column.id).join(",")}>
       <SheetEditor sheet={props.budget as unknown as SheetDoc} onChange={(sheet) => props.onChange({ ...props.budget, ...(sheet as unknown as Pick<BudgetDoc, "columns" | "rows">) })} disabled={props.disabled} lockedColumnIds={BUDGET_COLUMNS.map((column) => column.id)} />
     </section>
 
