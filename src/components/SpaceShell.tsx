@@ -12,7 +12,6 @@ import { actingProfileId as chatActingProfileId, bumpChannels, channelsVersion, 
 import { dmLabel, partitionChannels } from "../chatPartition";
 import { chatApi, newId as newMessageId, type ChannelSummary } from "../api/chat";
 import { setSelectedChannel } from "../chatChannelSelection";
-import { personalApi } from "../api/personal";
 import { documentsApi, ORGANIZATION_LIBRARY_ID } from "../api/documents";
 import { platformApi } from "../api/platform";
 import { currentUser, isWeb, profileId, profiles, reloadProfiles, projects, reloadProjects, workspaceId, workspaces } from "../session";
@@ -275,22 +274,6 @@ const [mobileSidebarOpen, setMobileSidebarOpen] = createSignal(false);
         archived: false,
       });
       setDropNote(`Shared “${document.title}” in ${channel.name ?? "the conversation"}`);
-      setTimeout(() => setDropNote(""), 4000);
-    } catch (reason) {
-      setChannelError(String(reason));
-    }
-  };
-
-  /** A task dropped on a project joins it — the same gesture as a document onto a
-   *  shelf. Only the task's OWNER may re-file it; the server refuses anyone else, and
-   *  the refusal is shown rather than swallowed. */
-  const fileTaskIntoProject = async (taskId: string, projectId: string, projectName: string) => {
-    try {
-      const mine = await personalApi.todos(actingProfileId() ?? "", true);
-      const task = mine.find((row) => row.id === taskId);
-      if (!task || task.project_id === projectId) return;
-      await personalApi.updateTodo({ ...task, project_id: projectId });
-      setDropNote(`“${task.content}” now belongs to ${projectName}`);
       setTimeout(() => setDropNote(""), 4000);
     } catch (reason) {
       setChannelError(String(reason));

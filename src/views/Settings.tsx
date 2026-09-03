@@ -3,7 +3,7 @@ import { For, Show, createResource, createSignal } from "solid-js";
 import { editSavedServer } from "../components/ServerConnect";
 import { Icon } from "../components/Icon";
 import { isMobileServer, openServerSetup } from "../mobile";
-import { NAV_GROUPS, defaultView, hiddenGroups, mobileNavPlacement, navLayout, navPlacement, setDefaultView, setMobileNavPlacement, setNavLayout, setNavPlacement, setShowDevelopment, showDevelopment, toggleGroup } from "../nav";
+import { NAV_GROUPS, defaultView, hiddenGroups, mobileNavPlacement, navLayout, navPlacement, setDefaultView, setMobileNavPlacement, setNavLayout, setNavPlacement, setShowDevelopment, showDevelopment, toggleGroup, type MobileNavPlacement, type NavPlacement } from "../nav";
 import { calendarFeedsApi, calendarsApi } from "../api/calendar-feeds";
 import { permanentTokensApi, twoFactorApi } from "../api/auth";
 import { platformApi } from "../api/platform";
@@ -125,8 +125,8 @@ export default function Settings() {
       <h2>Navigation</h2>
       <p class="settings-hint">Choose where the desktop rail and phone tab bar sit.</p>
       <div class="settings-nav-pickers">
-        <PillSelect label="Desktop rail" value={navPlacement()} onChange={setNavPlacement}><option value="left">Left</option><option value="right">Right</option><option value="top">Top</option><option value="bottom">Bottom</option></PillSelect>
-        <PillSelect label="Mobile tab bar" value={mobileNavPlacement()} onChange={setMobileNavPlacement}><option value="bottom">Bottom</option><option value="top">Top</option></PillSelect>
+        <PillSelect label="Desktop rail" value={navPlacement()} onChange={value => setNavPlacement(value as NavPlacement)}><option value="left">Left</option><option value="right">Right</option><option value="top">Top</option><option value="bottom">Bottom</option></PillSelect>
+        <PillSelect label="Mobile tab bar" value={mobileNavPlacement()} onChange={value => setMobileNavPlacement(value as MobileNavPlacement)}><option value="bottom">Bottom</option><option value="top">Top</option></PillSelect>
       </div>
       <label class="settings-option"><input type="checkbox" checked={showDevelopment()} onChange={event => setShowDevelopment(event.currentTarget.checked)} /><span><strong>Show Development in desktop rail</strong><em class="settings-sub">Phone navigation keeps five tabs; Development is in More.</em></span></label>
     </div>
