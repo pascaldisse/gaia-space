@@ -1,0 +1,27 @@
+/** ── PALEBLOOD TOKENS ────────────────────────────────────────────────────
+ *
+ *  SOURCE OF TRUTH: ~/projects/paloptic/client/game/atlas-ui.css `:root`
+ *  (the --atlas-* / --pt-* Bloodborne palette) — values below are copied
+ *  EXACT, not approximated. `--pb-*` is gaia-space's own namespace so this
+ *  file can be dropped into `palettes.css` without colliding with the app's
+ *  existing `--pt-*` brand tokens (Paloptic design-system.css uses --pt-*
+ *  for a different, teal brand — do not confuse the two).
+ *
+ *  RULE: change a value here AND in paloptic's atlas-ui.css together, or the
+ *  two apps' "same palette" claim silently goes false. TODO: hoist both into
+ *  one shared package once a second cross-app token needs this treatment.
+ */
+:root {
+  --pb-ink: #090806;                    /* atlas-ink / --pt-bg */
+  --pb-ink-raised: rgba(13, 12, 9, .92); /* atlas-ink-raised / --pt-surface */
+  --pb-ink-glass: rgba(15, 13, 10, .82); /* atlas-ink-glass */
+  --pb-bone: #ded4bd;                    /* atlas-bone / --pt-text */
+  --pb-parchment: #b9ae97;               /* atlas-parchment / --pt-accent-2 */
+  --pb-muted: #827965;                   /* atlas-muted */
+  --pb-gold: #a9905a;                    /* atlas-gold / --pt-accent */
+  --pb-gold-dim: rgba(169, 144, 90, .42); /* atlas-gold-dim */
+  --pb-gold-faint: rgba(169, 144, 90, .19); /* atlas-gold-faint */
+  --pb-blood: #a82b25;                   /* atlas-blood / --pt-danger */
+  --pb-blood-glow: rgba(168, 43, 37, .38); /* atlas-blood-glow */
+  --pb-frame: 1px solid var(--pb-gold-dim); /* atlas-frame */
+}

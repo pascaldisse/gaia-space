@@ -9,6 +9,9 @@ import "./spaceLightOverrides.css";
 // Typography / control shape / spacing restatement (stage 5a). Imported AFTER
 // the generated colour layer: where both touch a control it must win.
 import "./spaceLightType.css";
+// Cross-app shared token source (see file header) — the pb-* Bloodborne
+// vocabulary, imported before palettes.css so `.palette-paleblood` can read it.
+import "./palettes/paleblood.tokens.css";
 // Palettes LAST: colour-only re-points of the base tokens the three sheets above
 // build on (src/theme.ts). Selector `.palette-x .theme-space-light` outranks them.
 import "./palettes.css";

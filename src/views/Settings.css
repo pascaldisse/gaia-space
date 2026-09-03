@@ -62,5 +62,9 @@
 .palette-swatch.swatch-deep { background: #141414; }
 .palette-swatch.swatch-deep .palette-swatch-rail { background: #05413a; }
 .palette-swatch.swatch-deep .palette-swatch-card { background: #1d1c1b; border: 1px solid #35322e; }
+.palette-swatch.swatch-paleblood { background: #090806; }
+.palette-swatch.swatch-paleblood .palette-swatch-rail { background: #0d0c09; }
+.palette-swatch.swatch-paleblood .palette-swatch-card { background: rgba(13, 12, 9, .92); border: 1px solid rgba(169, 144, 90, .42); }
+.palette-swatch.swatch-paleblood .palette-swatch-accent { background: #a82b25; }
 
 .settings-nav-pickers{display:flex;flex-wrap:wrap;gap:12px}.settings-nav-pickers .picker{flex:1 1 220px}
