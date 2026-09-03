@@ -13,6 +13,7 @@ use crate::db;
 use rusqlite::{Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 type Result<T> = std::result::Result<T, String>;
+type UnreadThreadRow = (String, String, Option<String>, String, String, Option<String>);
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Channel {
@@ -660,14 +661,7 @@ fn list_unread_threads_impl(c: &Connection, profile_id: &str) -> Result<Vec<Unre
              JOIN messages m ON m.id=tc.root_message_id AND m.archived=0",
         )
         .map_err(|e| e.to_string())?;
-    let rows: Vec<(
-        String,
-        String,
-        Option<String>,
-        String,
-        String,
-        Option<String>,
-    )> = s
+    let rows: Vec<UnreadThreadRow> = s
         .query_map([], |r| {
             Ok((
                 r.get(0)?,

@@ -433,31 +433,6 @@ fn update_todo_on(c: &mut Connection, todo: Todo) -> Result<Todo> {
     err(tx.commit())?;
     todo_on(c, &todo.id)?.ok_or_else(|| "Todo not found".into())
 }
-fn visible_project_todos_on(
-    c: &Connection,
-    project_id: Option<&str>,
-    profile_id: &str,
-    include_done: bool,
-) -> Result<Vec<Todo>> {
-    let sql = format!("SELECT {TODO_COLUMNS} FROM todos t WHERE t.project_id IS NOT NULL AND (:project_id IS NULL OR t.project_id=:project_id) AND (:include_done=1 OR t.done=0) AND {PROJECT_TODO_VISIBILITY} ORDER BY t.done,t.due_date IS NULL,t.due_date,t.created_at");
-    let mut statement = err(c.prepare(&sql))?;
-    let mut todos = err(statement.query_map(
-        rusqlite::named_params! {
-            ":project_id": project_id,
-            ":profile_id": profile_id,
-            ":include_done": include_done,
-        },
-        read_todo,
-    ))?
-    .collect::<std::result::Result<Vec<_>, _>>()
-    .map_err(|error| error.to_string())?;
-    drop(statement);
-    for todo in &mut todos {
-        todo.assignee_ids = assignees_on(c, &todo.id)?;
-    }
-    Ok(todos)
-}
-
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_project_todos(
     project_id: String,

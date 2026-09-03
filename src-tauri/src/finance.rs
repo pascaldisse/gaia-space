@@ -942,7 +942,7 @@ fn csv_rows(text: &str) -> Vec<String> {
             current.push('\n');
             current.push_str(line);
         }
-        if quotes % 2 == 0 {
+        if quotes.is_multiple_of(2) {
             rows.push(std::mem::take(&mut current));
             quotes = 0;
         }
