@@ -906,7 +906,7 @@ fn new_delivery_id() -> Result<String> {
 /// after its write without holding a transaction open across the network. The
 /// existing queue/retry path (`retry_webhook_delivery`, the sweeper) does the send.
 /// Returns the delivery IDs created.
-pub(crate) fn enqueue_event(event_type: &str, payload: &serde_json::Value) -> Result<Vec<String>> {
+pub fn enqueue_event(event_type: &str, payload: &serde_json::Value) -> Result<Vec<String>> {
     let body = serde_json::to_string(payload).map_err(|e| e.to_string())?;
     let c = db::conn()?;
     let subscriptions: Vec<(String, Option<String>)> = c

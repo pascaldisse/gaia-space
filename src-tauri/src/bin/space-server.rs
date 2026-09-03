@@ -10,8 +10,8 @@ use axum::{
 };
 use gaia_space_lib::{
     app_rights, applications, blogs, calendar_feeds, calls, channel_feeds, channel_notes, chat,
-    chatbot, db, devenv, documents, events, issues, leads, meetings, oauth, organization,
-    package_registry, payload_dispatch, personal, pipelines, platform, review,
+    chatbot, db, devenv, documents, events, git_hosting, issues, leads, meetings, oauth,
+    organization, package_registry, payload_dispatch, personal, pipelines, platform, review,
 };
 use rand::RngCore;
 use rusqlite::{params, OptionalExtension};
@@ -21,11 +21,261 @@ use sha2::Digest;
 use std::{
     collections::HashMap,
     env,
+    io::Read,
     net::{IpAddr, SocketAddr},
     path::PathBuf,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::process::Command;
+
+/* git smart HTTP */
+
+fn git_http_name(value: &str) -> bool {
+    gaia_space_lib::git_hosting::valid_name(value)
+}
+
+fn hosted_project_public(project: &str) -> Result<bool, axum::response::Response> {
+    let conn =
+        db::conn().map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e).into_response())?;
+    conn.query_row(
+        "SELECT visibility='public' FROM projects WHERE id=?1",
+        [project],
+        |r| r.get(0),
+    )
+    .optional()
+    .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response())
+    .map(|value| value.unwrap_or(false))
+}
+
+fn hosted_git_path(project: &str, repo: &str) -> Result<PathBuf, axum::response::Response> {
+    if !git_http_name(project) || !git_http_name(repo) {
+        return Err(err(StatusCode::BAD_REQUEST, "invalid git repository path").into_response());
+    }
+    let conn =
+        db::conn().map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e).into_response())?;
+    let exists: bool = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM hosted_repositories WHERE project_id=?1 AND name=?2)",
+            params![project, repo],
+            |r| r.get(0),
+        )
+        .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response())?;
+    if !exists {
+        return Err(err(StatusCode::NOT_FOUND, "hosted repository not found").into_response());
+    }
+    gaia_space_lib::git_hosting::hosted_repo_path(
+        &db::data_dir().map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e).into_response())?,
+        project,
+        repo,
+    )
+    .map_err(|e| err(StatusCode::BAD_REQUEST, &e).into_response())
+}
+
+async fn git_service(
+    repo: &std::path::Path,
+    service: &str,
+    advertise: bool,
+    input: Vec<u8>,
+) -> Result<Vec<u8>, axum::response::Response> {
+    let executable = match service {
+        "git-upload-pack" => "upload-pack",
+        "git-receive-pack" => "receive-pack",
+        _ => return Err(err(StatusCode::BAD_REQUEST, "invalid git service").into_response()),
+    };
+    let mut command = Command::new("git");
+    command.arg(executable).arg("--stateless-rpc");
+    if advertise {
+        command.arg("--advertise-refs");
+    }
+    command
+        .arg(repo)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped());
+    let mut child = command.spawn().map_err(|e| {
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            &format!("start git {executable}: {e}"),
+        )
+        .into_response()
+    })?;
+    let mut stdin = child.stdin.take().ok_or_else(|| {
+        err(StatusCode::INTERNAL_SERVER_ERROR, "git stdin unavailable").into_response()
+    })?;
+    let writer = tokio::spawn(async move { stdin.write_all(&input).await });
+    let mut stdout = child.stdout.take().ok_or_else(|| {
+        err(StatusCode::INTERNAL_SERVER_ERROR, "git stdout unavailable").into_response()
+    })?;
+    let mut output = Vec::new();
+    stdout
+        .read_to_end(&mut output)
+        .await
+        .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response())?;
+    writer
+        .await
+        .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response())?
+        .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response())?;
+    let status = child
+        .wait()
+        .await
+        .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response())?;
+    if !status.success() {
+        return Err(err(
+            StatusCode::BAD_GATEWAY,
+            &format!("git {executable} failed: {status}"),
+        )
+        .into_response());
+    }
+    Ok(output)
+}
+
+fn git_request_body(headers: &HeaderMap, body: Bytes) -> Result<Vec<u8>, axum::response::Response> {
+    if headers
+        .get(header::CONTENT_ENCODING)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v.eq_ignore_ascii_case("gzip"))
+    {
+        let mut output = Vec::new();
+        flate2::read::GzDecoder::new(body.as_ref())
+            .read_to_end(&mut output)
+            .map_err(|e| {
+                err(
+                    StatusCode::BAD_REQUEST,
+                    &format!("invalid gzip Git request: {e}"),
+                )
+                .into_response()
+            })?;
+        Ok(output)
+    } else {
+        Ok(body.to_vec())
+    }
+}
+
+fn git_response(content_type: String, bytes: Vec<u8>) -> axum::response::Response {
+    (
+        [(
+            header::CONTENT_TYPE,
+            HeaderValue::from_str(&content_type)
+                .unwrap_or(HeaderValue::from_static("application/octet-stream")),
+        )],
+        bytes,
+    )
+        .into_response()
+}
+
+async fn git_info_refs(
+    headers: HeaderMap,
+    Path((project, path)): Path<(String, String)>,
+    Query(query): Query<HashMap<String, String>>,
+) -> axum::response::Response {
+    let Some(repo) = path.strip_suffix(".git/info/refs") else {
+        return err(StatusCode::NOT_FOUND, "unknown git route").into_response();
+    };
+    let Some(service) = query
+        .get("service")
+        .filter(|s| matches!(s.as_str(), "git-upload-pack" | "git-receive-pack"))
+    else {
+        return err(StatusCode::BAD_REQUEST, "invalid git service").into_response();
+    };
+    let write = service == "git-receive-pack";
+    let public = match hosted_project_public(&project) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    if write || !public {
+        if let Err(response) = registry_auth(&headers) {
+            return response;
+        }
+    }
+    let path = match hosted_git_path(&project, &repo) {
+        Ok(path) => path,
+        Err(response) => return response,
+    };
+    match git_service(&path, service, true, Vec::new()).await {
+        Ok(mut advertised) => {
+            let mut body =
+                format!("{:04x}# service={}\n0000", service.len() + 15, service).into_bytes();
+            body.append(&mut advertised);
+            git_response(format!("application/x-{service}-advertisement"), body)
+        }
+        Err(response) => response,
+    }
+}
+
+async fn git_rpc(
+    headers: HeaderMap,
+    Path((project, path)): Path<(String, String)>,
+    body: Bytes,
+) -> axum::response::Response {
+    let Some((repo_git, service)) = path.rsplit_once('/') else {
+        return err(StatusCode::NOT_FOUND, "unknown git route").into_response();
+    };
+    let Some(repo) = repo_git.strip_suffix(".git") else {
+        return err(StatusCode::NOT_FOUND, "unknown git route").into_response();
+    };
+    let service = service.to_string();
+    if !matches!(service.as_str(), "git-upload-pack" | "git-receive-pack") {
+        return err(StatusCode::NOT_FOUND, "unknown git service").into_response();
+    }
+    let public = match hosted_project_public(&project) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    if service == "git-receive-pack" || !public {
+        if let Err(response) = registry_auth(&headers) {
+            return response;
+        }
+    }
+    let path = match hosted_git_path(&project, &repo) {
+        Ok(path) => path,
+        Err(response) => return response,
+    };
+    let input = match git_request_body(&headers, body) {
+        Ok(body) => body,
+        Err(response) => return response,
+    };
+    let before = if service == "git-receive-pack" {
+        git_ref_tips(&path)
+    } else {
+        Ok(HashMap::new())
+    };
+    match git_service(&path, &service, false, input).await {
+        Ok(output) => {
+            if service == "git-receive-pack" {
+                if let (Ok(before), Ok(after)) = (before, git_ref_tips(&path)) {
+                    for (reference, tip) in after {
+                        if before.get(&reference) != Some(&tip) {
+                            let payload = json!({"event":events::GIT_COMMIT,"commit":{"repo_path":path,"id":tip,"message":"smart HTTP push","branch":reference}});
+                            if let Err(error) =
+                                applications::enqueue_event(events::GIT_COMMIT, &payload)
+                            {
+                                eprintln!("webhook fan-out for git.commit failed: {error}");
+                            }
+                        }
+                    }
+                }
+            }
+            git_response(format!("application/x-{service}-result"), output)
+        }
+        Err(response) => response,
+    }
+}
+
+fn git_ref_tips(path: &std::path::Path) -> Result<HashMap<String, String>, String> {
+    let repository = git2::Repository::open_bare(path).map_err(|e| e.to_string())?;
+    let references = repository.references().map_err(|e| e.to_string())?;
+    let tips = references
+        .filter_map(|reference| reference.ok())
+        .filter_map(|reference| {
+            Some((
+                reference.name().ok()?.to_string(),
+                reference.target()?.to_string(),
+            ))
+        })
+        .collect();
+    Ok(tips)
+}
 
 const PARAMETER_SECRET_MASK: &str = "***";
 const LOGIN_MAX_FAILED_ATTEMPTS: u32 = 5;
@@ -2547,7 +2797,8 @@ enum CommandPolicy {
 /// before it can reach `dispatch!`; missing entries fail closed with 403.
 fn command_policy(name: &str) -> Option<CommandPolicy> {
     Some(match name {
-        "create_project" => CommandPolicy::ProjectCreate,
+        "create_hosted_repo" | "delete_hosted_repo" | "list_hosted_repos" | "hosted_repo_clone_url" => CommandPolicy::Session,
+"create_project" => CommandPolicy::ProjectCreate,
         "update_project" => CommandPolicy::ProjectWrite,
         "delete_project" => CommandPolicy::ProjectDelete,
         "create_board" | "create_issue" | "clone_issue" | "move_issue_to_project" | "create_issue_status" => {
@@ -5343,6 +5594,10 @@ async fn cmd(
         return absence_delete(&user, &body);
     }
     dispatch!(name.as_str(), body, {
+    "create_hosted_repo" => git_hosting::create_hosted_repo(project_id: String, name: String, description: Option<String>, default_branch: String),
+    "delete_hosted_repo" => git_hosting::delete_hosted_repo(id: String),
+    "list_hosted_repos" => git_hosting::list_hosted_repos(project_id: String),
+    "hosted_repo_clone_url" => git_hosting::hosted_repo_clone_url(base_url: String, project: String, name: String),
     "list_devfiles" => applications::list_devfiles(project_id: Option<String>),
     "save_devfile" => applications::save_devfile(value: applications::Devfile),
     "delete_devfile" => applications::delete_devfile(id: String),
@@ -6036,15 +6291,8 @@ fn spawn_webhook_ticker() {
     });
 }
 
-#[tokio::main]
-async fn main() {
-    let p = env::var("SPACE_DB").unwrap_or_else(|_| "/var/lib/gaia-space/space.db".into());
-    db::set_db_path(PathBuf::from(p));
-    bootstrap();
-    spawn_webhook_ticker();
-    spawn_pipeline_schedule_ticker();
-    spawn_chat_schedule_ticker();
-    let app = Router::new()
+fn app_router() -> Router {
+    Router::new()
         .route("/caldav/", any(caldav_home))
         .route("/caldav/{calendar_id}/", any(caldav_collection))
         .route("/caldav/{calendar_id}/calendar.ics", any(caldav_calendar))
@@ -6133,13 +6381,25 @@ async fn main() {
                 .post(registry_oci_post)
                 .get(registry_oci_get),
         )
+        .route("/git/{project}/{*path}", get(git_info_refs).post(git_rpc))
         .route("/oauth/authorize", post(oauth_authorize))
         .route("/oauth/token", post(oauth_token))
         .route("/api/cmd/{command}", post(cmd))
         .layer(DefaultBodyLimit::max(document_upload_max_bytes(
             env::var("SPACE_DOCUMENT_UPLOAD_MAX_BYTES").ok().as_deref(),
         )))
-        .with_state(App::new());
+        .with_state(App::new())
+}
+
+#[tokio::main]
+async fn main() {
+    let p = env::var("SPACE_DB").unwrap_or_else(|_| "/var/lib/gaia-space/space.db".into());
+    db::set_db_path(PathBuf::from(p));
+    bootstrap();
+    spawn_webhook_ticker();
+    spawn_pipeline_schedule_ticker();
+    spawn_chat_schedule_ticker();
+    let app = app_router();
     let port = env::var("SPACE_PORT")
         .ok()
         .and_then(|x| x.parse().ok())
@@ -6484,6 +6744,47 @@ mod tests {
         c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('pa','alice','Alice',1),('pb','bob','Bob',1),('pc','server-admin','Server Admin',1),('pd','dora','Dora',1)", []).unwrap();
         c.execute("INSERT INTO users(id,username,password_hash,display_name,profile_id,role,active,created_at) VALUES('ua','alice','x','Alice','pa','member',1,1),('ub','bob','x','Bob','pb','member',1,1),('uc','server-admin','x','Server Admin','pc','admin',1,1),('ud','dora','x','Dora','pd','member',1,1)", []).unwrap();
         c.execute("INSERT INTO sessions(token,user_id,created_at,expires_at) VALUES('ta','ua',unixepoch(),unixepoch()+3600),('tb','ub',unixepoch(),unixepoch()+3600),('tc','uc',unixepoch(),unixepoch()+3600),('td','ud',unixepoch(),unixepoch()+3600)", []).unwrap();
+    }
+
+    #[tokio::test]
+    async fn git_smart_http_clone_and_push_roundtrip() {
+        let _serial = test_lock();
+        setup();
+        set_password("server-admin", "smart-http-password");
+        let suffix = format!("{}", std::process::id());
+        let private_project = format!("git-private-{suffix}");
+        let public_project = format!("git-public-{suffix}");
+        let c = db::conn().unwrap();
+        c.execute("INSERT INTO projects(id,name,key,created_by,created_at,visibility) VALUES(?1,'Private Git',?2,'pc',unixepoch(),'private'),(?3,'Public Git',?4,'pc',unixepoch(),'public')", params![private_project, format!("PR{suffix}"), public_project, format!("PU{suffix}")]).unwrap();
+        drop(c);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server =
+            tokio::spawn(async move { axum::serve(listener, app_router()).await.unwrap() });
+        tokio::task::spawn_blocking(move || {
+            let base = format!("http://{address}");
+            let client = reqwest::blocking::Client::new();
+            for (project_id, name) in [(&private_project, "private"), (&public_project, "public")] {
+                let response = client.post(format!("{base}/api/cmd/create_hosted_repo")).header(header::COOKIE, "space_session=tc").json(&json!({"project_id":project_id,"name":name,"description":null,"default_branch":"main"})).send().unwrap();
+                assert!(response.status().is_success(), "create hosted repo: {}", response.text().unwrap());
+            }
+            assert_eq!(client.get(format!("{base}/git/{private_project}/private.git/info/refs?service=git-upload-pack")).send().unwrap().status(), StatusCode::UNAUTHORIZED);
+            assert_eq!(client.get(format!("{base}/git/{public_project}/public.git/info/refs?service=git-upload-pack")).send().unwrap().status(), StatusCode::OK);
+            let work = std::env::temp_dir().join(format!("gaia-space-git-smart-http-{suffix}"));
+            std::fs::create_dir_all(&work).unwrap();
+            let url = format!("http://server-admin:smart-http-password@{address}/git/{private_project}/private.git");
+            let first = work.join("first"); let second = work.join("second");
+            let run = |args: &[&str]| { let out = std::process::Command::new("git").args(args).output().unwrap(); assert!(out.status.success(), "git {:?}: {}", args, String::from_utf8_lossy(&out.stderr)); };
+            run(&["clone", &url, first.to_str().unwrap()]);
+            run(&["-C", first.to_str().unwrap(), "config", "user.email", "test@example.test"]);
+            run(&["-C", first.to_str().unwrap(), "config", "user.name", "Smart HTTP Test"]);
+            std::fs::write(first.join("README"), "smart HTTP\n").unwrap();
+            run(&["-C", first.to_str().unwrap(), "add", "README"]); run(&["-C", first.to_str().unwrap(), "commit", "-m", "smart HTTP"]); run(&["-C", first.to_str().unwrap(), "push", "origin", "main"]); run(&["clone", &url, second.to_str().unwrap()]);
+            let log = std::process::Command::new("git").args(["-C", second.to_str().unwrap(), "log", "-1", "--format=%s"]).output().unwrap(); assert_eq!(String::from_utf8_lossy(&log.stdout).trim(), "smart HTTP");
+            assert_eq!(client.post(format!("{base}/git/{private_project}/private.git/git-receive-pack")).body(Vec::new()).send().unwrap().status(), StatusCode::UNAUTHORIZED);
+            let _ = std::fs::remove_dir_all(work);
+        }).await.unwrap();
+        server.abort();
     }
 
     fn bearer(token: &str) -> HeaderMap {
