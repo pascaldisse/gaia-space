@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import type { Document } from "./documents";
 
 export const DEFAULT_BUDGET_CURRENCY = "EUR";
 
@@ -92,8 +93,8 @@ export function serializeBudget(budget: BudgetDoc): string {
 export const budgetApi = {
   statement: (documentId: string, month: string | null) =>
     invoke<BudgetStatement>("budget_statement", { documentId, month }),
-  addExpense: (documentId: string, expense: BudgetExpenseInput) =>
-    invoke<void>("budget_add_expense", { documentId, expense }),
+  addExpense: (documentId: string, input: BudgetExpenseInput) =>
+    invoke<Document>("budget_add_expense", { documentId, input }),
   exportStatement: (documentId: string, month: string) =>
     invoke<string>("budget_export_statement", { documentId, month }),
 };

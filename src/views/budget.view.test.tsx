@@ -55,7 +55,7 @@ test("quick-add sends today, the session profile, and an empty split for everyon
   [...host.querySelectorAll("button")].find((button) => button.textContent?.trim() === "I paid")?.click();
   await wait();
   expect(calls.find((call) => call.command === "budget_add_expense")?.body).toEqual({
-    documentId: "budget-1", expense: { date: currentDate(), paid_by: "p-me", amount: "12.34", description: "Groceries", split: [] },
+    documentId: "budget-1", input: { date: currentDate(), paid_by: "p-me", amount: "12.34", description: "Groceries", split: [] },
   });
   expect(reloads).toBe(1);
 });
