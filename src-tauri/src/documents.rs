@@ -121,6 +121,7 @@ fn default_body_format() -> String {
 }
 pub const KIND_MARKDOWN: &str = "markdown";
 pub const KIND_SHEET: &str = "sheet";
+pub const KIND_BUDGET: &str = crate::budget::KIND_BUDGET;
 pub const MAX_SHEET_COLUMNS: usize = 64;
 pub const MAX_SHEET_ROWS: usize = 5000;
 pub const MAX_FORMULA_LEN: usize = 512;
@@ -163,15 +164,19 @@ fn ensure_sheet_schema(c: &rusqlite::Connection) -> Result<()> {
 }
 
 /// Every connection this module opens carries the sheet column.
-fn conn() -> Result<rusqlite::Connection> {
+pub(crate) fn document_connection() -> Result<rusqlite::Connection> {
     let c = db::conn()?;
     ensure_sheet_schema(&c)?;
     Ok(c)
 }
 
+fn conn() -> Result<rusqlite::Connection> {
+    document_connection()
+}
+
 fn validate_kind(kind: &str) -> Result<()> {
     match kind {
-        KIND_MARKDOWN | KIND_SHEET => Ok(()),
+        KIND_MARKDOWN | KIND_SHEET | KIND_BUDGET => Ok(()),
         other => Err(format!(
             "unknown document kind '{other}' (expected 'markdown' or 'sheet')"
         )),
@@ -442,7 +447,15 @@ pub(crate) fn document_readable_by_on(
 }
 
 pub fn document_writable_by(id: &str, profile_id: &str, is_admin: bool) -> Result<bool> {
-    let c = conn()?;
+    document_writable_by_on(&conn()?, id, profile_id, is_admin)
+}
+
+pub(crate) fn document_writable_by_on(
+    c: &rusqlite::Connection,
+    id: &str,
+    profile_id: &str,
+    is_admin: bool,
+) -> Result<bool> {
     c.query_row(
         &format!(
             "SELECT EXISTS(SELECT 1 FROM documents d WHERE d.id=?3 AND {})",
@@ -918,6 +931,10 @@ pub fn create_document(mut document: Document) -> Result<()> {
         if let Some(body) = document.body.as_deref() {
             validate_sheet_body(body)?;
         }
+    } else if document.kind == KIND_BUDGET {
+        if let Some(body) = document.body.as_deref() {
+            crate::budget::validate_budget_body(body)?;
+        }
     }
     c.execute(
 "INSERT INTO documents(id,container_type,container_id,folder_id,doc_type,body_format,title,body,version,archived,created_by,source_entity_type,source_entity_id,kind)VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)",
@@ -1076,17 +1093,47 @@ pub fn save_document(
     actor: Option<String>,
 ) -> Result<Document> {
     let mut c = conn()?;
-    let tx = c.transaction().map_err(|e| e.to_string())?;
+    save_document_on(&mut c, &id, &title, body, actor)
+}
+
+pub(crate) fn save_document_on(
+    c: &mut rusqlite::Connection,
+    id: &str,
+    title: &str,
+    body: Option<String>,
+    actor: Option<String>,
+) -> Result<Document> {
+    let (doc, kind) = {
+        let tx = c.transaction().map_err(|e| e.to_string())?;
+        let result = save_document_tx(&tx, id, title, body, actor)?;
+        tx.commit().map_err(|e| e.to_string())?;
+        result
+    };
+    if kind == KIND_SHEET {
+        reindex_sheet(c, &doc.id, doc.body.as_deref());
+    }
+    document_updated_event(&doc);
+    Ok(doc)
+}
+
+pub(crate) fn save_document_tx(
+    tx: &rusqlite::Transaction<'_>,
+    id: &str,
+    title: &str,
+    body: Option<String>,
+    actor: Option<String>,
+) -> Result<(Document, String)> {
     let (current_version, kind): (i64, String) = tx
         .query_row(
             "SELECT version,kind FROM documents WHERE id=?1",
-            [&id],
+            [id],
             |r| Ok((r.get(0)?, r.get(1)?)),
         )
         .map_err(|e| e.to_string())?;
-    // A broken grid is refused before anything is written: no body change, no version.
     if kind == KIND_SHEET {
         validate_sheet_body(body.as_deref().unwrap_or(""))?;
+    } else if kind == KIND_BUDGET {
+        crate::budget::validate_budget_body(body.as_deref().unwrap_or(""))?;
     }
     let next_version = current_version + 1;
     tx.execute(
@@ -1105,22 +1152,25 @@ pub fn save_document(
         ],
     )
     .map_err(|e| e.to_string())?;
-    tx.commit().map_err(|e| e.to_string())?;
-    if kind == KIND_SHEET {
-        reindex_sheet(&c, &id, body.as_deref());
-    }
-    let doc = get_document(id)?.ok_or_else(|| "document vanished after save".to_string())?;
-    // Taxonomy name first; the pre-taxonomy alias is re-emitted so subscriptions
-    // stored before `events.rs` existed keep firing.
-    document_event(crate::events::DOCUMENT_UPDATED, &doc);
-    document_event(crate::events::LEGACY_DOCUMENT_EVENT, &doc);
-    Ok(doc)
+    let doc = tx
+        .query_row(
+            &format!("SELECT {DOC_COLUMNS} FROM documents WHERE id=?1"),
+            [id],
+            row_to_document,
+        )
+        .map_err(|_| "document vanished after save".to_string())?;
+    Ok((doc, kind))
 }
 
 /// Webhook fan-out envelope: `{"event": …, "document": …}`; subscription filters address
 /// it by dot-path, e.g. `"document.title"`. Second domain in the cross-domain taxonomy
 /// (issues being the first). Best effort after commit — a subscriber problem must never
 /// undo a user's document edit.
+pub(crate) fn document_updated_event(doc: &Document) {
+    document_event(crate::events::DOCUMENT_UPDATED, doc);
+    document_event(crate::events::LEGACY_DOCUMENT_EVENT, doc);
+}
+
 fn document_event(event_type: &str, doc: &Document) {
     let payload = serde_json::json!({ "event": event_type, "document": doc });
     if let Err(e) = crate::applications::enqueue_event(event_type, &payload) {

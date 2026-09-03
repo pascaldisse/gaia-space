@@ -17,6 +17,8 @@ pub mod availability;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod blogs;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
+pub mod budget;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod calls;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod channel_feeds;
@@ -466,6 +468,9 @@ pub fn run() {
             review::dry_run_merge,
             review::attempt_merge,
             review::create_review,
+            budget::budget_statement,
+            budget::budget_add_expense,
+            budget::budget_export_statement,
             documents::list_documents,
             documents::get_document,
             documents::list_favorite_documents,
