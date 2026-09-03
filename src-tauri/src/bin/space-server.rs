@@ -2592,8 +2592,6 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         "update_document_access" => CommandPolicy::DocumentAccessWrite,
         "create_document" => CommandPolicy::DocumentCreate,
         "app_info"
-        | "join_meeting_call"
-        | "end_meeting_call"
         | "start_livekit_server"
         | "trigger_pipeline_script"
         | "trigger_pipeline_on_push"
@@ -2612,6 +2610,7 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         "archive_document" => CommandPolicy::DocumentOwnerWrite,
         "delete_document" => CommandPolicy::DocumentOwnerDelete,
         "archive_meeting" | "attach_meeting_channel" | "delete_meeting" => CommandPolicy::MeetingWrite,
+        "join_meeting_call" | "end_meeting_call" => CommandPolicy::MeetingRead,
         "archive_issue" | "archive_role" | "archive_sprint" | "archive_team" => {
             CommandPolicy::Session
         }
@@ -3104,6 +3103,8 @@ fn meeting_id(body: &Value, name: &str) -> Option<String> {
         "invite_meeting_participant"
             | "set_meeting_participant_status"
             | "list_meeting_participants"
+            | "join_meeting_call"
+            | "end_meeting_call"
     ) {
         arg(body, "meeting_id").ok()
     } else {
@@ -5341,6 +5342,31 @@ async fn cmd(
     }
     if name == "delete_absence" {
         return absence_delete(&user, &body);
+    }
+    // The body names only a meeting. Identity/display name come from the authenticated session.
+    if name == "join_meeting_call" {
+        let meeting_id: String = match arg(&body, "meeting_id") {
+            Ok(value) => value,
+            Err(error) => return err(StatusCode::BAD_REQUEST, &error).into_response(),
+        };
+        return match calls::join_web_meeting_call(
+            meeting_id,
+            user.profile_id.clone(),
+            user.display_name.clone(),
+        ) {
+            Ok(value) => Json(json!({"ok":true,"value":value})).into_response(),
+            Err(error) => err(StatusCode::BAD_REQUEST, &error).into_response(),
+        };
+    }
+    if name == "end_meeting_call" {
+        let meeting_id: String = match arg(&body, "meeting_id") {
+            Ok(value) => value,
+            Err(error) => return err(StatusCode::BAD_REQUEST, &error).into_response(),
+        };
+        return match calls::end_web_meeting_call(meeting_id, user.profile_id.clone()) {
+            Ok(value) => Json(json!({"ok":true,"value":value})).into_response(),
+            Err(error) => err(StatusCode::BAD_REQUEST, &error).into_response(),
+        };
     }
     dispatch!(name.as_str(), body, {
     "list_devfiles" => applications::list_devfiles(project_id: Option<String>),
