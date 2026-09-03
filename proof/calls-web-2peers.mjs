@@ -110,7 +110,12 @@ try {
   const detailUrl = `${base}/meetings/${encodeURIComponent(meetingId)}`;
   await Promise.all(Object.values(pages).map(page => page.goto(detailUrl, { waitUntil: "networkidle" })));
   // The canonical detail route resolves the Meetings surface; select the visible row to mount CallPanel.
-  await Promise.all(Object.values(pages).map(async page => { await page.getByRole("button", { name: title }).click(); await page.getByRole("button", { name: "Join call" }).waitFor({ state: "visible", timeout: 20_000 }); }));
+  await Promise.all(Object.values(pages).map(async page => {
+  const row = page.locator("button.meeting-row").filter({ hasText: title });
+  if (await row.count() !== 1) throw new Error(`created meeting row count: ${await row.count()}`);
+  await row.click();
+  await page.getByRole("button", { name: "Join call", exact: true }).waitFor({ state: "visible", timeout: 20_000 });
+}));
   stage = "joining";
   await pages.a.getByRole("button", { name: "Join call" }).click();
   await pages.b.getByRole("button", { name: "Join call" }).click();
