@@ -60,3 +60,7 @@ Locations: `Berlin office`, `Lisbon studio`, `Room 4.12`. Zwei Demo-Notification
 `src/components/{PageHeader,controls,blocks,EmptyState,paper.css,TaskRowEdit,TaskDrawer,SpaceShell,WorkItemDrawer,NotesLog}`
 `src/{attention.ts,statusTone.ts,nav.ts,router.ts,session.ts,spaceTheme.css,spaceLightType.css,spaceLightOverrides.css}`
 → `spaceLightOverrides.css` ist **generiert**: `bun tools/lightOverrides.mjs`
+
+## § Known
+`bun test --randomize --seed 1` fails calendar test “a task is drawn on its project's calendar…
+organisation calendar carries meetings” — second module-state leak, pre-existing, not in CI order.
