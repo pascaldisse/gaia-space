@@ -532,6 +532,7 @@ pub fn run() {
             meetings::list_meetings,
             meetings::get_meeting,
             meetings::create_meeting,
+            meetings::create_channel_call,
             meetings::update_meeting,
             meetings::archive_meeting,
             meetings::delete_meeting,

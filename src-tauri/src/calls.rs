@@ -788,10 +788,13 @@ fn join_meeting_call_with_connection(
         .optional()
         .map_err(|e| e.to_string())?;
     let is_organizer = meeting.organizer_id.as_deref() == Some(participant_id.as_str());
-    if !is_organizer && !matches!(rsvp.as_deref(), Some("accepted")) {
-        return Err("Waiting for organizer admission: only accepted participants can join this meeting call".into());
+    if !is_organizer && !matches!(rsvp.as_deref(), Some("accepted") | Some("invited")) {
+        return Err("Only invited participants can join this meeting call".into());
     }
     ensure_server(config.clone())?;
+    if matches!(rsvp.as_deref(), Some("invited")) {
+        connection.execute("UPDATE meeting_participants SET status='accepted' WHERE meeting_id=?1 AND profile_id=?2", rusqlite::params![meeting_id, participant_id]).map_err(|e| e.to_string())?;
+    }
     let public_url = config.public_url();
     let room = meetings::record_call_room_on(
         connection,
