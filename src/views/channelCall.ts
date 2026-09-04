@@ -22,7 +22,7 @@ export const buildChannelCallMeeting = (
 const ringing = (meeting: Meeting, now: number, ringSeconds = CALL_RING_SECONDS) =>
   meeting.video_status === "scheduled" && meeting.starts_at <= now && now - meeting.starts_at <= ringSeconds;
 const liveJoinable = (meeting: Meeting, now: number) =>
-  meeting.video_status === "live" && meeting.video_started_at !== null && now - meeting.video_started_at <= CALL_LIVE_JOINABLE_SECONDS;
+  meeting.video_status === "live" && now - (meeting.video_started_at ?? meeting.starts_at) <= CALL_LIVE_JOINABLE_SECONDS;
 /** The one incoming-call predicate. `dismissed` contains locally declined/accepted calls;
  *  remote RSVP status is folded into it by the shell before this function is called. */
 export const findIncomingCalls = (

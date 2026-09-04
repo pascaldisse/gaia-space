@@ -419,7 +419,7 @@ fn create_channel_call_on(c: &mut rusqlite::Connection, meeting: Meeting) -> Res
     }
     let meeting_url = normalize_meeting_url(meeting.meeting_url.as_deref())?;
     tx.execute("INSERT INTO meetings(id,title,description,starts_at,ends_at,rrule,location,organizer_id,channel_id,visibility,modification_preference,archived,video_provider,video_status,source_entity_type,source_entity_id,meeting_url) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)", rusqlite::params![meeting.id, meeting.title, meeting.description, meeting.starts_at, meeting.ends_at, meeting.rrule, meeting.location, meeting.organizer_id, meeting.channel_id, meeting.visibility, meeting.modification_preference, meeting.archived, meeting.video_provider, meeting.video_status, meeting.source_entity_type, meeting.source_entity_id, meeting_url]).map_err(|e| e.to_string())?;
-    for member in members {
+    for member in &members {
         let status = if member.profile_id == organizer_id {
             "accepted"
         } else {
@@ -432,6 +432,26 @@ fn create_channel_call_on(c: &mut rusqlite::Connection, meeting: Meeting) -> Res
         .map_err(|e| e.to_string())?;
     }
     tx.commit().map_err(|e| e.to_string())?;
+    let recipients = members.into_iter()
+        .map(|member| member.profile_id)
+        .filter(|profile_id| profile_id != &organizer_id)
+        .collect();
+    // A call ring is ephemeral; this durable feed entry lets an invited person who
+    // opens Space late still discover the channel and its call.
+    personal::fan_out_notification_on(
+        c,
+        personal::NotificationFanout {
+            recipients,
+            event_type: "call",
+            title: "Incoming call",
+            body: Some(&format!("{}
+/channel/{}/messages", meeting.title, channel_id)),
+            entity_type: "channel",
+            entity_id: &channel_id,
+            target_type: Some("entity"),
+            target_id: Some(&channel_id),
+        },
+    )?;
     Ok(meeting)
 }
 
@@ -832,6 +852,10 @@ mod tests {
         let participants: Vec<(String, String)> = c.prepare("SELECT profile_id,status FROM meeting_participants WHERE meeting_id='dm-call-meeting' ORDER BY profile_id").unwrap().query_map([], |row| Ok((row.get(0)?, row.get(1)?))).unwrap().collect::<rusqlite::Result<_>>().unwrap();
         assert_eq!(participants, vec![("caller".into(), "accepted".into()), ("recipient".into(), "invited".into())]);
         assert!(meeting_readable_on(&c, "dm-call-meeting", "recipient").unwrap(), "invited DM recipient must pass MEETING_READ_SCOPE");
+let notification: (String, String, String) = c.query_row("SELECT event_type,title,body FROM notifications WHERE recipient_id='recipient'", [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))).unwrap();
+assert_eq!(notification.0, "call");
+assert_eq!(notification.1, "Incoming call");
+assert!(notification.2.contains("/channel/dm-call/messages"));
     }
 
     /// ISSUE #5 REPRO: the exact JSON body the composer sends (`Meetings.tsx` create /

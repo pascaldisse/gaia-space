@@ -165,6 +165,7 @@ const [mobileSidebarOpen, setMobileSidebarOpen] = createSignal(false);
   // never separately in every route/channel.
   const CALL_RING_POLL_MS = Number(import.meta.env.VITE_CALL_RING_POLL_MS) || 3_000;
   const [dismissedCalls, setDismissedCalls] = createSignal<Set<string>>(new Set());
+  const [ringNow, setRingNow] = createSignal(Math.floor(Date.now() / 1_000));
   const [incomingMeetings, setIncomingMeetings] = createSignal<Meeting[]>([]);
   const [incoming, { refetch: refetchIncoming }] = createResource(
     actingProfileId,
@@ -182,7 +183,7 @@ const [mobileSidebarOpen, setMobileSidebarOpen] = createSignal(false);
   createEffect(() => setIncomingMeetings(incoming() ?? []));
   createEffect(() => {
     if (!actingProfileId()) return;
-    const timer = window.setInterval(() => { void refetchIncoming(); }, CALL_RING_POLL_MS);
+    const timer = window.setInterval(() => { setRingNow(Math.floor(Date.now() / 1_000)); void refetchIncoming(); }, CALL_RING_POLL_MS);
     onCleanup(() => window.clearInterval(timer));
   });
   const incomingCall = () => incomingMeetings()[0];
@@ -658,8 +659,9 @@ const [mobileSidebarOpen, setMobileSidebarOpen] = createSignal(false);
       <Show when={incomingCall()}>{meeting => {
         const caller = () => profiles()?.find(person => person.id === meeting().organizer_id)?.display_name || meeting().organizer_id || "Someone";
         const channel = () => (channels() ?? []).find(item => item.id === meeting().channel_id)?.name || meeting().title;
+        const elapsed = () => Math.max(0, ringNow() - (meeting().video_started_at ?? meeting().starts_at));
         return <section class="incoming-call-ring" role="alert" aria-label="Incoming call">
-          <div><strong>{caller()}</strong><span> is calling in #{channel()}</span></div>
+          <div><strong>{caller()}</strong><span> is calling in #{channel()} · {elapsed()}s</span></div>
           <div class="incoming-call-actions"><button type="button" class="decline" onClick={() => void declineIncomingCall()}>Decline</button><button type="button" class="accept" onClick={() => void acceptIncomingCall()}>Accept</button></div>
         </section>;
       }}</Show>

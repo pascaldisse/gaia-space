@@ -5,7 +5,7 @@ import { isDirectMessage, dmLabel } from "../chatPartition";
 import { Avatar } from "../components/Avatar";
 import { bumpChannels } from "../chatIdentity";
 import { meetingsApi, type Meeting } from "../api/meetings";
-import { buildChannelCallMeeting, channelCallLabel, findLiveChannelMeeting, resolveChannelCall } from "./channelCall";
+import { buildChannelCallMeeting, CALL_RING_SECONDS, channelCallLabel, findLiveChannelMeeting, resolveChannelCall } from "./channelCall";
 import { consumeChannelCallJoin, pendingChannelCallJoin } from "./channelCallJoin";
 import CallPanel from "./CallPanel";
 import { personalApi } from "../api/personal";
@@ -157,6 +157,21 @@ const callUnavailable = () => !channel() || !actingProfileId();
 const callTitle = (label: "Call" | "Video") =>
  callUnavailable() ? (!actingProfileId() ? "Sign-in still loading" : "Conversation still loading") : label;
 const liveMeeting = () => findLiveChannelMeeting(meetings(), channelId(), actingProfileId());
+const channelCall = () => resolveChannelCall(meetings(), channelId());
+const [callParticipants] = createResource(
+  () => [channelCall()?.id, actingProfileId()] as const,
+  ([meetingId, identity]) => meetingId && identity ? meetingsApi.participants(meetingId, identity) : Promise.resolve([]),
+);
+const callerCall = () => {
+  const meeting = channelCall();
+  return meeting?.organizer_id === actingProfileId() ? meeting : undefined;
+};
+const callerCallState = () => {
+  const meeting = callerCall();
+  if (!meeting) return "";
+  const started = meeting.video_started_at ?? meeting.starts_at;
+  return (callParticipants()?.length ?? 0) <= 1 && Math.floor(Date.now() / 1_000) - started <= CALL_RING_SECONDS ? "Ringing…" : "No answer";
+};
 
   const memberCount = () => members()?.length ?? 0;
   /** "Replies needed" = unread mentions of me IN THIS CHANNEL. */
@@ -422,6 +437,7 @@ const liveMeeting = () => findLiveChannelMeeting(meetings(), channelId(), acting
           )}
         </Show>
         <Show when={liveMeeting()}>{(meeting) => <div class="cw-live-call" role="status">{channelCallLabel(meeting())} <span aria-hidden="true">·</span> <button type="button" class="ghost small" onClick={() => openExistingCall(meeting())}>Join</button></div>}</Show>
+        <Show when={callerCall()}>{(meeting) => <div class="cw-live-call cw-caller-call" role="status"><strong>{callerCallState()}</strong><span aria-hidden="true">·</span><span>{meeting().title}</span></div>}</Show>
       </header>
 
       <div class="cw-body" classList={{ "with-rail": !!channelProjectId() || teamOpen() }}>
