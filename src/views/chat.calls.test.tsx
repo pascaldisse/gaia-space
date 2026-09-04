@@ -54,7 +54,7 @@ describe("chat calls", () => {
   });
   test("shows a join banner for a live channel meeting", async () => {
     const now = Math.floor(Date.now() / 1_000);
-    meetings = [{ id: "meeting-live", title: "Design", description: null, starts_at: now, ends_at: now + 3_600, rrule: null, location: null, organizer_id: "you", channel_id: "channel-1", visibility: "participants", modification_preference: "organizer-only", archived: false, video_provider: "livekit", video_room_id: "room", join_url: null, meeting_url: null, video_status: "live", video_started_at: now, video_ended_at: null, video_ended_by: null, source_entity_type: null, source_entity_id: null }];
+    meetings = [{ id: "meeting-live", title: "Design", description: null, starts_at: now, ends_at: now + 300, rrule: null, location: null, organizer_id: "you", channel_id: "channel-1", visibility: "participants", modification_preference: "organizer-only", archived: false, video_provider: "livekit", video_room_id: "room", join_url: null, meeting_url: null, video_status: "live", video_started_at: now, video_ended_at: null, video_ended_by: null, source_entity_type: null, source_entity_id: null }];
     const host = await mount();
     expect(host.querySelector(".chat-live-call")?.textContent).toContain("Call live");
     expect(host.querySelector(".chat-live-call button")?.textContent).toBe("Join");
