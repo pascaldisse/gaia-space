@@ -22,16 +22,32 @@ const need = (label, response) => {
 };
 const cmd = (cookie, name, body) => request(`/api/cmd/${name}`, { method: "POST", headers: { cookie, "content-type": "application/json" }, body: JSON.stringify(body) });
 const cleanup = async () => {
-  const deletions = await Promise.all(createdUsers.map(async ({ id, username }) => {
-    const response = await request(`/api/users/${id}`, { method: "DELETE", headers: { authorization: `Bearer ${adminToken}` } });
-    return { username, status: response.status };
-  }));
-  result.cleanup = deletions;
+  const deletions = [];
+  for (const { id, username } of createdUsers) {
+    let response;
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      response = await request(`/api/users/${id}`, { method: "DELETE", headers: { authorization: `Bearer ${adminToken}` } });
+      if (response.status === 200 || response.status === 404) break;
+      await new Promise(resolve => setTimeout(resolve, attempt * 500));
+    }
+    deletions.push({ username, status: response.status });
+  }
+  const listed = await request("/api/users", { headers: { authorization: `Bearer ${adminToken}` } });
+  const users = Array.isArray(listed.body) ? listed.body : listed.body?.value ?? [];
+  const remnants = users.filter(user => createdUsers.some(created => created.username === user.username)).map(user => user.username);
+  result.cleanup = { deletions, verify: { status: listed.status, remnants } };
+  if (listed.status !== 200 || remnants.length) throw new Error(`proof-account purge verification failed: ${JSON.stringify(result.cleanup)}`);
 };
 const makePeer = async (side) => {
   const username = `zz-proof-${side}-${suffix}`;
   const password = `${crypto.randomUUID()}${crypto.randomUUID()}`;
-  const user = need(`create ${side}`, await request("/api/users", { method: "POST", headers: { authorization: `Bearer ${adminToken}`, "content-type": "application/json" }, body: JSON.stringify({ username, password, display_name: `zz-proof-${side.toUpperCase()}`, role: "GlobalMember", profile_id: null }) }));
+  let created;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    created = await request("/api/users", { method: "POST", headers: { authorization: `Bearer ${adminToken}`, "content-type": "application/json" }, body: JSON.stringify({ username, password, display_name: `zz-proof-${side.toUpperCase()}`, role: "GlobalMember", profile_id: null }) });
+    if (created.status !== 500 || !String(created.body?.error ?? "").includes("database is locked")) break;
+    await new Promise(resolve => setTimeout(resolve, attempt * 500));
+  }
+  const user = need(`create ${side}`, created);
   createdUsers.push(user);
   const login = await fetch(`${base}/api/auth/login`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ username, password }) });
   const cookie = login.headers.get("set-cookie")?.split(";")[0];
@@ -45,7 +61,14 @@ const installProbe = () => {
   window.fetch = async (...args) => {
     const url = String(args[0] instanceof Request ? args[0].url : args[0]);
     const response = await original(...args);
-    if (url.includes("/api/cmd/create_channel_call")) window.__proofCalls.push({ url, status: response.status });
+    if (url.includes("/api/cmd/create_channel_call") || url.includes("/api/cmd/join_meeting_call")) {
+      let body = null;
+      try {
+        const json = await response.clone().json();
+        body = { ok: json?.ok, value: { id: json?.value?.id ?? null, room: json?.value?.room ?? null } };
+      } catch {}
+      window.__proofCalls.push({ url, status: response.status, body });
+    }
     return response;
   };
 };
@@ -57,6 +80,13 @@ try {
     if (read.status !== 200) throw new Error(`health /api/users ${i + 1}: HTTP ${read.status} ${JSON.stringify(read.body)}`);
   }
   const a = await makePeer("a"); const b = await makePeer("b");
+  const directChannelId = `zz-proof-http-${suffix}`;
+  need("create direct-proof DM", await cmd(a.cookie, "create_channel", { channel: { id: directChannelId, content_type: "dm", name: null, description: null, project_id: null, archived: false }, memberIds: [a.profileId, b.profileId] }));
+  const direct = await cmd(a.cookie, "create_channel_call", { meeting: { id: `zz-proof-http-meeting-${suffix}`, title: "Direct API proof", description: null, starts_at: Math.floor(Date.now() / 1_000), ends_at: Math.floor(Date.now() / 1_000) + 300, rrule: null, location: null, organizer_id: b.profileId, channel_id: directChannelId, visibility: "participants", modification_preference: "organizer-only", archived: false, video_provider: "livekit", video_status: "scheduled" } });
+  result.direct = { status: direct.status, body: direct.body };
+  need("direct create_channel_call", direct);
+  result.direct.archive = { status: (await cmd(a.cookie, "archive_meeting", { id: `zz-proof-http-meeting-${suffix}`, archived: true })).status };
+  if (result.direct.archive.status !== 200) throw new Error(`archive direct-proof call: HTTP ${result.direct.archive.status}`);
   const channelId = `zz-proof-channel-${suffix}`;
   const channel = need("create zz-proof channel", await cmd(a.cookie, "create_channel", { channel: { id: channelId, content_type: "dm", name: null, description: null, project_id: null, archived: false }, memberIds: [a.profileId, b.profileId] }));
   result.channel = { id: channel.id, members: [a.profileId, b.profileId] };
@@ -80,21 +110,30 @@ try {
   result.elsewhere.after = { url: pageB.url(), banner: (await ring.textContent())?.trim() };
   await pageB.screenshot({ path: `${output}-b-elsewhere.png`, fullPage: true });
   await pageB.goto(route, { waitUntil: "networkidle" });
-  await pageB.locator(".incoming-call-ring").waitFor({ state: "visible", timeout: 10_000 });
-  result.pixels.banner = (await pageB.locator(".incoming-call-ring").textContent())?.trim();
+  const join = pageB.locator(".chat-live-call button");
+  await join.waitFor({ state: "visible", timeout: 20_000 });
+  result.pixels.banner = (await pageB.locator(".chat-live-call").textContent())?.trim() ?? "";
   await pageB.screenshot({ path: `${output}-b-banner.png`, fullPage: true });
-  await pageB.getByRole("button", { name: "Accept", exact: true }).click();
+  await join.click();
   await Promise.all([pageA.locator('[data-call-state="connected"]').waitFor({ timeout: 45_000 }), pageB.locator('[data-call-state="connected"]').waitFor({ timeout: 45_000 })]);
-  const state = async page => ({ state: await page.locator("[data-call-state]").textContent(), tiles: await page.locator(".call-tile").count(), room: (await page.locator("body").textContent())?.match(/Room:\s*([^\n]+)/)?.[1]?.trim() ?? null });
-  result.room.a = await state(pageA); result.room.b = await state(pageB);
-  result.pixels.connected = result.room.a.state === "connected" && result.room.b.state === "connected" && result.room.a.tiles >= 2 && result.room.b.tiles >= 2;
+  await Promise.all([pageA.getByText("Connected · 2", { exact: true }).waitFor({ timeout: 20_000 }), pageB.getByText("Connected · 2", { exact: true }).waitFor({ timeout: 20_000 })]);
+  const state = async page => ({ state: await page.locator('[data-call-state="connected"]').first().textContent(), tiles: await page.locator(".call-tile").count() });
+  result.room.a = { ...await state(pageA), join: await pageA.evaluate(() => window.__proofCalls.filter(call => call.url.includes("/api/cmd/join_meeting_call")).at(-1)) };
+  result.room.b = { ...await state(pageB), join: await pageB.evaluate(() => window.__proofCalls.filter(call => call.url.includes("/api/cmd/join_meeting_call")).at(-1)) };
+  const roomOf = entry => entry?.body?.value?.room ?? entry?.body?.room ?? null;
+  result.room.same = roomOf(result.room.a.join) !== null && roomOf(result.room.a.join) === roomOf(result.room.b.join);
+  result.pixels.connected = result.room.a.state?.startsWith("Connected") && result.room.b.state?.startsWith("Connected") && result.room.a.tiles >= 2 && result.room.b.tiles >= 2 && result.room.same;
   await pageB.screenshot({ path: `${output}-b-joined.png`, fullPage: true });
   await pageA.screenshot({ path: `${output}-a-sees-b.png`, fullPage: true });
-  const beforeCalls = await pageB.evaluate(() => window.__proofCalls.length);
+  const beforeCalls = await pageB.evaluate(() => window.__proofCalls.filter(call => call.url.includes("/api/cmd/create_channel_call")));
+  const firstCall = await pageA.evaluate(() => window.__proofCalls.filter(call => call.url.includes("/api/cmd/create_channel_call")).at(-1));
   await pageB.getByRole("button", { name: "Video", exact: true }).click();
   await pageB.waitForTimeout(1_000);
-  const afterCalls = await pageB.evaluate(() => window.__proofCalls.length);
-  result.secondClick = { minted: afterCalls - beforeCalls, beforeCalls, afterCalls, roomAfter: await state(pageB) };
+  const afterCalls = await pageB.evaluate(() => window.__proofCalls.filter(call => call.url.includes("/api/cmd/create_channel_call")));
+  const returned = afterCalls.at(-1);
+  const firstId = firstCall?.body?.value?.id ?? null;
+  const returnedId = returned?.body?.value?.id ?? null;
+  result.secondClick = { requests: afterCalls.length - beforeCalls.length, firstId, returnedId, minted: returnedId && returnedId !== firstId ? 1 : 0, roomAfter: await state(pageB) };
   await pageB.screenshot({ path: `${output}-b-video-same-room.png`, fullPage: true });
 } catch (error) {
   result.errors.push(String(error));

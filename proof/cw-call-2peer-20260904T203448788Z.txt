@@ -1,0 +1,12 @@
+utc=2026-09-04T20:34:48.788Z
+base=https://paloptic.com/space
+output=proof/cw-call-2peer-20260904T203448788Z
+health={"users_1":200,"users_2":200,"users_3":200,"users_4":200,"users_5":200}
+pixels={"banner":"Call live · Join","connected":true}
+room={"a":{"state":"Connected · 2","tiles":2,"join":{"url":"/space/api/cmd/join_meeting_call","status":200,"body":{"ok":true,"value":{"id":null,"room":"meeting-meeting-6672e931-0e6b-4495-93e6-8e653c63a284"}}}},"b":{"state":"Connected · 2","tiles":2,"join":{"url":"/space/api/cmd/join_meeting_call","status":200,"body":{"ok":true,"value":{"id":null,"room":"meeting-meeting-6672e931-0e6b-4495-93e6-8e653c63a284"}}}},"same":true}
+secondClick={"requests":0,"firstId":"meeting-6672e931-0e6b-4495-93e6-8e653c63a284","returnedId":null,"minted":0,"roomAfter":{"state":"Connected · 2","tiles":3}}
+elsewhere={"before":{"url":"https://paloptic.com/space/home","incoming":0},"after":{"url":"https://paloptic.com/space/home","banner":"zz-proof-A is calling in #dm · 0sDeclineAccept"}}
+errors=[]
+direct={"status":200,"body":{"ok":true,"value":{"archived":false,"channel_id":"zz-proof-http-1788554088788-98e2339f","description":null,"ends_at":1788554390,"id":"zz-proof-http-meeting-1788554088788-98e2339f","join_url":null,"location":null,"meeting_url":null,"modification_preference":"organizer-only","organizer_id":"profile-576a9e8a9c65","rrule":null,"source_entity_id":null,"source_entity_type":null,"starts_at":1788554090,"title":"Direct API proof","video_ended_at":null,"video_ended_by":null,"video_provider":"livekit","video_room_id":null,"video_started_at":null,"video_status":"scheduled","visibility":"participants"}},"archive":{"status":200}}
+channel={"id":"zz-proof-channel-1788554088788-98e2339f","members":["profile-576a9e8a9c65","profile-31ab39273b9a"]}
+cleanup={"deletions":[{"status":200},{"status":200}],"verify":{"status":200,"remnants":[]}}
