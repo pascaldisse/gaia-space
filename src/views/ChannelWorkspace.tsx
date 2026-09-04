@@ -12,13 +12,12 @@ import { currentUser, humanError, isWeb, profileId, profiles, projects, reloadPr
 import { channelTabs, linkProps, navigate, route } from "../router";
 import { GhostPill, PillMenu } from "../components/controls";
 import ConfirmDialog from "../components/ConfirmDialog";
-import DeleteButton from "../components/DeleteButton";
+import ContextMenu from "../components/ContextMenu";
 import EmptyState from "../components/EmptyState";
 import Chat from "./Chat";
 import "./ChannelWorkspace.css";
 import "./Meetings.css";
 import { UI_LOCALE } from "../calendar";
-import { metricTone } from "../statusTone";
 
 /**
  * The channel as a workspace (GAIA Space redesign, stage 2).
@@ -223,6 +222,10 @@ const liveMeeting = () => findLiveChannelMeeting(meetings(), channelId());
   // a stale copy, or the name and description would travel back in time with it.
   const [binding, setBinding] = createSignal(false);
   const [bindError, setBindError] = createSignal("");
+  // Revealed only from the `⋯` menu's "Attach to project…" item — the picker used to
+  // sit permanently in the header for every project-less channel, whether or not
+  // anyone had asked for it.
+  const [showAttach, setShowAttach] = createSignal(false);
   const attachToProject = async (projectId: string) => {
     const current = channel();
     if (!current || !projectId) return;
@@ -230,12 +233,18 @@ const liveMeeting = () => findLiveChannelMeeting(meetings(), channelId());
     try {
       await chatApi.updateChannel({ ...current, project_id: projectId });
       await refetchChannel();
+      setShowAttach(false);
     } catch (reason) {
       setBindError(humanError(reason));
     } finally {
       setBinding(false);
     }
   };
+  const canAttach = () => !project() && channel()?.content_type !== "dm";
+  // The header's one overflow menu (same component and pattern as views/Chat.tsx's
+  // `channelMenu`) — Call and Video stay as their own buttons (frequent, one click),
+  // everything else moves behind `⋯`.
+  const [channelMenu, setChannelMenu] = createSignal<{ x: number; y: number }>();
 
 
   /* ── DELETING A CONVERSATION ──────────────────────────────────────────────
@@ -288,17 +297,16 @@ const liveMeeting = () => findLiveChannelMeeting(meetings(), channelId());
         <div class="cw-title-row">
           <div class="cw-title">
             <Show when={project()}>{(value) => <div class="cw-kicker">{value().name}</div>}</Show>
-            <Show when={channel()?.content_type === "dm"} fallback={<h1># {channelTitle()}</h1>}>
-            <div class="cw-dm-title"><Avatar name={channelTitle()} avatarUrl={selectedChannel()?.avatarUrl} size={30} /><h1>{channelTitle()}</h1><span class="cw-presence" aria-label="Available" /></div>
-          </Show>
-            <Show when={channel()?.description}>{(text) => <p class="cw-subtitle">{text()}</p>}</Show>
-            {/* A FACT IS NOT A LABEL ON A CONTROL. "Not part of a project yet" used to
-                be glued to the left of the picker in a row of its own; it belongs with
-                the channel's other facts, and the ACT belongs in the action row below —
-                the same rule every other surface follows. */}
-            <Show when={!project() && channel()?.content_type !== "dm"}>
-              <p class="cw-subtitle">Not part of a project yet</p>
-            </Show>
+            <div class="cw-title-line">
+              <Show when={channel()?.content_type === "dm"} fallback={<h1># {channelTitle()}</h1>}>
+                <div class="cw-dm-title"><Avatar name={channelTitle()} avatarUrl={selectedChannel()?.avatarUrl} size={30} /><h1>{channelTitle()}</h1><span class="cw-presence" aria-label="Available" /></div>
+              </Show>
+              {/* THE CHANNEL'S KIND, in one word, where the title already is — a fact,
+                  not a control. DMs already say who they are with a face and a name. */}
+              <Show when={channel() && channel()?.content_type !== "dm"}>
+                <span class="cw-type-chip">{channel()?.content_type}</span>
+              </Show>
+            </div>
           </div>
           <div class="cw-metrics">
             {/* THE COUNT AND THE TEAM RAIL ARE NOW THE SAME PEOPLE. `list_channel_members`
@@ -340,36 +348,30 @@ const liveMeeting = () => findLiveChannelMeeting(meetings(), channelId());
                 )}
               </Show>
             </Show>
-            {/* Waiting on me -> amber, but ONLY when there is something to wait for:
-                `metricTone` refuses a tone to zero, so this chip can never become a
-                coloured warning about nothing (audit §3.7). */}
-            <Show when={repliesNeeded() > 0}>
-              <span class="cw-pill" classList={{ [metricTone(repliesNeeded(), "amber") || "untoned"]: true }}>
-                <strong>{repliesNeeded()}</strong> replies needed
-              </span>
-            </Show>
-            {/* No channel-bound meeting -> no chip. The prototype's "14:30 Meeting" has no
-                other honest source: meetings bind to a channel, never to a project. */}
-            <Show when={nextMeeting()}>
-              {(meeting) => <span class="cw-pill"><strong>{hhmm(meeting().starts_at)}</strong> Meeting</span>}
-            </Show>
-            {/* The same red button every other surface uses — red at rest, so the act
-                is recognised before it is read. It was this view's own grey control,
-                which is exactly the inconsistency the shared button exists to end. */}
+            {/* Call and Video stay direct buttons — the two acts reached from here most
+                often. Everything else (attach, delete) now lives behind `⋯`. */}
             <button type="button" class="ghost small" aria-label="Call" title="Call" onClick={() => void startCall(true)}>Call</button>
 <button type="button" class="ghost small" aria-label="Video" title="Video" onClick={() => void startCall(false)}>Video</button>
-<DeleteButton label="Delete conversation" onRequest={() => setConfirmDelete(true)} />
+<button type="button" class="ghost small" aria-label="Channel actions" onClick={(event) => setChannelMenu({ x: event.clientX, y: event.clientY })}>⋯</button>
           </div>
         </div>
+        <Show when={channelMenu()}>{(menu) => <ContextMenu x={menu().x} y={menu().y} onClose={() => setChannelMenu(undefined)} items={[
+          ...(canAttach() ? [{ label: "Attach to project…", onSelect: () => setShowAttach(true) }] : []),
+          { label: "Delete conversation", danger: true, onSelect: () => setConfirmDelete(true) },
+        ]} />}</Show>
+
+        {/* A fact, not a control: shown only when the channel actually has one, and
+            never the placeholder "Not part of a project yet" that used to sit here
+            whether or not there was anything to say. */}
+        <Show when={channel()?.description}>{(text) => <p class="cw-subtitle">{text()}</p>}</Show>
 
         <Show when={deleteError()}>
           <p class="cw-error" role="alert">{deleteError()}</p>
         </Show>
 
-        {/* A channel without a project has no work surfaces. The one act that would
-            create them lives where every act lives: the action row under the
-            introduction, in the one size system, not floating in the header. */}
-        <Show when={!project() && channel()?.content_type !== "dm"}>
+        {/* The attach flow: revealed on request from the `⋯` menu, not permanently
+            rendered under every project-less channel's header. */}
+        <Show when={canAttach() && showAttach()}>
           <nav class="page-actionbar cw-actionbar">
             <PillMenu
               label="Attach to project"
@@ -387,6 +389,7 @@ const liveMeeting = () => findLiveChannelMeeting(meetings(), channelId());
             <Show when={bindError()}><span class="cw-attach-error" role="alert">{bindError()}</span></Show>
           </nav>
         </Show>
+
         {/* NO TAB ROW. The one link out is to the project this conversation belongs
             to — where its tasks, calendar, knowledge and overview all live, under the
             project's own single row of tabs. */}
