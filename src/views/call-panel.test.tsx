@@ -95,7 +95,7 @@ if (command === "list_meeting_transcript_segments") return [{ id: "segment-1", m
   (Array.from(host.querySelectorAll("button")).find(button => button.textContent === "Join call") as HTMLButtonElement).click();
   await settle();
   expect(calls).toEqual(["microphone:true", "camera:true"]);
-  expect(host.textContent).toContain("2 participants");
+  expect(host.textContent).toContain("Connected · 2");
   expect(remoteAudioAttachments).toHaveLength(1);
   expect(remoteAudioAttachments[0]).toBeInstanceOf(HTMLAudioElement);
   expect(host.querySelectorAll("select")).toHaveLength(3);
@@ -150,10 +150,10 @@ test("a persisted running egress job is shown on join, so a restart cannot stran
   expect(host.textContent).not.toContain("Recording recording");
 });
 
-// The backend refuses recording when it cannot name the acting profile. The UI must
-// say so rather than offer a button that throws: a control that looks armed and does
-// nothing is the interface lying about what the system will do.
-test("an unresolvable native actor disables recording and explains why", async () => {
+// The backend refuses recording when it cannot name the acting profile. Rather than
+// offer a button that throws, the control is removed entirely (no error box either):
+// a control that looks armed and does nothing is the interface lying about intent.
+test("an unresolvable native actor removes the recording control instead of disabling it", async () => {
   (window as any).__TAURI_INTERNALS__ = { invoke: async (command: string) => {
     ipcCommands.push(command);
     if (command === "join_meeting_call") return { url: "ws://livekit.test", room: "meeting-meeting-1", token: "signed-token" };
@@ -165,12 +165,9 @@ test("an unresolvable native actor disables recording and explains why", async (
   dispose = render(() => <CallPanel meeting={meeting} identity="me" displayName="Me" />, host);
   (Array.from(host.querySelectorAll("button")).find(button => button.textContent === "Join call") as HTMLButtonElement).click();
   await settle();
-  const record = Array.from(host.querySelectorAll("button")).find(button => button.textContent === "Start recording") as HTMLButtonElement;
-  expect(record.disabled).toBe(true);
-  expect(host.textContent).toContain("cannot tell who is acting");
-  record.click();
-  await settle();
-  expect(ipcCommands).not.toContain("start_meeting_recording");
+  expect(Array.from(host.querySelectorAll("button")).some(button => button.textContent === "Start recording")).toBe(false);
+  expect(host.textContent).not.toContain("cannot tell who is acting");
+  expect(host.textContent).not.toContain("Recording is unavailable");
 });
 
 test("only the organizer can end the call, and a non-organizer sees leave alone", async () => {

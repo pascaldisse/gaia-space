@@ -88,19 +88,32 @@ export default function CallPanel(props: { meeting: Meeting; identity: string; d
   const [recordings, setRecordings] = createSignal<CallRecording[]>([]);
   const [chatMessages, setChatMessages] = createSignal<ChatMessage[]>([]);
   const [chatDraft, setChatDraft] = createSignal("");
-const [transcriptSegments, setTranscriptSegments] = createSignal<CallTranscriptSegment[]>([]);
+  const [transcriptSegments, setTranscriptSegments] = createSignal<CallTranscriptSegment[]>([]);
   // Native answer to "can this machine name who is acting?". Undefined until asked.
   const [actorRefusal, setActorRefusal] = createSignal<string>();
+  const [actorChecked, setActorChecked] = createSignal(false);
   const [join, setJoin] = createSignal<CallJoin>();
+  const [theatre, setTheatre] = createSignal(false);
   const connected = () => state() === "connected";
   const organizer = () => props.meeting.organizer_id === props.identity;
   const activeRecording = () => recordings().find(item => ["starting", "recording", "stopping"].includes(item.status));
   const recordingInProgress = () => activeRecording()?.status === "recording";
+  // Recording is only ever offered once the native side has confirmed it can name
+  // an acting profile; a refusal removes the control instead of disabling it inline.
+  const recordingAvailable = () => organizer() && actorChecked() && !actorRefusal();
   const timeLabel = (seconds: number | null) => seconds === null ? "—" : new Date(seconds * 1_000).toLocaleString(UI_LOCALE);
   const lifecycleFact = () => {
     const started = props.meeting.video_started_at === null ? "" : `Started ${timeLabel(props.meeting.video_started_at)}`;
     const ended = props.meeting.video_ended_at === null ? "" : `Ended ${timeLabel(props.meeting.video_ended_at)}${props.meeting.video_ended_by ? ` by ${props.meeting.video_ended_by}` : ""}`;
     return [started, ended].filter(Boolean).join(" · ");
+  };
+  // Top-left state chip: Meet-style short words, not a sentence.
+  const stateLabel = () => {
+    const value = state();
+    if (value === "connecting") return "Connecting…";
+    if (value === "reconnecting") return "Reconnecting";
+    if (value === "connected") return `Connected${join() ? ` · ${participants().length}` : ""}`;
+    return value.charAt(0).toUpperCase() + value.slice(1);
   };
   const sync = () => {
     const current = room();
@@ -156,7 +169,7 @@ const [transcriptSegments, setTranscriptSegments] = createSignal<CallTranscriptS
       // joins late (or after an app restart) must still see that this call is being
       // recorded, and the organizer must be able to stop that job.
       void syncRecording();
-void syncTranscript();
+      void syncTranscript();
     } catch (reason) {
       await next?.disconnect();
       setRoom(undefined); setParticipants([]); setJoin(undefined); setState("disconnected");
@@ -183,19 +196,20 @@ void syncTranscript();
   };
   const syncRecording = async () => {
     // Ask the native side who it thinks is acting before drawing a control that
-    // depends on the answer; an unresolvable actor is refused server-side, so the
-    // button must say that rather than look armed.
+    // depends on the answer; an unresolvable actor removes the control entirely
+    // rather than rendering a button that would just throw.
     try { const status = await meetingsApi.recordingActor(); setActorRefusal(status.available ? undefined : (status.reason ?? "This installation cannot determine who is acting.")); }
     catch (reason) { setActorRefusal(`Recording identity unavailable: ${String(reason)}`); }
+    finally { setActorChecked(true); }
     try { setRecordings(await meetingsApi.recordings(props.meeting.id)); }
-    catch (reason) { setNotice(`Connected; recording state unavailable: ${String(reason)}`); }
+    catch (reason) { console.debug("call recording state unavailable", reason); }
   };
   const syncTranscript = async () => {
-try { setTranscriptSegments(await meetingsApi.transcriptSegments(props.meeting.id)); }
-catch (reason) { setNotice(`Connected; captions unavailable: ${String(reason)}`); }
-};
-const toggleRecording = async () => {
-    if (!organizer() || actorRefusal()) return;
+    try { setTranscriptSegments(await meetingsApi.transcriptSegments(props.meeting.id)); }
+    catch (reason) { setNotice(`Connected; captions unavailable: ${String(reason)}`); }
+  };
+  const toggleRecording = async () => {
+    if (!recordingAvailable()) return;
     try {
       setError("");
       const active = activeRecording();
@@ -231,20 +245,34 @@ const toggleRecording = async () => {
       setChatMessages(items => [...items, message]); setChatDraft("");
     } catch (reason) { setError(`Could not send chat message: ${String(reason)}`); }
   };
+  const copyRoomId = async () => {
+    const id = join()?.room ?? props.meeting.video_room_id;
+    if (!id) return;
+    try { await navigator.clipboard.writeText(id); setNotice("Room id copied."); }
+    catch (reason) { setError(`Could not copy room id: ${String(reason)}`); }
+  };
   onCleanup(() => { void room()?.disconnect(); });
   return <section class="call-panel" aria-label="Live call">
-    <header class="call-heading"><div><p class="call-eyebrow">LiveKit meeting</p><h3>{props.meeting.title}</h3><p class="call-state">State: <strong data-call-state>{state()}</strong>{join() && <> · {participants().length} participant{participants().length === 1 ? "" : "s"}</>}</p></div>
-      <Show when={room()} fallback={<button class="primary" disabled={state() === "connecting" || waitingForAdmission()} onClick={() => void requestJoin()}>{state() === "connecting" ? "Joining…" : waitingForAdmission() ? "Waiting for admission…" : "Join call"}</button>}><span class="call-leave-group"><button class="danger" onClick={() => void leave()}>Leave call</button><Show when={organizer()}><button class="danger" onClick={() => void endCall()}>End call</button></Show></span></Show>
+    <header class="call-topbar">
+      <p class="call-state-chip" data-call-state={state()}><Show when={join()}><strong>{stateLabel()}</strong></Show><Show when={!join()}>{props.meeting.title}</Show></p>
+      <Show when={room()} fallback={<button class="primary" disabled={state() === "connecting" || waitingForAdmission()} onClick={() => void requestJoin()}>{state() === "connecting" ? "Joining…" : waitingForAdmission() ? "Waiting for admission…" : "Join call"}</button>}>
+        <span class="call-leave-group">
+          <button type="button" class="ghost small call-theatre-toggle" aria-pressed={theatre()} onClick={() => setTheatre(value => !value)}>{theatre() ? "Collapse" : "Expand"}</button>
+          <button class="danger" onClick={() => void leave()}>Leave call</button>
+          <Show when={organizer()}><button class="danger" onClick={() => void endCall()}>End call</button></Show>
+        </span>
+      </Show>
     </header>
     <Show when={error()}><p class="meeting-error" role="alert">{error()}</p></Show>
     <Show when={notice()}><p class="call-notice" role="status">{notice()}</p></Show>
     <Show when={waitingForAdmission()}><p class="call-lobby" role="status">Lobby request sent. The organizer can admit you from the meeting participants list.</p></Show>
     <Show when={activeRecording()}>{active => <p class="call-recording" role="status">Recording {active().status} · captured by LiveKit Egress</p>}</Show>
-    <Show when={organizer() && actorRefusal()}><p class="call-notice" role="status">Recording is unavailable: {actorRefusal()}</p></Show>
-    <Show when={join()} fallback={<Show when={props.meeting.video_room_id}>{room => <p class="call-room">Room: {room()} · {props.meeting.video_status}</p>}</Show>}><p class="call-room">Room: {join()!.room}</p></Show>
+    <Show when={!join()}><Show when={props.meeting.video_room_id}>{room => <p class="call-room">Room: {room()} · {props.meeting.video_status}</p>}</Show></Show>
     <Show when={lifecycleFact()}>{fact => <p class="call-room">{fact()}</p>}</Show>
-    <div classList={{ "call-tiles": true, "audio-only": !!props.audioOnly }} aria-live="polite"><For each={participants()}>{participant => props.audioOnly ? <AudioParticipant participant={participant} /> : <VideoTile participant={participant} />}</For><Show when={connected() && participants().length === 0}><p class="call-empty">You are connected. Waiting for participants…</p></Show></div>
-    <Show when={room()}><section class="call-chat" aria-label="In-call chat"><div class="call-chat-heading"><strong>Chat</strong><span>{chatMessages().length} message{chatMessages().length === 1 ? "" : "s"}</span></div><div class="call-chat-messages" aria-live="polite"><Show when={chatMessages().length === 0}><p>Messages sent here are delivered to people currently in this call.</p></Show><For each={chatMessages()}>{message => <p><strong>{message.author}</strong><span>{message.text}</span></p>}</For></div><form class="call-chat-compose" onSubmit={event => { event.preventDefault(); void sendChat(); }}><input aria-label="Chat message" value={chatDraft()} onInput={event => setChatDraft(event.currentTarget.value)} maxlength={2_000} placeholder="Message everyone in this call" /><button disabled={!chatDraft().trim()}>Send</button></form></section><section class="call-transcript" aria-label="Live captions"><div class="call-chat-heading"><strong>Live captions</strong><span>{transcriptSegments().length} segment{transcriptSegments().length === 1 ? "" : "s"}</span></div><div class="call-chat-messages" aria-live="polite"><Show when={transcriptSegments().length === 0}><p>Captions appear here when a transcriber submits transcript segments.</p></Show><For each={transcriptSegments()}>{segment => <p><strong>{segment.speaker_id ?? "Unknown speaker"}</strong><span>{segment.text}</span></p>}</For></div></section><Show when={recordings().length}><section class="call-transcript" aria-label="Recording history"><div class="call-chat-heading"><strong>Recording history</strong><span>{recordings().length} job{recordings().length === 1 ? "" : "s"}</span></div><div class="call-chat-messages"><For each={recordings()}>{item => <p><strong>{item.status}</strong><span>{item.filepath ?? "No file path"} · started {timeLabel(item.started_at)}{item.stopped_at === null ? "" : ` · stopped ${timeLabel(item.stopped_at)}`}{item.last_error ? ` · ${item.last_error}` : ""}</span></p>}</For></div></section></Show><footer class="call-controls"><div class="call-toggle-group"><button classList={{ active: microphoneOn() }} aria-pressed={microphoneOn()} onClick={() => void toggleMicrophone()}>{microphoneOn() ? "Mute microphone" : "Unmute microphone"}</button><Show when={!props.audioOnly}><button classList={{ active: cameraOn() }} aria-pressed={cameraOn()} onClick={() => void toggleCamera()}>{cameraOn() ? "Turn camera off" : "Turn camera on"}</button><button classList={{ active: screenSharing() }} aria-pressed={screenSharing()} onClick={() => void toggleScreenShare()}>{screenSharing() ? "Stop sharing" : "Share screen"}</button></Show><Show when={organizer()}><button classList={{ active: recordingInProgress(), recording: true }} aria-pressed={recordingInProgress()} disabled={!!actorRefusal() || (!!activeRecording() && !recordingInProgress())} title={actorRefusal()} onClick={() => void toggleRecording()}>{recordingInProgress() ? "Stop recording" : activeRecording() ? `Recording ${activeRecording()!.status}…` : "Start recording"}</button></Show></div>
+    <div class="call-stage" classList={{ theatre: theatre() }} data-call-stage aria-live="polite">
+      <div classList={{ "call-tiles": true, "audio-only": !!props.audioOnly }}><For each={participants()}>{participant => props.audioOnly ? <AudioParticipant participant={participant} /> : <VideoTile participant={participant} />}</For><Show when={connected() && participants().length === 0}><p class="call-empty">You are connected. Waiting for participants…</p></Show></div>
+    </div>
+    <Show when={room()}><section class="call-chat" aria-label="In-call chat"><div class="call-chat-heading"><strong>Chat</strong><span>{chatMessages().length} message{chatMessages().length === 1 ? "" : "s"}</span></div><div class="call-chat-messages" aria-live="polite"><Show when={chatMessages().length === 0}><p>Messages sent here are delivered to people currently in this call.</p></Show><For each={chatMessages()}>{message => <p><strong>{message.author}</strong><span>{message.text}</span></p>}</For></div><form class="call-chat-compose" onSubmit={event => { event.preventDefault(); void sendChat(); }}><input aria-label="Chat message" value={chatDraft()} onInput={event => setChatDraft(event.currentTarget.value)} maxlength={2_000} placeholder="Message everyone in this call" /><button disabled={!chatDraft().trim()}>Send</button></form></section><section class="call-transcript" aria-label="Live captions"><div class="call-chat-heading"><strong>Live captions</strong><span>{transcriptSegments().length} segment{transcriptSegments().length === 1 ? "" : "s"}</span></div><div class="call-chat-messages" aria-live="polite"><Show when={transcriptSegments().length === 0}><p>Captions appear here when a transcriber submits transcript segments.</p></Show><For each={transcriptSegments()}>{segment => <p><strong>{segment.speaker_id ?? "Unknown speaker"}</strong><span>{segment.text}</span></p>}</For></div></section><Show when={recordings().length}><section class="call-transcript" aria-label="Recording history"><div class="call-chat-heading"><strong>Recording history</strong><span>{recordings().length} job{recordings().length === 1 ? "" : "s"}</span></div><div class="call-chat-messages"><For each={recordings()}>{item => <p><strong>{item.status}</strong><span>{item.filepath ?? "No file path"} · started {timeLabel(item.started_at)}{item.stopped_at === null ? "" : ` · stopped ${timeLabel(item.stopped_at)}`}{item.last_error ? ` · ${item.last_error}` : ""}</span></p>}</For></div></section></Show><footer class="call-controls"><div class="call-toggle-group"><button classList={{ active: microphoneOn() }} aria-pressed={microphoneOn()} onClick={() => void toggleMicrophone()}>{microphoneOn() ? "Mute microphone" : "Unmute microphone"}</button><Show when={!props.audioOnly}><button classList={{ active: cameraOn() }} aria-pressed={cameraOn()} onClick={() => void toggleCamera()}>{cameraOn() ? "Turn camera off" : "Turn camera on"}</button><button classList={{ active: screenSharing() }} aria-pressed={screenSharing()} onClick={() => void toggleScreenShare()}>{screenSharing() ? "Stop sharing" : "Share screen"}</button></Show><Show when={recordingAvailable()}><button classList={{ active: recordingInProgress(), recording: true }} aria-pressed={recordingInProgress()} disabled={!!activeRecording() && !recordingInProgress()} onClick={() => void toggleRecording()}>{recordingInProgress() ? "Stop recording" : activeRecording() ? `Recording ${activeRecording()!.status}…` : "Start recording"}</button></Show><button type="button" class="ghost small" onClick={() => void copyRoomId()}>Copy room id</button></div>
       <div class="call-devices"><DevicePicker label="Microphone" kind="audioinput" devices={devices().audioinput} disabled={!connected()} onChange={id => void switchDevice("audioinput", id)} /><Show when={!props.audioOnly}><DevicePicker label="Camera" kind="videoinput" devices={devices().videoinput} disabled={!connected()} onChange={id => void switchDevice("videoinput", id)} /></Show><DevicePicker label="Speaker" kind="audiooutput" devices={devices().audiooutput} disabled={!connected()} onChange={id => void switchDevice("audiooutput", id)} /></div>
     </footer></Show>
   </section>;

@@ -246,7 +246,10 @@ cursor: pointer;
 .cw-presence { width: 8px; height: 8px; border-radius: 50%; background: var(--teal); }
 
 .cw-live-call { display: flex; align-items: center; gap: .35rem; padding: .35rem 0 .7rem; color: var(--accent-text); font-size: .84rem; }
-.cw-call-panel { flex: 0 0 auto; padding: 0 18px; overflow: auto; }
+/* The panel's own .call-stage is height-bounded (Meetings.css); flex:none here keeps
+   this column from stretching to fit it, so <Chat embedded>'s .message-pane below
+   keeps its own overflow-y:auto instead of being pushed off the bottom of the page. */
+.cw-call-panel { flex: none; padding: 0 18px; }
 .cw-call-panel .call-panel { margin: 12px 0; }
 /* Header calls are primary workspace actions, never hover-reveal message-row tools. */
 .cw-metrics button.ghost.small { opacity: 1; }
