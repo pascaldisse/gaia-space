@@ -42,7 +42,20 @@
   letter-spacing: -.045em;
   font-weight: 720;
 }
-.cw-subtitle { margin: 6px 0 0; color: var(--muted); font-size: 14px; }
+.cw-title-line { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+/* THE CHANNEL'S KIND. One quiet word beside the title, not a control — the same
+   fact `content_type` always was, just no longer stacked as its own header line. */
+.cw-type-chip {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+.cw-subtitle { margin: 8px 0 0; color: var(--muted); font-size: 14px; }
 
 .cw-metrics { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 .cw-pill {
