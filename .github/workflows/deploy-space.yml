@@ -11,8 +11,8 @@ on:
     branches: [master]
     paths:
       - "src/**"
-- "scripts/ledger-to-todo.mjs"
-- "data/todo.json"
+      - "scripts/ledger-to-todo.mjs"
+      - "data/todo.json"
       - "src-tauri/**"
       - "package.json"
       - "bun.lock"
