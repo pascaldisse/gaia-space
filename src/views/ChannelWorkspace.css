@@ -235,3 +235,5 @@ cursor: pointer;
 .cw-live-call { display: flex; align-items: center; gap: .35rem; padding: .35rem 0 .7rem; color: var(--accent-text); font-size: .84rem; }
 .cw-call-panel { flex: 0 0 auto; padding: 0 18px; overflow: auto; }
 .cw-call-panel .call-panel { margin: 12px 0; }
+/* Header calls are primary workspace actions, never hover-reveal message-row tools. */
+.cw-metrics button.ghost.small { opacity: 1; }
