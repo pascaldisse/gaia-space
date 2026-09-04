@@ -52,10 +52,23 @@
 .call-stage{--call-stage-height:360px;--call-stage-height-theatre:70vh;flex:none;height:var(--call-stage-height);min-height:0;position:relative;border-radius:10px;overflow:hidden;background:#060a14}
 .call-stage.theatre{height:var(--call-stage-height-theatre)}
 .call-stage .call-tiles{height:100%}
-.call-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;min-height:0}.call-tile{position:relative;display:grid;grid-template-rows:1fr auto;overflow:hidden;min-height:0;border:1px solid var(--surface-border);border-radius:10px;background:#0b1220;color:#fff}.call-tile video{display:block;width:100%;height:100%;min-height:0;object-fit:cover;background:#060a14}.call-avatar{display:grid;place-items:center;min-height:0;height:100%;background:linear-gradient(135deg,var(--accent-soft),#15223d);color:var(--text-strong);font:600 2rem var(--font-head)}.call-tile-meta{display:grid;gap:2px;padding:8px 10px;background:rgba(8,15,30,.92)}.call-tile-meta strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.86rem}.call-tile-meta small{color:#afbdd5;font-size:.73rem}
+.call-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;min-height:0}.call-tile{position:relative;display:block;overflow:hidden;min-height:0;height:100%;border:1px solid var(--surface-border);border-radius:10px;background:#0b1220;color:#fff}.call-tile video{display:block;width:100%;height:100%;min-height:0;object-fit:cover;background:#060a14}.call-avatar{display:grid;place-items:center;min-height:0;height:100%;background:linear-gradient(135deg,var(--accent-soft),#15223d);color:var(--text-strong);font:600 2rem var(--font-head)}
+/* Meet-style overlay chip, not a full-width bar under the video. */
+.call-tile-meta{position:absolute;left:6px;bottom:6px;display:flex;align-items:baseline;gap:5px;max-width:calc(100% - 12px);padding:3px 8px;border-radius:999px;background:rgba(8,15,30,.72)}.call-tile-meta strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.8rem}.call-tile-meta small{color:#afbdd5;font-size:.7rem;white-space:nowrap}
 .call-topbar{display:flex;align-items:center;justify-content:space-between;gap:8px}
 .call-state-chip{margin:0;padding:5px 10px;border-radius:999px;background:var(--ctl-bg);color:var(--text-faint);font-size:.78rem;font-weight:600}
 .call-state-chip strong{color:var(--text-strong);text-transform:none}
+/* Grid tiling: 1 full, 2 side-by-side, 3-4 a 2x2, >4 auto-fit minmax. */
+.call-grid-1{grid-template-columns:1fr}
+.call-grid-2{grid-template-columns:repeat(2,1fr)}
+.call-grid-2x2{grid-template-columns:repeat(2,1fr);grid-template-rows:repeat(2,1fr)}
+.call-grid-auto{grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
+.call-tile.speaking{outline:2px solid var(--accent);outline-offset:-2px}
+.call-waiting{position:absolute;inset:0;display:grid;place-items:center;margin:0;color:var(--text-faint);font-size:.9rem;pointer-events:none}
+/* Self preview: a small mirrored PiP tile, not a second main tile. */
+.call-pip{--call-pip-width:160px;position:absolute;right:10px;bottom:10px;width:var(--call-pip-width);aspect-ratio:16/9;border-radius:8px;overflow:hidden;box-shadow:0 4px 14px rgba(0,0,0,.4);z-index:1}
+.call-pip .call-tile,.call-pip .call-audio-participant{height:100%;border-radius:8px}
+.call-pip video[data-source="camera"]{transform:scaleX(-1)}
 .call-controls{display:grid;gap:12px;padding-top:2px;border-top:1px solid var(--surface-border)}.call-toggle-group{display:flex;flex-wrap:wrap;gap:7px;padding-top:12px}.call-toggle-group button.active{border-color:var(--accent);background:var(--accent-soft);color:var(--accent-text)}
 .call-chat{display:grid;gap:8px;padding:11px;border:1px solid var(--surface-border);border-radius:var(--radius-option);background:var(--ctl-bg)}.call-chat-heading,.call-chat-compose{display:flex;align-items:center;gap:8px}.call-chat-heading{justify-content:space-between;font-size:.84rem}.call-chat-heading span{color:var(--text-faint);font-size:.76rem}.call-chat-messages{display:grid;gap:6px;max-height:10rem;overflow:auto}.call-chat-messages p{display:grid;gap:2px;margin:0;padding:7px 8px;border-radius:6px;background:var(--surface);font-size:.83rem}.call-chat-messages p>strong{font-size:.76rem;color:var(--accent-text)}.call-chat-messages p>span{overflow-wrap:anywhere}.call-chat-messages>p{color:var(--text-faint)}.call-chat-compose input{min-width:0;flex:1}.call-chat-compose button{flex:none}
 
