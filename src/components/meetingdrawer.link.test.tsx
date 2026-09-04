@@ -34,7 +34,7 @@ const reply = (cmd: string) => {
 const blank = (): MeetingForm => ({
   title: "", description: null, starts_at: 1893456000, ends_at: 1893459600, rrule: null,
   location: null, organizer_id: "me", channel_id: null, visibility: "participants",
-  modification_preference: "organizer-only", meeting_url: null,
+  modification_preference: "organizer-only", meeting_url: null, video_provider: null,
 });
 const mount = async (form: MeetingForm, invitees: string[], sink: { added: string[]; removed: string[]; fields: [string, unknown][] }) => {
   (window as any).__TAURI_INTERNALS__ = { invoke: (cmd: string) => Promise.resolve(reply(cmd)) };

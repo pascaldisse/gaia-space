@@ -228,6 +228,30 @@ test("quick create offers a meeting, a task and a deadline form on the chosen da
     expect([...deadlineForm!.querySelectorAll("option")].map((o) => o.textContent)).toEqual(["Select a project…", "Apollo"]);
   });
 
+  test("the header's New meeting button opens the composer, and the Video call choice sends video_provider 'livekit'", async () => {
+    stubFetch();
+    setProfileId("pa");
+    replies = { calendar_aggregate: { ok: true, value: [] } };
+    const host = mount();
+    await settle();
+    expect(host.querySelector("form[aria-label='New meeting']")).toBeNull();
+    // The action row's own button, not the per-day `.cal-side-add` affordance.
+    (host.querySelector(".page-actionbar button.primary") as HTMLButtonElement).click();
+    await settle();
+    const form = host.querySelector("form[aria-label='New meeting']") as HTMLFormElement;
+    expect(form).toBeTruthy();
+    (form.querySelector('input[aria-label="Meeting title"]') as HTMLInputElement).value = "Kickoff";
+    (form.querySelector('input[aria-label="Meeting title"]') as HTMLInputElement).dispatchEvent(new Event("input", { bubbles: true }));
+    // "Video call" is the default choice; the form is submitted without touching it.
+    expect((form.querySelector('[role="radio"][aria-checked="true"]') as HTMLButtonElement)?.textContent).toBe("Video call");
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    await settle();
+    const create = calls.find((c) => c.cmd === "create_meeting");
+    expect(create, `commands seen: ${calls.map((c) => c.cmd).join(",")}`).toBeTruthy();
+    expect(create!.args.meeting.video_provider).toBe("livekit");
+    expect(create!.args.meeting.meeting_url).toBeNull();
+  });
+
   test("a deadline is written with the narrow command, never a whole project payload", async () => {
     stubFetch();
     setProfileId("pa");
@@ -408,6 +432,10 @@ describe("the day composer invites people", () => {
     (host.querySelector('input[aria-label="Meeting title"]') as HTMLInputElement).value = "Design review";
     (host.querySelector('input[aria-label="Meeting title"]') as HTMLInputElement)
       .dispatchEvent(new Event("input", { bubbles: true }));
+    // Default choice is "Video call"; the link field only exists behind "External link".
+    const choices = [...host.querySelectorAll('[role="radio"]')] as HTMLButtonElement[];
+    (choices.find((button) => button.textContent === "External link") as HTMLButtonElement).click();
+    await settle();
     const link = host.querySelector('input[aria-label="Meeting link"]') as HTMLInputElement;
     link.value = "meet.google.com/bad";
     link.dispatchEvent(new Event("input", { bubbles: true }));

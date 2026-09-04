@@ -4,6 +4,7 @@ import { localInput, meetingDraftError, NO_ORGANIZER, UI_LOCALE} from "../calend
 import { ProfilePicker } from "../components/Pickers";
 import DateTimeField from "../components/DateTimeField";
 import MeetingDrawer, { type MeetingForm } from "../components/MeetingDrawer";
+import { meetingWherePayload, meetingWhereKindOf } from "./MeetingWhereField";
 import PageHeader, { Chip } from "../components/PageHeader";
 import { SectionHeading } from "../components/blocks";
 import { Icon } from "../components/Icon";
@@ -49,7 +50,8 @@ import "./Meetings.css";
 const epoch = (value: string) => Math.floor(Date.parse(value) / 1000);
 const newForm = (): MeetingForm => {
   const start = Math.floor(Date.now() / 1000) + 3600;
-  return { title: "", description: null, starts_at: start, ends_at: start + 3600, rrule: null, location: null, organizer_id: profileId() || null, channel_id: null, visibility: "participants", modification_preference: "organizer-only", meeting_url: null };
+  // Default choice = 'video': a fresh composer starts on this product's own call room.
+  return { title: "", description: null, starts_at: start, ends_at: start + 3600, rrule: null, location: null, organizer_id: profileId() || null, channel_id: null, visibility: "participants", modification_preference: "organizer-only", meeting_url: null, video_provider: "livekit" };
 };
 /** ── JOIN ─────────────────────────────────────────────────────────────────────
  *  One affordance, two implementations, because the two runtimes differ in ONE
@@ -166,6 +168,10 @@ export default function Meetings() {
       // Desktop IPC has no session rebinding, so only that transport requires a profile.
       const organizer = draft.organizer_id || profileId() || null;
       if (!organizer && !isWeb()) throw new Error(NO_ORGANIZER);
+      // Where the meeting happens is one exclusive choice (video / link / in person);
+      // meetingWherePayload is the ONLY place that turns it into these three fields, so
+      // whatever a person typed for a choice no longer selected never reaches the payload.
+      const where = meetingWherePayload({ kind: meetingWhereKindOf(draft), meeting_url: draft.meeting_url ?? "", location: draft.location ?? "" });
       const meeting: Meeting = {
         id: newId(),
         title: draft.title.trim(),
@@ -173,15 +179,14 @@ export default function Meetings() {
         starts_at: draft.starts_at,
         ends_at: draft.ends_at,
         rrule: draft.rrule?.trim() || null,
-        location: draft.location?.trim() || null,
+        location: where.location,
         organizer_id: organizer,
         channel_id: draft.channel_id || null,
         visibility: draft.visibility,
         modification_preference: draft.modification_preference,
-        meeting_url: draft.meeting_url?.trim() || null,
+        meeting_url: where.meeting_url,
         archived: false,
-        // A new meeting has no room yet: the room is minted and bound at the first join.
-        video_provider: null,
+        video_provider: where.video_provider,
         video_room_id: null,
         join_url: null,
         video_status: "scheduled",
