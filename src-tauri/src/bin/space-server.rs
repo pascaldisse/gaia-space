@@ -2849,7 +2849,7 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         }
         "mark_notification_read" => CommandPolicy::NotificationWrite,
         "create_absence" | "update_absence" | "delete_absence" => CommandPolicy::AbsenceWrite,
-        "create_meeting" => CommandPolicy::SessionIdentityWrite,
+        "create_meeting" | "create_channel_call" => CommandPolicy::SessionIdentityWrite,
         "save_document" | "restore_doc_version" | "budget_add_expense" | "budget_export_statement" => CommandPolicy::DocumentWrite,
         "budget_statement" => CommandPolicy::DocumentRead,
         "list_document_access" => CommandPolicy::DocumentRead,
@@ -5766,6 +5766,7 @@ async fn cmd(
     "move_issue_to_project" => issues::move_issue_to_project(input: issues::IssueTransferInput),
     "create_issue_status" => issues::create_issue_status(input: issues::StatusInput),
     "create_meeting" => meetings::create_meeting(meeting: meetings::Meeting),
+    "create_channel_call" => meetings::create_channel_call(meeting: meetings::Meeting),
     "create_job_artifact" => pipelines::create_job_artifact(input: pipelines::JobArtifactInput),
     "create_message" => chat::create_message(message: chat::Message),
     "create_package_repository" => pipelines::create_package_repository(repo: pipelines::PackageRepository),

@@ -17,7 +17,7 @@ const reply = (cmd: string, _args: Record<string, unknown>) => {
   if (["list_projects", "list_mentions_for_profile", "list_meetings", "list_messages_page", "list_channels_with_meta", "list_applications", "list_pinned_messages", "list_scheduled_messages"].includes(cmd)) return [];
   if (cmd === "private_feed") return channel;
   if (cmd === "get_channel_notification_preference") return { profile_id: "me", channel_id: channel.id, email_enabled: true, push_enabled: true, thread_scope: "all" };
-  if (cmd === "create_meeting") return null;
+  if (cmd === "create_channel_call") return { ..._args.meeting as object };
   return [];
 };
 
@@ -36,7 +36,7 @@ test("/channel/:id/messages renders channel Call and Video, and Video creates it
   expect(host.querySelector('[aria-label="Call"]')).toBeTruthy();
   host.querySelector<HTMLButtonElement>('[aria-label="Video"]')!.click();
   await settle();
-  expect(calls.find(call => call.cmd === "create_meeting")?.args.meeting).toMatchObject({ channel_id: channel.id, video_provider: "livekit" });
+  expect(calls.find(call => call.cmd === "create_channel_call")?.args.meeting).toMatchObject({ channel_id: channel.id, video_provider: "livekit" });
   expect(host.querySelector('[aria-label="Live call"]')).toBeTruthy();
 });
 test("Call controls explain a missing acting profile without creating a meeting", async () => {
@@ -54,5 +54,5 @@ test("Call controls explain a missing acting profile without creating a meeting"
   video.click();
   await Promise.resolve();
   expect(host.querySelector('[role="alert"]')?.textContent).toBe("Sign-in still loading");
-  expect(calls.some(call => call.cmd === "create_meeting")).toBe(false);
+  expect(calls.some(call => call.cmd === "create_channel_call")).toBe(false);
 });

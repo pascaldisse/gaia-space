@@ -21,7 +21,7 @@ const reply = (cmd: string, args: Record<string, unknown>) => {
   if (cmd === "list_messages_page") return { messages: [], next_cursor: null, has_more: false };
   if (cmd === "get_channel_notification_preference") return { profile_id: "me", channel_id: "channel-1", email_enabled: true, push_enabled: true, thread_scope: "all" };
   if (cmd === "list_mentions_for_profile" || cmd === "list_pinned_messages" || cmd === "list_scheduled_messages" || cmd === "list_applications" || cmd === "list_projects") return [];
-  if (cmd === "create_meeting") { meetings = [...meetings, args.meeting]; return null; }
+  if (cmd === "create_channel_call") { meetings = [...meetings, args.meeting]; return args.meeting; }
   return [];
 };
 const mount = async () => {
@@ -47,12 +47,13 @@ describe("chat calls", () => {
     const host = await mount();
     host.querySelector<HTMLButtonElement>('[aria-label="Video"]')!.click();
     await settle();
-    const call = calls.find(item => item.cmd === "create_meeting");
+    const call = calls.find(item => item.cmd === "create_channel_call");
     expect(call?.args.meeting).toMatchObject({ channel_id: "channel-1", video_provider: "livekit", visibility: "participants" });
+    expect(calls.some(item => item.cmd === "join_meeting_call")).toBe(true);
     expect(host.querySelector('[aria-label="Live call"]')).toBeTruthy();
   });
   test("shows a join banner for a live channel meeting", async () => {
-    meetings = [{ id: "meeting-live", title: "Design", description: null, starts_at: 1, ends_at: 2, rrule: null, location: null, organizer_id: "me", channel_id: "channel-1", visibility: "participants", modification_preference: "organizer-only", archived: false, video_provider: "livekit", video_room_id: "room", join_url: null, meeting_url: null, video_status: "live", video_started_at: 1, video_ended_at: null, video_ended_by: null, source_entity_type: null, source_entity_id: null }];
+    meetings = [{ id: "meeting-live", title: "Design", description: null, starts_at: 1, ends_at: 2, rrule: null, location: null, organizer_id: "you", channel_id: "channel-1", visibility: "participants", modification_preference: "organizer-only", archived: false, video_provider: "livekit", video_room_id: "room", join_url: null, meeting_url: null, video_status: "live", video_started_at: 1, video_ended_at: null, video_ended_by: null, source_entity_type: null, source_entity_id: null }];
     const host = await mount();
     expect(host.querySelector(".chat-live-call")?.textContent).toContain("Call live");
     expect(host.querySelector(".chat-live-call button")?.textContent).toBe("Join");

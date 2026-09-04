@@ -2,7 +2,7 @@ import { createResource, createSignal, createEffect, onCleanup, For, Show } from
 import { useDeepLink, linkProps, route } from "../router";
 import { currentUser, isWeb, projects, reloadProjects, setProjectId } from "../session";
 import { meetingsApi, type Meeting } from "../api/meetings";
-import { buildChannelCallMeeting, findLiveChannelMeeting } from "./channelCall";
+import { buildChannelCallMeeting, channelCallLabel, findLiveChannelMeeting, resolveChannelCall } from "./channelCall";
 import CallPanel from "./CallPanel";
 import { navLayout } from "../nav";
 import { actingProfileId, bumpChannels, setActingProfileId } from "../chatIdentity";
@@ -138,14 +138,16 @@ export default function Chat(props: { embedded?: boolean } = {}) {
   const [meetings, { refetch: refetchMeetings }] = createResource(actingProfileId, (id) =>
     id ? meetingsApi.list(id) : Promise.resolve<Meeting[]>([]),
   );
-  const liveMeeting = () => findLiveChannelMeeting(meetings(), activeChannelId() ?? "");
-  const [openCall, setOpenCall] = createSignal<{ meeting: Meeting; audioOnly: boolean }>();
-  const openExistingCall = (meeting: Meeting, audioOnly = false) => setOpenCall({ meeting, audioOnly });
+  const liveMeeting = () => findLiveChannelMeeting(meetings(), activeChannelId() ?? "", actingProfileId());
+  const [openCall, setOpenCall] = createSignal<{ meeting: Meeting; audioOnly: boolean; autoJoin?: boolean }>();
+  const openExistingCall = (meeting: Meeting, audioOnly = false) => setOpenCall({ meeting, audioOnly, autoJoin: true });
   const startCall = async (audioOnly: boolean) => {
     const channel = activeChannel(); const organizer = actingProfileId();
     if (!channel || !organizer) return;
+    const existing = resolveChannelCall(meetings(), channel.id);
+    if (existing) { openExistingCall(existing, audioOnly); return; }
     const meeting = buildChannelCallMeeting(channel, organizer);
-    try { await meetingsApi.create(meeting); setOpenCall({ meeting, audioOnly }); void refetchMeetings(); }
+    try { const created = await meetingsApi.createChannelCall(meeting); setOpenCall({ meeting: created, audioOnly, autoJoin: true }); void refetchMeetings(); }
     catch (reason) { fail(reason); }
   };
 
@@ -1345,7 +1347,8 @@ const deleteActiveChannel = async () => {
             <button type="button" class="ghost small" aria-label="Call" title="Call" onClick={() => void startCall(true)}>Call</button><button type="button" class="ghost small" aria-label="Video" title="Video" onClick={() => void startCall(false)}>Video</button><button type="button" class="ghost small" aria-label="Channel actions" onClick={(event) => setChannelMenu({ x: event.clientX, y: event.clientY })}>⋯</button>
           </Show>
         </header>
-        <Show when={liveMeeting()}>{meeting => <div class="chat-live-call" role="status">Call live <span aria-hidden="true">·</span> <button type="button" class="ghost small" onClick={() => openExistingCall(meeting())}>Join</button></div>}</Show>
+        <Show when={liveMeeting()}>{meeting => <div class="chat-live-call" role="status">{channelCallLabel(meeting())} <span aria-hidden="true">·</span> <button type="button" class="ghost small" onClick={() => openExistingCall(meeting())}>Join</button></div>}</Show>
+        <Show when={openCall()}>{call => <div class="chat-call-panel"><CallPanel meeting={call().meeting} audioOnly={call().audioOnly} autoJoin={call().autoJoin} identity={isWeb() ? currentUser()?.profile_id ?? "" : actingProfileId() ?? ""} displayName={isWeb() ? currentUser()?.display_name ?? "" : profileName(actingProfileId())}/></div>}</Show>
         <Show when={channelMenu()}>{menu => <ContextMenu x={menu().x} y={menu().y} onClose={() => setChannelMenu(undefined)} items={[
           { label: "Pinned messages", onSelect: () => setShowPinned((value) => !value) },
 { label: "Mentions", onSelect: () => setShowMentions((value) => !value) },
@@ -1530,9 +1533,9 @@ const deleteActiveChannel = async () => {
         </Show>
       </section>
 
-      <Show when={showMembers() || showProjectPicker() || showNotifications() || threadRoot() || openCall()}>
+      <Show when={showMembers() || showProjectPicker() || showNotifications() || threadRoot()}>
       <aside class="chat-detail">
-        <Show when={openCall()}>{call => <CallPanel meeting={call().meeting} audioOnly={call().audioOnly} identity={isWeb() ? currentUser()?.profile_id ?? "" : actingProfileId() ?? ""} displayName={isWeb() ? currentUser()?.display_name ?? "" : profileName(actingProfileId())}/>}</Show>
+
         <Show when={showProjectPicker()}><section class="members-panel" aria-label="Attach channel to project"><div class="thread-header"><strong>Attach to project</strong><button class="ghost small" onClick={() => setShowProjectPicker(false)}>×</button></div><select aria-label="Attach to project" value={activeChannel()?.project_id ?? ""} onChange={(event) => void attachActiveChannel(event.currentTarget.value)}><option value="">Not part of a project</option><For each={projects()?.filter((project) => !project.archived)}>{project => <option value={project.id}>{project.name}</option>}</For></select></section></Show>
         <Show when={showNotifications()}><Show when={notificationPreference()}>{settings => <section class="members-panel" aria-label="Notification settings"><div class="thread-header"><strong>Notifications</strong><button class="ghost small" onClick={() => setShowNotifications(false)}>×</button></div><label><input type="checkbox" checked={settings().email_enabled} onChange={event => void updateNotificationPreference({ email_enabled: event.currentTarget.checked })}/> Email</label><label><input type="checkbox" checked={settings().push_enabled} onChange={event => void updateNotificationPreference({ push_enabled: event.currentTarget.checked })}/> Push</label><label>Threads <select value={settings().thread_scope} onChange={event => void updateNotificationPreference({ thread_scope: event.currentTarget.value as ChannelNotificationPreference["thread_scope"] })}><option value="all">All</option><option value="followed">Followed</option><option value="none">None</option></select></label></section>}</Show></Show>
         <Show when={showMembers()}>

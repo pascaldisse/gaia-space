@@ -5,7 +5,7 @@ import { isDirectMessage, dmLabel } from "../chatPartition";
 import { Avatar } from "../components/Avatar";
 import { bumpChannels } from "../chatIdentity";
 import { meetingsApi, type Meeting } from "../api/meetings";
-import { buildChannelCallMeeting, findLiveChannelMeeting } from "./channelCall";
+import { buildChannelCallMeeting, channelCallLabel, findLiveChannelMeeting, resolveChannelCall } from "./channelCall";
 import CallPanel from "./CallPanel";
 import { personalApi } from "../api/personal";
 import { currentUser, humanError, isWeb, profileId, profiles, projects, reloadProfiles, reloadProjects } from "../session";
@@ -71,7 +71,7 @@ const WORK_TABS: Partial<Record<TabKey, string | undefined>> = {
   notes: "chats",
 };
 
-const CHANNEL_CALL_REFRESH_MS = Number(import.meta.env.VITE_CHANNEL_CALL_REFRESH_MS) || 15_000;
+const CHANNEL_CALL_REFRESH_MS = Number(import.meta.env.VITE_CHANNEL_CALL_REFRESH_MS) || 5_000;
 const hhmm = (seconds: number) =>
   new Date(seconds * 1000).toLocaleTimeString(UI_LOCALE, { hour: "2-digit", minute: "2-digit" });
 
@@ -132,21 +132,23 @@ createEffect(() => {
  const timer = window.setInterval(() => { void refetchMeetings(); }, CHANNEL_CALL_REFRESH_MS);
  onCleanup(() => window.clearInterval(timer));
 });
-const [openCall, setOpenCall] = createSignal<{ meeting: Meeting; audioOnly: boolean }>();
-const openExistingCall = (meeting: Meeting, audioOnly = false) => setOpenCall({ meeting, audioOnly });
+const [openCall, setOpenCall] = createSignal<{ meeting: Meeting; audioOnly: boolean; autoJoin?: boolean }>();
+const openExistingCall = (meeting: Meeting, audioOnly = false) => setOpenCall({ meeting, audioOnly, autoJoin: true });
 const startCall = async (audioOnly: boolean) => {
  const current = channel(); const organizer = actingProfileId();
  setMemberError("");
  if (!organizer) { setMemberError("Sign-in still loading"); return; }
  if (!current) { setMemberError("Conversation still loading"); return; }
+ const existing = resolveChannelCall(meetings(), current.id);
+ if (existing) { openExistingCall(existing, audioOnly); return; }
  const meeting = buildChannelCallMeeting(current, organizer);
- try { await meetingsApi.create(meeting); setOpenCall({ meeting, audioOnly }); await refetchMeetings(); }
+ try { const created = await meetingsApi.createChannelCall(meeting); setOpenCall({ meeting: created, audioOnly, autoJoin: true }); await refetchMeetings(); }
  catch (reason) { setMemberError(humanError(reason)); }
 };
 const callUnavailable = () => !channel() || !actingProfileId();
 const callTitle = (label: "Call" | "Video") =>
  callUnavailable() ? (!actingProfileId() ? "Sign-in still loading" : "Conversation still loading") : label;
-const liveMeeting = () => findLiveChannelMeeting(meetings(), channelId());
+const liveMeeting = () => findLiveChannelMeeting(meetings(), channelId(), actingProfileId());
 
   const memberCount = () => members()?.length ?? 0;
   /** "Replies needed" = unread mentions of me IN THIS CHANNEL. */
@@ -411,12 +413,12 @@ const liveMeeting = () => findLiveChannelMeeting(meetings(), channelId());
             </div>
           )}
         </Show>
-        <Show when={liveMeeting()}>{(meeting) => <div class="cw-live-call" role="status">Call live <span aria-hidden="true">·</span> <button type="button" class="ghost small" onClick={() => openExistingCall(meeting())}>Join</button></div>}</Show>
+        <Show when={liveMeeting()}>{(meeting) => <div class="cw-live-call" role="status">{channelCallLabel(meeting())} <span aria-hidden="true">·</span> <button type="button" class="ghost small" onClick={() => openExistingCall(meeting())}>Join</button></div>}</Show>
       </header>
 
       <div class="cw-body" classList={{ "with-rail": !!channelProjectId() || teamOpen() }}>
         <section class="cw-panel cw-chat">
-          <Show when={openCall()}>{(call) => <div class="cw-call-panel"><CallPanel meeting={call().meeting} audioOnly={call().audioOnly} identity={isWeb() ? currentUser()?.profile_id ?? "" : actingProfileId() ?? ""} displayName={isWeb() ? currentUser()?.display_name ?? "" : nameOf(actingProfileId())}/></div>}</Show>
+          <Show when={openCall()}>{(call) => <div class="cw-call-panel"><CallPanel meeting={call().meeting} audioOnly={call().audioOnly} autoJoin={call().autoJoin} identity={isWeb() ? currentUser()?.profile_id ?? "" : actingProfileId() ?? ""} displayName={isWeb() ? currentUser()?.display_name ?? "" : nameOf(actingProfileId())}/></div>}</Show>
           {/* THE ONLY BODY THIS SURFACE HAS NOW: the messages. The five guest views
               that used to be mounted here are mounted by views/ProjectWorkspace.tsx
               instead, under the project's single tab row — one home each, not two.

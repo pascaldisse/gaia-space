@@ -997,7 +997,7 @@ fn remove_channel_member_impl(c: &Connection, channel_id: &str, profile_id: &str
     }
     Ok(())
 }
-fn list_channel_members_impl(c: &Connection, channel_id: &str) -> Result<Vec<ChannelMember>> {
+pub(crate) fn list_channel_members_impl(c: &Connection, channel_id: &str) -> Result<Vec<ChannelMember>> {
     let mut s = c.prepare(EFFECTIVE_MEMBERS_SQL).map_err(|e| e.to_string())?;
     let rows = s
         .query_map([channel_id], |r| {
