@@ -4103,6 +4103,11 @@ fn authorize_command(
                 }
             }
             put_arg(body, "profile_id", json!(user.profile_id));
+            // Same source `project_readable` reads a project by: a GlobalAdmin sees every
+            // project's todos exactly as it sees every project, with no membership row
+            // required. Server-resolved from the session only — a client-sent `admin`
+            // field would be overwritten here regardless of what it said.
+            put_arg(body, "admin", json!(user.role == "GlobalAdmin"));
             Ok(())
         }
         // Reads: the channel id is the scope and `channel_notes::list_channel_notes`
@@ -5991,8 +5996,8 @@ async fn cmd(
     "list_thread_replies" => chat::list_thread_replies(thread_of: String, acting_profile_id: Option<String>),
     "list_time_tracking_entries" => issues::list_time_tracking_entries(issue_id: String),
     "list_todos" => personal::list_todos(profile_id: String, include_done: Option<bool>),
-    "list_project_todos" => personal::list_project_todos(project_id: String, profile_id: String, include_done: Option<bool>),
-    "list_team_todos" => personal::list_team_todos(profile_id: String, include_done: Option<bool>),
+    "list_project_todos" => personal::list_project_todos(project_id: String, profile_id: String, include_done: Option<bool>, admin: Option<bool>),
+    "list_team_todos" => personal::list_team_todos(profile_id: String, include_done: Option<bool>, admin: Option<bool>),
     "list_project_member_ids" => personal::project_member_ids(project_id: String),
     "calendar_aggregate" => personal::calendar_aggregate(profile_id: String, range_start: i64, range_end: i64, range_start_date: Option<String>, range_end_date: Option<String>, target_profile_id: Option<String>, target_location: Option<String>),
     "list_calendar_feeds" => calendar_feeds::list_calendar_feeds(profile_id: String),
@@ -9815,6 +9820,78 @@ mod tests {
             .as_str()
             .unwrap_or_default()
             .contains("Assignee must be a project member"));
+    }
+
+    /// The live bug: a GlobalAdmin with zero project memberships got `count=0` from
+    /// `list_team_todos`/`list_project_todos`, though `project_readable` already shows it
+    /// every project. `pc` (server-admin, role='admin' → GlobalAdmin) is a member of
+    /// nothing here on purpose.
+    #[tokio::test]
+    async fn global_admin_sees_project_and_team_todos_with_no_memberships() {
+        let _serial = test_lock();
+        setup();
+        let c = db::conn().unwrap();
+        c.execute_batch("INSERT INTO projects(id,name,key,created_by,created_at) VALUES('adm-proj','AdminProj','ADMP','pa',1); INSERT INTO project_members(project_id,profile_id) VALUES('adm-proj','pb');").unwrap();
+        drop(c);
+        let (status, value) = call(cookie("ta"), "create_todo", json!({"input":{"profile_id":"pa","content":"Owner task","project_id":"adm-proj","done":false,"assignee_ids":[]}})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        let todo_id = value["value"]["id"].as_str().unwrap().to_string();
+
+        // 'pc' (GlobalAdmin) has no row in `project_members` and did not create the
+        // project or the todo — the exact live-bug shape (bridge admin, 0 memberships).
+        let (status, value) = call(
+            cookie("tc"),
+            "list_project_todos",
+            json!({"project_id":"adm-proj","include_done":true}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        assert_eq!(
+            value["value"].as_array().unwrap().iter().map(|t| t["id"].as_str().unwrap()).collect::<Vec<_>>(),
+            vec![todo_id.as_str()],
+            "a GlobalAdmin must read a project's todos exactly as it reads the project itself"
+        );
+        let (status, value) = call(
+            cookie("tc"),
+            "list_team_todos",
+            json!({"include_done":true}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        assert!(
+            value["value"].as_array().unwrap().iter().any(|t| t["id"].as_str() == Some(todo_id.as_str())),
+            "{value}"
+        );
+
+        // A plain member-less non-admin ('td') still sees nothing: the bypass is
+        // role-gated, not merely "anyone who asks".
+        let (status, value) = call(
+            cookie("td"),
+            "list_project_todos",
+            json!({"project_id":"adm-proj","include_done":true}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(value["value"].as_array().unwrap().is_empty());
+        let (status, value) = call(
+            cookie("td"),
+            "list_team_todos",
+            json!({"include_done":true}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(!value["value"].as_array().unwrap().iter().any(|t| t["id"].as_str() == Some(todo_id.as_str())));
+
+        // A client cannot forge the bypass for itself: 'td' claiming admin=true over the
+        // wire is silently overwritten server-side (CommandPolicy::ProjectTodoRead).
+        let (status, value) = call(
+            cookie("td"),
+            "list_project_todos",
+            json!({"project_id":"adm-proj","include_done":true,"admin":true}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(value["value"].as_array().unwrap().is_empty(), "a client-sent admin flag must be ignored");
     }
 
     #[tokio::test]
