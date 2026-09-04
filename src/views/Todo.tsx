@@ -40,11 +40,15 @@ export default function Todo() {
    *  with, and it only ever grows. */
   const [showDone,setShowDone]=createSignal(false);
   const [todos,{refetch}]=createResource(profileId,id=>id?personalApi.todos(id,true):Promise.resolve([]));
+  /* A FAILED READ IS NOT AN EMPTY LIST (mirrors TeamTasks/ProjectTasks, 6de55cc): a
+     rejected `list_todos` is carried as `todos.error` and shown as one alert below,
+     never silently rendered as zero rows. */
+  const loadError=()=>todos.error;
   /* A ROW IS THE TASK, NOT THE READ THAT DELIVERED IT (GS issue #2). Every read hands
      back freshly deserialised objects; `<For>` keys BY REFERENCE, so an unchanged task
      looked new and its row — with any OPEN editor in it — was disposed and rebuilt.
      `stableTasks` keeps the object a task already had when its content did not change. */
-  const stableTodos=stableTasks(()=>todos());
+  const stableTodos=stableTasks(()=>(todos.error?[]:todos()));
 const scopedTodos=()=>myTasks(stableTodos(),profileId());
 const [assignedIssues]=createResource(profileId,id=>id?planningApi.issues({assignee_id:id}):Promise.resolve([]));
 const [issueFacts]=createResource(()=>assignedIssues()?.map(issue=>issue.id).join(",")??"",async()=>Promise.all((assignedIssues()??[]).map(async issue=>({issue,detail:await planningApi.issue(issue.id)}))));
@@ -152,7 +156,7 @@ const issueKind=(issue:Issue)=>issueFacts()?.find(fact=>fact.issue.id===issue.id
    *  not 'nothing exists' and not 'a filter matched nothing' — 'you are finished'. */
   const openCount=()=>openTodos().length;
   /** True while an EmptyState on this surface is showing its own "New task". */
-  const showsEmptyPrimary=()=>!!profileId()&&!todos.loading&&(!scopedTodos().length||!openCount());
+  const showsEmptyPrimary=()=>!loadError()&&!!profileId()&&!todos.loading&&(!scopedTodos().length||!openCount());
   const doneList=()=>scopedTodos().filter(todo=>todo.done);
   const dayGroups=stableBy(
     ()=>[{ key:"today", label:"Today" },{ key:"later", label:"Later" },{ key:"someday", label:"No date" }],
@@ -292,6 +296,7 @@ const issueKind=(issue:Issue)=>issueFacts()?.find(fact=>fact.issue.id===issue.id
         </Show>
       }
     />
+    <Show when={loadError()}>{err=><p class="personal-error" role="alert">Could not load tasks: {String(err())}</p>}</Show>
     <Show when={error()}><p class="personal-error">{error()}</p></Show>
 
     <Show when={!showsEmptyPrimary()}>
@@ -331,7 +336,7 @@ const issueKind=(issue:Issue)=>issueFacts()?.find(fact=>fact.issue.id===issue.id
         </div>
       </Show>
       <Show when={!profileId()}><p class="personal-empty">No profile selected — add one in Members.</p></Show>
-      <Show when={!todos.loading && !!profileId() && !scopedTodos().length}>
+      <Show when={!loadError() && !todos.loading && !!profileId() && !scopedTodos().length}>
         <EmptyState
           title="No tasks yet"
           hint="Tasks assigned to you appear here, including project work."
