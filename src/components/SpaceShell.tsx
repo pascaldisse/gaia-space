@@ -5,6 +5,7 @@ import "./SpaceShell.css";
 import "../views/ChatSpaceLight.css";
 import { Icon, type IconName } from "./Icon";
 import NewChannelDialog from "./NewChannelDialog";
+import RecipientPicker from "./RecipientPicker";
 import ConfirmDialog from "./ConfirmDialog";
 import PromptDialog from "./PromptDialog";
 import ContextMenu, { type ContextMenuItem } from "./ContextMenu";
@@ -133,8 +134,13 @@ export default function SpaceShell(props: {
   const [sidebarCollapsed, setSidebarCollapsed] = createSignal(false);
 const [mobileSidebarOpen, setMobileSidebarOpen] = createSignal(false);
   const [filter, setFilter] = createSignal("");
-  /** `undefined` = closed; a string (possibly "") = open, bound to that project. */
+  /** `undefined` = closed; a string (possibly "") = open, bound to that project.
+   *  Scoped to the sidebar's own per-project/per-section "+" only — the global
+   *  "New message" action below opens the picker instead (ONE ACTION, ONE PLACE:
+   *  a project-bound `+` still needs the project preset NewChannelDialog carries,
+   *  the person-first global action does not). */
   const [newChannelFor, setNewChannelFor] = createSignal<string | undefined>();
+  const [recipientPickerOpen, setRecipientPickerOpen] = createSignal(false);
 
   // Identity: web is bound to the authenticated profile, desktop to the acting one.
   const actingProfileId = () => currentUser()?.profile_id ?? profileId();
@@ -640,7 +646,7 @@ const [mobileSidebarOpen, setMobileSidebarOpen] = createSignal(false);
             composer the sidebar's section `+` and the global `New message` open,
             organisation-scoped. Search keeps its own two addresses (the command bar
             and the sidebar's magnifier), both of which say "search". */}
-        <button class="round-action" aria-label="New message" title="New message" onClick={() => setNewChannelFor("")}>
+        <button class="round-action" aria-label="New message" title="New message" onClick={() => setRecipientPickerOpen(true)}>
           <Icon name="plus" size={20} />
         </button>
         <a class="profile" title={meLabel()} aria-label={meLabel()} {...linkProps({ view: "Settings" })}>
@@ -826,6 +832,10 @@ const [mobileSidebarOpen, setMobileSidebarOpen] = createSignal(false);
       </aside>
       </Show>
 
+      <Show when={recipientPickerOpen()}>
+        <RecipientPicker onClose={() => setRecipientPickerOpen(false)} />
+      </Show>
+
       <Show when={newChannelFor() !== undefined}>
         <NewChannelDialog
           projectId={newChannelFor() || undefined}
@@ -861,9 +871,15 @@ const [mobileSidebarOpen, setMobileSidebarOpen] = createSignal(false);
               `Schedule meeting` is gone; the two surfaces that own it keep it.
               `New message` stays as the ONE global action and now genuinely opens
               NewChannelDialog — the same act as the sidebar `+`, organisation-scoped
-              (`""` = no project pre-bound), so nothing became unreachable. */}
+              (`""` = no project pre-bound), so nothing became unreachable.
+
+              Stage feat/new-message-picker: `New message` now opens RecipientPicker
+              (a Telegram-style person/channel picker) instead of NewChannelDialog's
+              content-type form. NewChannelDialog itself is untouched — the sidebar's
+              per-project `+` (`setNewChannelFor`) still opens it, since that button
+              needs the project preset a person-first picker has no reason to carry. */}
           <div class="top-actions">
-            <button class="btn primary" onClick={() => setNewChannelFor("")}>New message</button>
+            <button class="btn primary" onClick={() => setRecipientPickerOpen(true)}>New message</button>
           </div>
         </header>
         <section class="space-content">{props.children}</section>
