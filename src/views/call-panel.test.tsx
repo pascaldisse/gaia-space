@@ -95,7 +95,7 @@ if (command === "list_meeting_transcript_segments") return [{ id: "segment-1", m
   (Array.from(host.querySelectorAll("button")).find(button => button.textContent === "Join call") as HTMLButtonElement).click();
   await settle();
   expect(calls).toEqual(["microphone:true", "camera:true"]);
-  expect(host.textContent).toContain("2 participants");
+  expect(host.textContent).toContain("Connected · 2");
   expect(remoteAudioAttachments).toHaveLength(1);
   expect(remoteAudioAttachments[0]).toBeInstanceOf(HTMLAudioElement);
   expect(host.querySelectorAll("select")).toHaveLength(3);
@@ -150,10 +150,10 @@ test("a persisted running egress job is shown on join, so a restart cannot stran
   expect(host.textContent).not.toContain("Recording recording");
 });
 
-// The backend refuses recording when it cannot name the acting profile. The UI must
-// say so rather than offer a button that throws: a control that looks armed and does
-// nothing is the interface lying about what the system will do.
-test("an unresolvable native actor disables recording and explains why", async () => {
+// The backend refuses recording when it cannot name the acting profile. Rather than
+// offer a button that throws, the control is removed entirely (no error box either):
+// a control that looks armed and does nothing is the interface lying about intent.
+test("an unresolvable native actor removes the recording control instead of disabling it", async () => {
   (window as any).__TAURI_INTERNALS__ = { invoke: async (command: string) => {
     ipcCommands.push(command);
     if (command === "join_meeting_call") return { url: "ws://livekit.test", room: "meeting-meeting-1", token: "signed-token" };
@@ -165,12 +165,9 @@ test("an unresolvable native actor disables recording and explains why", async (
   dispose = render(() => <CallPanel meeting={meeting} identity="me" displayName="Me" />, host);
   (Array.from(host.querySelectorAll("button")).find(button => button.textContent === "Join call") as HTMLButtonElement).click();
   await settle();
-  const record = Array.from(host.querySelectorAll("button")).find(button => button.textContent === "Start recording") as HTMLButtonElement;
-  expect(record.disabled).toBe(true);
-  expect(host.textContent).toContain("cannot tell who is acting");
-  record.click();
-  await settle();
-  expect(ipcCommands).not.toContain("start_meeting_recording");
+  expect(Array.from(host.querySelectorAll("button")).some(button => button.textContent === "Start recording")).toBe(false);
+  expect(host.textContent).not.toContain("cannot tell who is acting");
+  expect(host.textContent).not.toContain("Recording is unavailable");
 });
 
 test("only the organizer can end the call, and a non-organizer sees leave alone", async () => {
@@ -216,17 +213,20 @@ test("a meeting that already has a bound room shows it before anyone joins", asy
   expect(host.textContent).toContain("by me");
 });
 
-test("an invited attendee waits in the lobby until the organizer accepts the RSVP", async () => {
+test("an invited attendee joins without an RSVP round trip", async () => {
   (window as any).__TAURI_INTERNALS__ = { invoke: async (command: string) => {
     ipcCommands.push(command);
     if (command === "list_meeting_participants") return [{ meeting_id: "meeting-1", profile_id: "me", status: "invited" }];
+    if (command === "join_meeting_call") return { url: "ws://livekit.test", room: "meeting-meeting-1", token: "signed-token" };
+    if (command === "recording_actor_status") return { available: true, profile_id: "me", source: "sole_profile", reason: null };
+    if (command === "list_meeting_recordings" || command === "list_meeting_transcript_segments") return [];
     throw new Error(`unexpected command: ${command}`);
   } };
   const host = document.createElement("div"); document.body.append(host);
   dispose = render(() => <CallPanel meeting={{ ...meeting, organizer_id: "host" }} identity="me" displayName="Me" />, host);
   (host.querySelector("button") as HTMLButtonElement).click();
   await settle();
-  expect(ipcCommands).toEqual(["list_meeting_participants"]);
-  expect(host.textContent).toContain("Lobby request sent");
-  expect(host.textContent).toContain("Waiting for admission…");
+  expect(ipcCommands).toContain("list_meeting_participants");
+  expect(ipcCommands).toContain("join_meeting_call");
+  expect(host.textContent).toContain("Connected");
 });
