@@ -434,13 +434,27 @@ fn update_todo_on(c: &mut Connection, todo: Todo) -> Result<Todo> {
     todo_on(c, &todo.id)?.ok_or_else(|| "Todo not found".into())
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
+/// `admin`: GlobalAdmin bypass of the visibility predicate below, mirroring
+/// `project_readable` in space-server.rs (`role==GlobalAdmin || owner || member`) —
+/// an admin reads every project's todos the same way it reads every project. The HTTP
+/// command layer resolves this itself from the SESSION user's role and never trusts a
+/// client-sent value (see `CommandPolicy::ProjectTodoRead`); the desktop Tauri command
+/// has no session role to ask, so a caller that omits the argument gets the safe
+/// default of `false` (not an admin), same as any other unspecified caller.
 pub fn list_project_todos(
     project_id: String,
     profile_id: String,
     include_done: Option<bool>,
+    admin: Option<bool>,
 ) -> Result<Vec<Todo>> {
     let c = db::conn()?;
-    list_project_todos_on(&c, &project_id, &profile_id, include_done.unwrap_or(false))
+    list_project_todos_on(
+        &c,
+        &project_id,
+        &profile_id,
+        include_done.unwrap_or(false),
+        admin.unwrap_or(false),
+    )
 }
 /// The ONE project-todo visibility rule, written once. `{p}` is the placeholder for the
 /// bound parameter holding the reading profile, so per-project and cross-project reads
@@ -453,25 +467,35 @@ pub fn list_project_todos(
 const PROJECT_TODO_VISIBILITY: &str = "(t.profile_id={p} OR EXISTS(SELECT 1 FROM projects p WHERE p.id=t.project_id AND (p.created_by={p} OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id={p}))) OR EXISTS(SELECT 1 FROM todo_assignees a WHERE a.todo_id=t.id AND a.profile_id={p}))";
 const TODO_COLUMNS: &str = "t.id,t.profile_id,t.content,t.due_date,t.project_id,t.done,t.source_entity_type,t.source_entity_id,t.notes,t.content_kind,t.category";
 const TODO_ORDER: &str = "ORDER BY t.done,t.due_date IS NULL,t.due_date,t.created_at";
-fn project_todo_visibility(profile_param: &str) -> String {
-    PROJECT_TODO_VISIBILITY.replace("{p}", profile_param)
+/// `admin_param` bypasses [`PROJECT_TODO_VISIBILITY`] entirely when true — the same
+/// shape as `project_readable`'s `role==GlobalAdmin || …`. Non-admin reads are
+/// untouched: the OR short-circuits straight into the unchanged predicate.
+fn project_todo_visibility(profile_param: &str, admin_param: &str) -> String {
+    format!(
+        "({admin_param}=1 OR {})",
+        PROJECT_TODO_VISIBILITY.replace("{p}", profile_param)
+    )
 }
-/// Todos of ONE project, as seen by `profile_id`. See [`PROJECT_TODO_VISIBILITY`].
+/// Todos of ONE project, as seen by `profile_id` (or, if `admin`, by everyone). See
+/// [`PROJECT_TODO_VISIBILITY`] and [`project_todo_visibility`].
 pub(crate) fn list_project_todos_on(
     c: &Connection,
     project_id: &str,
     profile_id: &str,
     include_done: bool,
+    admin: bool,
 ) -> Result<Vec<Todo>> {
     let sql = format!(
         "SELECT {TODO_COLUMNS} FROM todos t WHERE t.project_id=?1 AND (?3=1 OR t.done=0) AND {} {TODO_ORDER}",
-        project_todo_visibility("?2")
+        project_todo_visibility("?2", "?4")
     );
     let mut statement = err(c.prepare(&sql))?;
-    let mut todos =
-        err(statement.query_map(params![project_id, profile_id, include_done], read_todo))?
-            .collect::<std::result::Result<Vec<_>, _>>()
-            .map_err(|error| error.to_string())?;
+    let mut todos = err(statement.query_map(
+        params![project_id, profile_id, include_done, admin],
+        read_todo,
+    ))?
+    .collect::<std::result::Result<Vec<_>, _>>()
+    .map_err(|error| error.to_string())?;
     drop(statement);
     for todo in &mut todos {
         todo.assignee_ids = assignees_on(c, &todo.id)?;
@@ -482,23 +506,37 @@ pub(crate) fn list_project_todos_on(
 /// every project this profile can see, in one list. Project-less personal todos are
 /// excluded — this is the team surface, not "my tasks".
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn list_team_todos(profile_id: String, include_done: Option<bool>) -> Result<Vec<Todo>> {
+/// `admin`: see [`list_project_todos`] — same GlobalAdmin bypass, same default.
+pub fn list_team_todos(
+    profile_id: String,
+    include_done: Option<bool>,
+    admin: Option<bool>,
+) -> Result<Vec<Todo>> {
     let c = db::conn()?;
-    list_team_todos_on(&c, &profile_id, include_done.unwrap_or(false))
+    list_team_todos_on(
+        &c,
+        &profile_id,
+        include_done.unwrap_or(false),
+        admin.unwrap_or(false),
+    )
 }
 pub(crate) fn list_team_todos_on(
     c: &Connection,
     profile_id: &str,
     include_done: bool,
+    admin: bool,
 ) -> Result<Vec<Todo>> {
     let sql = format!(
         "SELECT {TODO_COLUMNS} FROM todos t WHERE t.project_id IS NOT NULL AND (?2=1 OR t.done=0) AND {} {TODO_ORDER}",
-        project_todo_visibility("?1")
+        project_todo_visibility("?1", "?3")
     );
     let mut statement = err(c.prepare(&sql))?;
-    let mut todos = err(statement.query_map(params![profile_id, include_done], read_todo))?
-        .collect::<std::result::Result<Vec<_>, _>>()
-        .map_err(|error| error.to_string())?;
+    let mut todos = err(statement.query_map(
+        params![profile_id, include_done, admin],
+        read_todo,
+    ))?
+    .collect::<std::result::Result<Vec<_>, _>>()
+    .map_err(|error| error.to_string())?;
     drop(statement);
     // Same per-row assignee fill as `list_project_todos`: consistency over cleverness.
     for todo in &mut todos {
@@ -2153,7 +2191,7 @@ mod tests {
         create_todo_on(&mut c, personal).unwrap();
 
         let ids = |profile: &str, include_done: bool| -> Vec<String> {
-            list_team_todos_on(&c, profile, include_done)
+            list_team_todos_on(&c, profile, include_done, false)
                 .unwrap()
                 .into_iter()
                 .map(|t| t.id)
@@ -2177,12 +2215,12 @@ mod tests {
         // Refactor safety: both reads run the SAME predicate, so for a single project
         // they must agree exactly — the day they diverge, this fails.
         for profile in ["p", "q", "r", "outsider"] {
-            let per_project: Vec<String> = list_project_todos_on(&c, "project", profile, true)
+            let per_project: Vec<String> = list_project_todos_on(&c, "project", profile, true, false)
                 .unwrap()
                 .into_iter()
                 .map(|t| t.id)
                 .collect();
-            let team: Vec<String> = list_team_todos_on(&c, profile, true)
+            let team: Vec<String> = list_team_todos_on(&c, profile, true, false)
                 .unwrap()
                 .into_iter()
                 .filter(|t| t.project_id.as_deref() == Some("project"))
@@ -2190,6 +2228,69 @@ mod tests {
                 .collect();
             assert_eq!(per_project, team, "predicates drifted for {profile}");
         }
+    }
+
+    /// The bug this closes: an admin with zero memberships got `count=0` from both
+    /// project and team reads, though `project_readable` (space-server.rs) already
+    /// shows it every project. `admin=true` must reach exactly as far as ownership or
+    /// membership already would — never further (a done row still needs `include_done`).
+    #[test]
+    fn admin_bypasses_membership_like_project_readable_does() {
+        let mut c = conn();
+        c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('outsider-admin','oa','Outsider Admin',1)", []).unwrap();
+        create_todo_on(&mut c, todo_input("owner-task", "p", &["p"])).unwrap();
+        let mut finished = todo_input("finished", "q", &[]);
+        finished.done = true;
+        create_todo_on(&mut c, finished).unwrap();
+
+        // Not a member, not an owner, not an assignee, no admin flag: sees nothing —
+        // the exact live-bug shape (bridge admin, 0 memberships, count=0).
+        assert!(list_project_todos_on(&c, "project", "outsider-admin", true, false)
+            .unwrap()
+            .is_empty());
+        assert!(list_team_todos_on(&c, "outsider-admin", true, false)
+            .unwrap()
+            .is_empty());
+
+        // Same profile, admin=true: sees every project todo, exactly as `project_readable`
+        // would let it read the project itself.
+        let admin_project: Vec<String> =
+            list_project_todos_on(&c, "project", "outsider-admin", true, true)
+                .unwrap()
+                .into_iter()
+                .map(|t| t.id)
+                .collect();
+        assert_eq!(
+            admin_project,
+            vec!["owner-task".to_string(), "finished".to_string()]
+        );
+        let admin_team: Vec<String> = list_team_todos_on(&c, "outsider-admin", true, true)
+            .unwrap()
+            .into_iter()
+            .map(|t| t.id)
+            .collect();
+        assert_eq!(
+            admin_team,
+            vec!["owner-task".to_string(), "finished".to_string()]
+        );
+
+        // The bypass does not also waive `include_done`: a done row still needs it asked for.
+        assert!(!list_project_todos_on(&c, "project", "outsider-admin", false, true)
+            .unwrap()
+            .iter()
+            .any(|t| t.id == "finished"));
+        assert!(!list_team_todos_on(&c, "outsider-admin", false, true)
+            .unwrap()
+            .iter()
+            .any(|t| t.id == "finished"));
+
+        // A genuine member's own reach is untouched by the admin plumbing existing at all.
+        assert_eq!(
+            list_project_todos_on(&c, "project", "p", true, false)
+                .unwrap()
+                .len(),
+            2
+        );
     }
 
     #[test]
@@ -2206,7 +2307,7 @@ mod tests {
 
         // Every member sees every member's project todos — lead, owner, or neither.
         for member in ["p", "q", "r"] {
-            let ids: Vec<String> = list_project_todos_on(&c, "project", member, false)
+            let ids: Vec<String> = list_project_todos_on(&c, "project", member, false, false)
                 .unwrap()
                 .into_iter()
                 .map(|t| t.id)
@@ -2218,14 +2319,14 @@ mod tests {
             );
         }
         // Someone outside the project sees none of it.
-        assert!(list_project_todos_on(&c, "project", "outsider", false)
+        assert!(list_project_todos_on(&c, "project", "outsider", false, false)
             .unwrap()
             .is_empty());
 
         // Clearing the lead changes nobody's reach either.
         crate::platform::set_project_lead_on(&c, "project", None).unwrap();
         assert_eq!(
-            list_project_todos_on(&c, "project", "r", false)
+            list_project_todos_on(&c, "project", "r", false, false)
                 .unwrap()
                 .len(),
             2
