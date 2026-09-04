@@ -1277,13 +1277,13 @@ pub fn list_doc_versions_scoped(
     document_id: String,
     profile_id: String,
 ) -> Result<Vec<DocVersion>> {
-    let c = conn()?;
-    let mut s = c.prepare(&format!("SELECT v.id,v.document_id,v.version,v.body,v.created_by,v.created_at FROM doc_versions v JOIN documents d ON d.id=v.document_id WHERE v.document_id=?2 AND {DOCUMENT_READ_SCOPE} ORDER BY v.version DESC")).map_err(|e| e.to_string())?;
-    let rows = s
-        .query_map(
-            rusqlite::params![profile_id, document_id],
-            row_to_doc_version,
-        )
+    list_doc_versions_scoped_on(&conn()?, &document_id, &profile_id)
+}
+
+fn list_doc_versions_scoped_on(c: &rusqlite::Connection, document_id: &str, profile_id: &str) -> Result<Vec<DocVersion>> {
+    let sql = format!("SELECT v.id,v.document_id,v.version,v.body,v.created_by,v.created_at FROM doc_versions v JOIN documents d ON d.id=v.document_id WHERE v.document_id=?2 AND {} ORDER BY v.version DESC", document_read_scope());
+    let mut s = c.prepare(&sql).map_err(|e| e.to_string())?;
+    let rows = s.query_map(rusqlite::params![profile_id, document_id], row_to_doc_version)
         .map_err(|e| e.to_string())?
         .collect::<std::result::Result<_, _>>()
         .map_err(|e| e.to_string());
@@ -3003,6 +3003,19 @@ mod tests {
             rusqlite::params![format!("{id}-v1"), id, body],
         )
         .unwrap();
+    }
+
+    #[test]
+    fn scoped_version_history_uses_the_complete_read_scope() {
+        let c = test_conn();
+        c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('history-owner','history-owner','Owner',0),('history-viewer','history-viewer','Viewer',0),('history-stranger','history-stranger','Stranger',0)", []).unwrap();
+        c.execute("INSERT INTO documents(id,container_type,container_id,doc_type,title,body,version,archived,created_by) VALUES('history-doc','my-docs','history-owner','text','History','body',1,0,'history-owner')", []).unwrap();
+        c.execute("INSERT INTO doc_versions(id,document_id,version,body,created_by) VALUES('history-doc-v1','history-doc',1,'body','history-owner')", []).unwrap();
+        c.execute("INSERT INTO document_permissions(document_id,recipient_type,recipient_id,access_level) VALUES('history-doc','profile','history-viewer','viewer')", []).unwrap();
+
+        assert_eq!(list_doc_versions_scoped_on(&c, "history-doc", "history-owner").unwrap().len(), 1);
+        assert_eq!(list_doc_versions_scoped_on(&c, "history-doc", "history-viewer").unwrap().len(), 1);
+        assert!(list_doc_versions_scoped_on(&c, "history-doc", "history-stranger").unwrap().is_empty());
     }
 
     #[test]

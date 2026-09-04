@@ -135,7 +135,21 @@ describe("documents workspace composition", () => {
     expect(host.textContent).toContain("Team");
   });
 
-  test("renders rich text, interactive checklists, and numbered code by saved body format", async () => {
+  test("a failed version-history request cannot strand the document on Loading", async () => {
+setProfileId("me");
+serve({
+list_document_folders: { ok: true, value: [] },
+list_documents: { ok: true, value: [{ id: "private-doc", container_type: "my-docs", container_id: "me", folder_id: null, doc_type: "text", body_format: "text", title: "Private plan", body: "Readable body", version: 1, archived: false, created_by: "me" }] },
+list_doc_versions: { status: 500, body: { ok: false, error: "broken version query" } },
+});
+const host = await mount();
+navigate({ view: "Documents", entityType: "document", entityId: "private-doc", containerType: "my-docs", containerId: "me" });
+await settle();
+expect(host.textContent).toContain("Readable body");
+expect(host.textContent).toContain("Version history could not be loaded");
+expect(host.textContent).not.toContain("Loading…");
+});
+test("renders rich text, interactive checklists, and numbered code by saved body format", async () => {
 setProfileId("me");
 const docs = [
 { id: "rich", container_type: "my-docs", container_id: "me", folder_id: null, doc_type: "text", body_format: "rich-text", title: "Rich", body: "<h2>Stored heading</h2><p>formatted</p>", version: 1, archived: false, created_by: "me" },

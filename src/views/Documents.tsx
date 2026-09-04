@@ -1148,7 +1148,7 @@ if (doc?.kind === "budget") setBudget(parseBudget(doc.body));
 
   // ---- publication (public link) ----
   const [publication, { refetch: refetchPublication }] = createResource(selectedDocumentId, (id) =>
-    id ? documentsApi.getPublication(id) : Promise.resolve(null),
+    id ? documentsApi.getPublication(id).catch(() => null) : Promise.resolve(null),
   );
   async function togglePublished() {
     const id = selectedDocumentId();
@@ -2097,21 +2097,23 @@ if (restored.kind === "budget") setBudget(parseBudget(restored.body));
                   </select>
                   <button class="primary small" disabled={!shareRecipientId()} onClick={addAccessRecipient}>Add</button>
                 </div>
-                <Show when={!access.loading} fallback={<p class="hint">Loading access…</p>}>
-                  <ul class="sharing-list">
-                    <For each={access() ?? []}>
-                      {(permission) => (
-                        <li>
-                          <span class="sharing-recipient">{recipientName(permission)}</span>
-                          <span class="sharing-kind">{permission.recipient_type === "profile" ? "person" : "team"}</span>
-                          <span class="sharing-level">{permission.access_level}</span>
-                          <button class="ghost small" aria-label={`Remove ${recipientName(permission)}`} onClick={() => removeAccessRecipient(permission)}>Remove</button>
-                        </li>
-                      )}
-                    </For>
-                  </ul>
-                  <Show when={(access() ?? []).length === 0}>
-                    <p class="hint">Only you can access this document.</p>
+                <Show when={!access.error} fallback={<p class="error-bar" role="alert">Document access could not be loaded: {String(access.error)}</p>}>
+                  <Show when={!access.loading} fallback={<p class="hint">Loading access…</p>}>
+                    <ul class="sharing-list">
+                      <For each={access() ?? []}>
+                        {(permission) => (
+                          <li>
+                            <span class="sharing-recipient">{recipientName(permission)}</span>
+                            <span class="sharing-kind">{permission.recipient_type === "profile" ? "person" : "team"}</span>
+                            <span class="sharing-level">{permission.access_level}</span>
+                            <button class="ghost small" aria-label={`Remove ${recipientName(permission)}`} onClick={() => removeAccessRecipient(permission)}>Remove</button>
+                          </li>
+                        )}
+                      </For>
+                    </ul>
+                    <Show when={(access() ?? []).length === 0}>
+                      <p class="hint">Only you can access this document.</p>
+                    </Show>
                   </Show>
                 </Show>
               </section>
@@ -2119,28 +2121,30 @@ if (restored.kind === "budget") setBudget(parseBudget(restored.body));
             <div class="section-label" style="padding:0 0 0.4em">
               Version history
             </div>
-            <Show when={!versions.loading} fallback={<p class="hint">Loading…</p>}>
-              <ul class="version-list">
-                <For each={versions()}>
-                  {(v) => (
-                    <li classList={{ current: v.version === selectedDocument()?.version }}>
-                      <div class="version-head">
-                        <strong>v{v.version}</strong>
-                        <span class="version-time">{when(v.created_at)}</span>
-                      </div>
-                      <div class="version-author">{profiles()?.find((p) => p.id === v.created_by)?.display_name ?? v.created_by ?? "—"}</div>
-                      {/* History speaks about the document, not about its storage: a
-                          table is counted and named, prose keeps its text preview. */}
-                      <div class="version-snippet">{versionSnippet(selectedDocument()?.kind, v.body)}</div>
-                      <Show when={v.version !== selectedDocument()?.version}>
-                        <button class="ghost small" onClick={() => restoreVersion(v.version)}>
-                          Restore
-                        </button>
-                      </Show>
-                    </li>
-                  )}
-                </For>
-              </ul>
+            <Show when={!versions.error} fallback={<p class="error-bar" role="alert">Version history could not be loaded: {String(versions.error)}</p>}>
+              <Show when={!versions.loading} fallback={<p class="hint">Loading…</p>}>
+                <ul class="version-list">
+                  <For each={versions()}>
+                    {(v) => (
+                      <li classList={{ current: v.version === selectedDocument()?.version }}>
+                        <div class="version-head">
+                          <strong>v{v.version}</strong>
+                          <span class="version-time">{when(v.created_at)}</span>
+                        </div>
+                        <div class="version-author">{profiles()?.find((p) => p.id === v.created_by)?.display_name ?? v.created_by ?? "—"}</div>
+                        {/* History speaks about the document, not about its storage: a
+                            table is counted and named, prose keeps its text preview. */}
+                        <div class="version-snippet">{versionSnippet(selectedDocument()?.kind, v.body)}</div>
+                        <Show when={v.version !== selectedDocument()?.version}>
+                          <button class="ghost small" onClick={() => restoreVersion(v.version)}>
+                            Restore
+                          </button>
+                        </Show>
+                      </li>
+                    )}
+                  </For>
+                </ul>
+              </Show>
             </Show>
           </aside>
         </Show>

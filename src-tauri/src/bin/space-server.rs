@@ -2871,7 +2871,7 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "add_review_participant"
         | "add_team_membership"
         | "archive_cf_definition" => CommandPolicy::Session,
-        "archive_document" => CommandPolicy::DocumentOwnerWrite,
+        "archive_document" | "publish_document" => CommandPolicy::DocumentOwnerWrite,
         "delete_document" => CommandPolicy::DocumentOwnerDelete,
         "archive_meeting" | "attach_meeting_channel" | "delete_meeting" => CommandPolicy::MeetingWrite,
         "join_meeting_call" | "end_meeting_call" => CommandPolicy::MeetingRead,
@@ -2963,7 +2963,7 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         "get_issue" | "get_issue_detail" | "list_issues" => CommandPolicy::IssueRead,
         "list_issue_assignees" | "set_issue_assignees" => CommandPolicy::IssueAssign,
         "add_project_member" | "remove_project_member" => CommandPolicy::ProjectMemberAdmin,
-        "get_document" | "list_doc_versions" => CommandPolicy::DocumentRead,
+        "get_document" | "get_document_publication" | "list_doc_versions" | "read_document_file" => CommandPolicy::DocumentRead,
         // Favourites are caller-scoped: `bind_session_identity` forces `profile_id` to
         // the session, and the read scope inside the query does the rest.
         "list_favorite_documents" | "set_document_favorite" | "move_favorite_document" => {
@@ -3394,6 +3394,9 @@ fn document_id(body: &Value, name: &str) -> Option<String> {
             | "budget_add_expense"
             | "budget_export_statement"
             | "list_doc_versions"
+            | "read_document_file"
+            | "get_document_publication"
+            | "publish_document"
             | "list_document_access"
             | "update_document_access"
     ) {
@@ -5844,6 +5847,8 @@ async fn cmd(
     "get_channel_by_entity" => chat::get_channel_by_entity(entity_type: String, entity_id: String),
     "resolve_source_ref" => chat::resolve_source_ref(entity_type: String, entity_id: String),
     "get_document" => documents::get_document_scoped(id: String, profile_id: String),
+    "get_document_publication" => documents::get_document_publication(document_id: String),
+    "publish_document" => documents::publish_document(document_id: String, published: bool, slug: Option<String>),
     "get_issue" => issues::get_issue(id: String),
     "get_issue_detail" => issues::get_issue_detail(id: String),
     "get_meeting" => meetings::get_meeting_scoped(id: String, profile_id: String),
@@ -5882,6 +5887,7 @@ async fn cmd(
     "list_deploy_targets" => pipelines::list_deploy_targets(),
     "list_deployments_for_target" => pipelines::list_deployments_for_target(target_id: String),
     "list_doc_versions" => documents::list_doc_versions_scoped(document_id: String, profile_id: String),
+    "read_document_file" => documents::read_document_file(document_id: String, max_bytes: Option<u64>),
     "list_document_access" => documents::list_document_access(document_id: String),
     "update_document_access" => documents::update_document_access(document_id: String, permissions: Vec<documents::DocumentAccessRecipient>),
     "list_document_folders" => documents::list_document_folders_scoped(profile_id: String),
@@ -6583,6 +6589,16 @@ mod tests {
                 "{name}"
             );
         }
+    }
+
+    #[test]
+    fn document_detail_commands_have_scoped_policies_and_ids() {
+        for name in ["get_document_publication", "read_document_file"] {
+            assert!(matches!(command_policy(name), Some(CommandPolicy::DocumentRead)), "{name}");
+            assert_eq!(document_id(&json!({"documentId": "doc-preview", "maxBytes": null}), name), Some("doc-preview".into()));
+        }
+        assert!(matches!(command_policy("publish_document"), Some(CommandPolicy::DocumentOwnerWrite)));
+        assert_eq!(document_id(&json!({"documentId": "doc-preview", "published": true}), "publish_document"), Some("doc-preview".into()));
     }
 
     #[test]
