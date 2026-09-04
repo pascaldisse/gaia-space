@@ -39,3 +39,20 @@ test("/channel/:id/messages renders channel Call and Video, and Video creates it
   expect(calls.find(call => call.cmd === "create_meeting")?.args.meeting).toMatchObject({ channel_id: channel.id, video_provider: "livekit" });
   expect(host.querySelector('[aria-label="Live call"]')).toBeTruthy();
 });
+test("Call controls explain a missing acting profile without creating a meeting", async () => {
+  const host = document.createElement("div"); document.body.appendChild(host);
+  dispose = render(() => <ChannelWorkspace /> as any, host);
+  await settle();
+  setProfileId("");
+  await Promise.resolve();
+  const video = host.querySelector<HTMLButtonElement>('[aria-label="Video"]')!;
+  expect(video.disabled).toBe(true);
+  expect(video.title).toBe("Sign-in still loading");
+  // A stale browser event can reach the already-rendered listener while identity changes.
+  // The handler must still explain the guard instead of silently returning.
+  video.disabled = false;
+  video.click();
+  await Promise.resolve();
+  expect(host.querySelector('[role="alert"]')?.textContent).toBe("Sign-in still loading");
+  expect(calls.some(call => call.cmd === "create_meeting")).toBe(false);
+});

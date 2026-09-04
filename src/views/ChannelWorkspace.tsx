@@ -136,11 +136,16 @@ const [openCall, setOpenCall] = createSignal<{ meeting: Meeting; audioOnly: bool
 const openExistingCall = (meeting: Meeting, audioOnly = false) => setOpenCall({ meeting, audioOnly });
 const startCall = async (audioOnly: boolean) => {
  const current = channel(); const organizer = actingProfileId();
- if (!current || !organizer) return;
+ setMemberError("");
+ if (!organizer) { setMemberError("Sign-in still loading"); return; }
+ if (!current) { setMemberError("Conversation still loading"); return; }
  const meeting = buildChannelCallMeeting(current, organizer);
  try { await meetingsApi.create(meeting); setOpenCall({ meeting, audioOnly }); await refetchMeetings(); }
  catch (reason) { setMemberError(humanError(reason)); }
 };
+const callUnavailable = () => !channel() || !actingProfileId();
+const callTitle = (label: "Call" | "Video") =>
+ callUnavailable() ? (!actingProfileId() ? "Sign-in still loading" : "Conversation still loading") : label;
 const liveMeeting = () => findLiveChannelMeeting(meetings(), channelId());
 
   const memberCount = () => members()?.length ?? 0;
@@ -350,8 +355,8 @@ const liveMeeting = () => findLiveChannelMeeting(meetings(), channelId());
             </Show>
             {/* Call and Video stay direct buttons — the two acts reached from here most
                 often. Everything else (attach, delete) now lives behind `⋯`. */}
-            <button type="button" class="ghost small" aria-label="Call" title="Call" onClick={() => void startCall(true)}>Call</button>
-<button type="button" class="ghost small" aria-label="Video" title="Video" onClick={() => void startCall(false)}>Video</button>
+            <button type="button" class="ghost small" aria-label="Call" title={callTitle("Call")} disabled={callUnavailable()} onClick={() => void startCall(true)}>Call</button>
+<button type="button" class="ghost small" aria-label="Video" title={callTitle("Video")} disabled={callUnavailable()} onClick={() => void startCall(false)}>Video</button>
 <button type="button" class="ghost small" aria-label="Channel actions" onClick={(event) => setChannelMenu({ x: event.clientX, y: event.clientY })}>⋯</button>
           </div>
         </div>
@@ -364,6 +369,9 @@ const liveMeeting = () => findLiveChannelMeeting(meetings(), channelId());
             never the placeholder "Not part of a project yet" that used to sit here
             whether or not there was anything to say. */}
         <Show when={channel()?.description}>{(text) => <p class="cw-subtitle">{text()}</p>}</Show>
+        <Show when={memberError()}>
+          <p class="cw-error" role="alert">{memberError()}</p>
+        </Show>
 
         <Show when={deleteError()}>
           <p class="cw-error" role="alert">{deleteError()}</p>
