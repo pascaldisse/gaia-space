@@ -4293,7 +4293,7 @@ fn authorize_command(
             Ok(())
         }
         CommandPolicy::SessionIdentityWrite => match name {
-            "create_meeting" => bind_required_object_identity(
+            "create_meeting" | "create_channel_call" => bind_required_object_identity(
                 body,
                 "meeting",
                 "organizer_id",
