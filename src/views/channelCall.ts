@@ -1,8 +1,7 @@
 import { newId, type Channel } from "../api/chat";
 import { type Meeting } from "../api/meetings";
-
 export const CHAT_CALL_DURATION_SECONDS = Number(import.meta.env.VITE_CHAT_CALL_DURATION_SECONDS) || 60 * 60;
-
+export const CHANNEL_CALL_RING_SECONDS = Number(import.meta.env.VITE_CHANNEL_CALL_RING_SECONDS) || CHAT_CALL_DURATION_SECONDS;
 export const buildChannelCallMeeting = (
   channel: Pick<Channel, "id" | "name" | "content_type">,
   organizerId: string,
@@ -32,6 +31,15 @@ export const buildChannelCallMeeting = (
   source_entity_type: null,
   source_entity_id: null,
 });
-
-export const findLiveChannelMeeting = (meetings: Meeting[] | undefined, channelId: string): Meeting | undefined =>
-  meetings?.find((meeting) => meeting.channel_id === channelId && meeting.video_status === "live");
+const ringing = (meeting: Meeting, now: number) =>
+  meeting.video_status === "scheduled" && meeting.starts_at <= now && now - meeting.starts_at <= CHANNEL_CALL_RING_SECONDS;
+export const resolveChannelCall = (meetings: Meeting[] | undefined, channelId: string, now = Math.floor(Date.now() / 1_000)): Meeting | null => {
+  const calls = meetings?.filter((meeting) => !meeting.archived && meeting.channel_id === channelId) ?? [];
+  return calls.find((meeting) => meeting.video_status === "live") ?? calls.find((meeting) => ringing(meeting, now)) ?? null;
+};
+export const findLiveChannelMeeting = (meetings: Meeting[] | undefined, channelId: string, organizerId: string | null | undefined, now = Math.floor(Date.now() / 1_000)): Meeting | undefined => {
+  const meeting = resolveChannelCall(meetings, channelId, now);
+  return meeting?.organizer_id === organizerId ? undefined : meeting ?? undefined;
+};
+export const channelCallLabel = (meeting: Pick<Meeting, "video_status">) =>
+  meeting.video_status === "scheduled" ? "Incoming call" : "Call live";

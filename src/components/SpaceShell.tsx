@@ -100,6 +100,12 @@ const MODE_LINKS: Record<RailMode, SideEntry[]> = {
 const MODE_TITLE: Record<RailMode, string> = {
   home: "Home", chats: "Chats", projects: "Projects", library: "Library", development: "Development", more: "More",
 };
+
+/** Section order for the Chats/Home conversation list (Pascal, 2026-09-04: "direct
+ *  messages should always appear on top"). A DM is triaged before any project's
+ *  channels, `directs` first — nothing below hardcodes the order, it reads this array.
+ *  Reorder here, not in the JSX, if that ever needs to change again. */
+const RAIL_GROUP_ORDER: readonly ("directs" | "channels")[] = ["directs", "channels"];
 /** linkProps() is evaluated ONCE when a node is created, so a plain spread freezes the
  *  href at first render: the rail's links were still `/dashboard` (the fallback, from
  *  before registerViews ran), and the Chats landing could never see channels that load
@@ -372,10 +378,16 @@ const [mobileSidebarOpen, setMobileSidebarOpen] = createSignal(false);
   });
 
   /** Direct messages: 1:1 conversations. They live in the Chats mode only, and the
-   *  search matches what the row SHOWS — the other person's name. */
+   *  search matches what the row SHOWS — the other person's name. Sorted by most
+   *  recent activity first (the same `last_message_at` the "newest channel" landing
+   *  already trusts); a pair with no messages yet has no activity to sort by, so those
+   *  fall back to their label, alphabetically, instead of a stable-sort coin flip. */
   const directs = createMemo(() => {
     const term = filter().trim().toLowerCase();
-    return split().dms.filter((channel) => !term || labelOfDirect(channel).toLowerCase().includes(term));
+    return split().dms
+      .filter((channel) => !term || labelOfDirect(channel).toLowerCase().includes(term))
+      .sort((a, b) => (b.last_message_at ?? -Infinity) - (a.last_message_at ?? -Infinity)
+        || labelOfDirect(a).localeCompare(labelOfDirect(b)));
   });
 
   /** Projects, for the Tasks mode's "by project" section. */
@@ -437,6 +449,104 @@ const [mobileSidebarOpen, setMobileSidebarOpen] = createSignal(false);
    *  without tone (`metricTone`'s rule) rather than hidden — the filter is still real. */
   const entryCount = (entry: SideEntry) =>
     entry.filter ? attentionFilterCount(entry.filter) : badgeOf(entry.badge);
+
+  /** Real channels grouped by project, plus the loose/"Other channels" tail — the block
+   *  `RAIL_GROUP_ORDER`'s `"channels"` entry stands for. */
+  const channelGroupsSection = () => (
+    <For each={groups()}>
+      {(group) => (
+        <div class="section">
+          <div
+            class="section-head"
+            classList={{ "drop-into": dropTarget() === `project:${group.id}` }}
+            onDragOver={(event) => {
+              // Only a real project takes a conversation; "Other channels" is the
+              // absence of one, so it is not a destination.
+              if (!group.id || !carries(event, "application/x-gaia-channel")) return;
+              event.preventDefault();
+              setDropTarget(`project:${group.id}`);
+            }}
+            onDragLeave={() => setDropTarget((current) => (current === `project:${group.id}` ? null : current))}
+            onDrop={(event) => {
+              const channelId = event.dataTransfer?.getData("application/x-gaia-channel");
+              setDropTarget(null);
+              if (!channelId || !group.id) return;
+              event.preventDefault();
+              void attachChannelToProject(channelId, group.id);
+            }}
+          >
+            <span>{group.label}</span>
+            {/* The `+` is where "new conversation" lives now (it left Chat's sidebar). */}
+            <button class="section-add" aria-label={`New channel in ${group.label}`} title="New channel" onClick={() => setNewChannelFor(group.id)}>+</button>
+          </div>
+          <For each={group.channels}>
+            {(channel) => (
+              <a
+                class="channel"
+                classList={{
+                  active: activeChannelId() === channel.id,
+                  unread: channel.unread_count > 0,
+                  "drop-into": dropTarget() === `channel:${channel.id}`,
+                }}
+                draggable={true}
+                onDragStart={(event) => event.dataTransfer?.setData("application/x-gaia-channel", channel.id)}
+                onDragOver={(event) => {
+                  if (!carries(event, "application/x-gaia-document")) return;
+                  event.preventDefault();
+                  setDropTarget(`channel:${channel.id}`);
+                }}
+                onDragLeave={() => setDropTarget((current) => (current === `channel:${channel.id}` ? null : current))}
+                onDrop={(event) => {
+                  const payload = readPayload<{ id: string; title: string; path: string }>(event, "application/x-gaia-document");
+                  setDropTarget(null);
+                  if (!payload) return;
+                  event.preventDefault();
+                  void shareDocumentInto(channel, payload);
+                }}
+                onContextMenu={(event) => openChannelMenu(event, channel)}
+                onPointerDown={() => setSelectedChannel(channel)}
+                onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") setSelectedChannel(channel); }}
+                {...navLink(() => ({ view: "Chat", entityType: "channel", entityId: channel.id, tab: "messages" }))}
+              >
+                <span class="hash" aria-hidden="true">#</span>
+                {channel.name}
+                <Show when={channel.unread_count > 0}><span class="count">{channel.unread_count}</span></Show>
+              </a>
+            )}
+          </For>
+        </div>
+      )}
+    </For>
+  );
+
+  /** The DM section `RAIL_GROUP_ORDER`'s `"directs"` entry stands for — rendered wherever
+   *  that array puts it, `@`-glyphed, sorted by `directs()` (most recent activity first). */
+  const directMessagesSection = () => (
+    <Show when={directs().length > 0}>
+      <div class="section">
+        <div class="section-head"><span>Direct messages</span></div>
+        <For each={directs()}>
+          {(channel) => (
+            <a
+              class="channel"
+              classList={{ active: activeChannelId() === channel.id, unread: channel.unread_count > 0 }}
+              onContextMenu={(event) => openChannelMenu(event, channel)}
+              onPointerDown={() => setSelectedChannel({ ...channel, headerLabel: labelOfDirect(channel), avatarUrl: profiles()?.find((person) => person.display_name === labelOfDirect(channel))?.avatar_url })}
+              onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") setSelectedChannel({ ...channel, headerLabel: labelOfDirect(channel), avatarUrl: profiles()?.find((person) => person.display_name === labelOfDirect(channel))?.avatar_url }); }}
+              {...navLink(() => ({ view: "Chat", entityType: "channel", entityId: channel.id, tab: "messages" }))}
+            >
+              <span class="hash" aria-hidden="true">@</span>
+              {labelOfDirect(channel)}
+              <Show when={channel.unread_count > 0}><span class="count">{channel.unread_count}</span></Show>
+            </a>
+          )}
+        </For>
+      </div>
+    </Show>
+  );
+  /** The order the two sections above render in — driven by `RAIL_GROUP_ORDER`, not by
+   *  their position in this file. */
+  const sidebarSections = () => RAIL_GROUP_ORDER.map((section) => (section === "directs" ? directMessagesSection() : channelGroupsSection()));
 
   const railItem = (entry: (typeof RAIL)[number]) => (
     <a
@@ -698,91 +808,7 @@ const [mobileSidebarOpen, setMobileSidebarOpen] = createSignal(false);
         </Show>
 
         <Show when={showsChannels()}>
-        <For each={groups()}>
-          {(group) => (
-            <div class="section">
-              <div
-                class="section-head"
-                classList={{ "drop-into": dropTarget() === `project:${group.id}` }}
-                onDragOver={(event) => {
-                  // Only a real project takes a conversation; "Other channels" is the
-                  // absence of one, so it is not a destination.
-                  if (!group.id || !carries(event, "application/x-gaia-channel")) return;
-                  event.preventDefault();
-                  setDropTarget(`project:${group.id}`);
-                }}
-                onDragLeave={() => setDropTarget((current) => (current === `project:${group.id}` ? null : current))}
-                onDrop={(event) => {
-                  const channelId = event.dataTransfer?.getData("application/x-gaia-channel");
-                  setDropTarget(null);
-                  if (!channelId || !group.id) return;
-                  event.preventDefault();
-                  void attachChannelToProject(channelId, group.id);
-                }}
-              >
-                <span>{group.label}</span>
-                {/* The `+` is where "new conversation" lives now (it left Chat's sidebar). */}
-                <button class="section-add" aria-label={`New channel in ${group.label}`} title="New channel" onClick={() => setNewChannelFor(group.id)}>+</button>
-              </div>
-              <For each={group.channels}>
-                {(channel) => (
-                  <a
-                    class="channel"
-                    classList={{
-                      active: activeChannelId() === channel.id,
-                      unread: channel.unread_count > 0,
-                      "drop-into": dropTarget() === `channel:${channel.id}`,
-                    }}
-                    draggable={true}
-                    onDragStart={(event) => event.dataTransfer?.setData("application/x-gaia-channel", channel.id)}
-                    onDragOver={(event) => {
-                      if (!carries(event, "application/x-gaia-document")) return;
-                      event.preventDefault();
-                      setDropTarget(`channel:${channel.id}`);
-                    }}
-                    onDragLeave={() => setDropTarget((current) => (current === `channel:${channel.id}` ? null : current))}
-                    onDrop={(event) => {
-                      const payload = readPayload<{ id: string; title: string; path: string }>(event, "application/x-gaia-document");
-                      setDropTarget(null);
-                      if (!payload) return;
-                      event.preventDefault();
-                      void shareDocumentInto(channel, payload);
-                    }}
-                    onContextMenu={(event) => openChannelMenu(event, channel)}
-                    onPointerDown={() => setSelectedChannel(channel)}
-                    onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") setSelectedChannel(channel); }}
-                    {...navLink(() => ({ view: "Chat", entityType: "channel", entityId: channel.id, tab: "messages" }))}
-                  >
-                    <span class="hash" aria-hidden="true">#</span>
-                    {channel.name}
-                    <Show when={channel.unread_count > 0}><span class="count">{channel.unread_count}</span></Show>
-                  </a>
-                )}
-              </For>
-            </div>
-          )}
-        </For>
-        <Show when={directs().length > 0}>
-          <div class="section">
-            <div class="section-head"><span>Direct messages</span></div>
-            <For each={directs()}>
-              {(channel) => (
-                <a
-                  class="channel"
-                  classList={{ active: activeChannelId() === channel.id, unread: channel.unread_count > 0 }}
-                  onContextMenu={(event) => openChannelMenu(event, channel)}
-                  onPointerDown={() => setSelectedChannel({ ...channel, headerLabel: labelOfDirect(channel), avatarUrl: profiles()?.find((person) => person.display_name === labelOfDirect(channel))?.avatar_url })}
-                  onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") setSelectedChannel({ ...channel, headerLabel: labelOfDirect(channel), avatarUrl: profiles()?.find((person) => person.display_name === labelOfDirect(channel))?.avatar_url }); }}
-                  {...navLink(() => ({ view: "Chat", entityType: "channel", entityId: channel.id, tab: "messages" }))}
-                >
-                  <span class="hash" aria-hidden="true">@</span>
-                  {labelOfDirect(channel)}
-                  <Show when={channel.unread_count > 0}><span class="count">{channel.unread_count}</span></Show>
-                </a>
-              )}
-            </For>
-          </div>
-        </Show>
+        {sidebarSections()}
         <Show when={!groups().length && !directs().length}>
           <div class="section"><div class="side-empty">No conversations yet.</div></div>
         </Show>

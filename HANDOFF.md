@@ -74,3 +74,7 @@ UI:
 ## 次
 
 ⑥候補:(a) history search/discovery(同KB行の残·V119要否は全文索引の設計次第) · (b) thread paging のUI配線 · (c) stickers/saved messages+labels=missing残(別KB行) · (d) notification policy設定/Slack export。
+
+## proof lanes
+
+proof lanes: create accounts with prefix `zz-proof-`, run `tools/purge-proof-accounts.ts --verify` at lane end.
