@@ -20,6 +20,7 @@ import Dashboard from "./views/Dashboard";
 import Home from "./views/Home";
 import Development from "./views/Development";
 import Todo from "./views/Todo";
+import LedgerTodo from "./views/LedgerTodo";
 import Absences from "./views/Absences";
 import Projects from "./views/Projects";
 import Repos from "./views/Repos";
@@ -62,13 +63,13 @@ import { isMobileSetup } from "./mobile";
 import { activeView, createHashAdapter, createPathAdapter, initRouter, linkEntity, linkProps, registerViews, route, setAvailableViews, setRoutePending } from "./router";
 import { defaultView, financeVisible, groupOfView, navLayout, setFinanceAllowed, viewLabel, visibleGroups, type NavGroup } from "./nav";
 
-type View = { name:string; icon:IconName; component:Component };
+type View = { name:string; icon:IconName; component:Component; slug?:string; aliases?:string[] };
 type AppProps = { online?: boolean };
 // Chat-first destinations. They are ordinary registered views: reachable from every nav
 // layout, deep-linkable, and normalized by the same router policy as the rest.
 const homeView:View={name:"Home",icon:"home",component:Home};
 const developmentView:View={name:"Development",icon:"target",component:Development};
-const personalViews:View[]=[homeView,{name:"Dashboard",icon:"home",component:Dashboard},{name:"To-Do",icon:"check",component:Todo},{name:"Absences",icon:"clock-nav",component:Absences}];
+const personalViews:View[]=[homeView,{name:"Dashboard",icon:"home",component:Dashboard},{name:"To-Do",icon:"check",component:Todo},{name:"Task Ledger",icon:"check",component:LedgerTodo,slug:"todo"},{name:"Absences",icon:"clock-nav",component:Absences}];
 const localOnlyViews:View[]=[{name:"Repos",icon:"repo",component:Repos},{name:"Code Reviews",icon:"review",component:Reviews},{name:"Pipelines",icon:"pipeline",component:Pipelines}];
 const workspaceViews:View[]=[{name:"Projects",icon:"layers",component:Projects},...localOnlyViews,{name:"Issues",icon:"target",component:Issues},{name:"Boards",icon:"columns",component:Boards},{name:"Chat",icon:"chat",component:Chat},{name:"Inbox",icon:"inbox",component:Inbox},{name:"Documents",icon:"book-nav",component:Documents},{name:"Blogs",icon:"book",component:Blogs},{name:"Calendar",icon:"calendar-nav",component:Calendar},{name:"Meetings",icon:"calendar-nav",component:Meetings},{name:"Dev Environments",icon:"repo",component:DevEnvironments},{name:"Packages",icon:"package",component:Packages},{name:"Members",icon:"org",component:Members},{name:"Locations",icon:"org",component:Locations},{name:"Admin",icon:"settings",component:Admin},{name:"Applications",icon:"grid",component:Applications}];
 const usersView:View={name:"Users",icon:"users",component:Users};

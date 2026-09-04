@@ -11,7 +11,8 @@
     "serve": "vite preview",
     "test": "bun test",
     "shot": "bun tools/screenshot.ts",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "ledger:todo": "bun scripts/ledger-to-todo.mjs"
   },
   "license": "MIT",
   "overrides": {

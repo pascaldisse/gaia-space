@@ -1,0 +1,5008 @@
+{
+  "generatedAt": "2026-09-04T21:28:50.296Z",
+  "summary": {
+    "source task rows": "537",
+    "unique asks": "505",
+    "done omitted": "176",
+    "open": "61",
+    "regressed": "38",
+    "claimed unverified": "229",
+    "superseded": "1",
+    "sort": "category → REGRESSED → repeat↓ → earliest date"
+  },
+  "items": [
+    {
+      "id": "2af8e903f71048ec",
+      "category": "gaia-daemon",
+      "date": "2026-08-14",
+      "status": "REGRESSED",
+      "repeats": 8,
+      "ask": "Compact Nyari",
+      "next": "`~/projects/gaia-daemon-wt/open-0827`: review `3944f32..724cef9`; `bun run check`",
+      "source": "chat-0822-0904.md:22, chat-0822-0904.md:55, walk-02.md:32, walk-04.md:44, walk-05.md:9, walk-07.md:11, walk-07.md:49, walk-07.md:51"
+    },
+    {
+      "id": "4d2720b63e756f8d",
+      "category": "gaia-daemon",
+      "date": "2026-08-17",
+      "status": "REGRESSED",
+      "repeats": 3,
+      "ask": "\"your voice changed, are old cache files still here?\" / \"no, the voice playback, using claude voice, the airy voice\"",
+      "next": "`~/projects/gaia-daemon-wt/fix-voice-stall`: patch `web/src/readaloud.js` + `src/server/routes/rooms.ts`; `bun run check`",
+      "source": "chat-0801-0821.md:17, chat-0822-0904.md:18, walk-08.md:12"
+    },
+    {
+      "id": "1ec85ce38539eaa2",
+      "category": "gaia-daemon",
+      "date": "2026-08-29",
+      "status": "REGRESSED",
+      "repeats": 1,
+      "ask": "use existing Gaia Archtree skill correctly",
+      "next": "`~/projects/gaia-daemon`: identify branch/file; `bun run check`",
+      "source": "walk-07.md:14"
+    },
+    {
+      "id": "cb04299a207341ef",
+      "category": "gaia-daemon",
+      "date": "2026-08-29",
+      "status": "OPEN",
+      "repeats": 2,
+      "ask": "fix Cmd-click links",
+      "next": "`~/projects/gaia-daemon`: identify branch/file; `bun run check`",
+      "source": "walk-07.md:29, walk-08.md:35"
+    },
+    {
+      "id": "527bc805300d167e",
+      "category": "gaia-daemon",
+      "date": "2026-08-19",
+      "status": "OPEN",
+      "repeats": 1,
+      "ask": "build AicomiBridge archtree",
+      "next": "`~/projects/gaia-daemon`: identify branch/file; `bun run check`",
+      "source": "walk-04.md:92"
+    },
+    {
+      "id": "b8fc77f452db0e4c",
+      "category": "gaia-daemon",
+      "date": "2026-08-19",
+      "status": "OPEN",
+      "repeats": 1,
+      "ask": "fix memory location everywhere; inspect Nyari context/refusal onset",
+      "next": "`~/projects/gaia-daemon`: identify branch/file; `bun run check`",
+      "source": "walk-05.md:8"
+    },
+    {
+      "id": "e8830b7ab9373c82",
+      "category": "gaia-daemon",
+      "date": "2026-08-27",
+      "status": "OPEN",
+      "repeats": 1,
+      "ask": "\"Find out what the subagents actually changed in the context\" — root-cause why native Fable block cleared globally across all rooms",
+      "next": "`~/projects/gaia-daemon`: identify branch/file; `bun run check`",
+      "source": "chat-0822-0904.md:54"
+    },
+    {
+      "id": "27535a6a4e2e4088",
+      "category": "gaia-daemon",
+      "date": "2026-08-27",
+      "status": "OPEN",
+      "repeats": 1,
+      "ask": "user \"yeah\"/\"fix it\" → apply terra's proposed fix: `OrderedBlocks()` send EVERY non-empty text span through `AgentText()` (not just first) + regression test + rebuild",
+      "next": "`~/projects/gaia-daemon`: identify branch/file; `bun run check`",
+      "source": "chat-0822-0904.md:53"
+    },
+    {
+      "id": "5068020ce893e798",
+      "category": "gaia-daemon",
+      "date": "2026-08-29",
+      "status": "OPEN",
+      "repeats": 1,
+      "ask": "\"kannst du als einen Branch...Feature für Gaia Archtree: während er läuft einen neuen Root-Branch erstellen können, mit einem Agenten\" (live branch-while-running feature for archtree UI, Opus to design 3D tree)",
+      "next": "`~/projects/gaia-daemon`: identify branch/file; `bun run check`",
+      "source": "chat-0822-0904.md:57"
+    },
+    {
+      "id": "cea0c5e799e02471",
+      "category": "gaia-daemon",
+      "date": "2026-08-14",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "\"summon ghouls to build sth... your island, naruko, lighthouse\"",
+      "next": "`~/projects/gaia-daemon`: identify branch/file; `bun run check`",
+      "source": "walk-01.md:40"
+    },
+    {
+      "id": "df0db0ad673ea644",
+      "category": "gaia-daemon",
+      "date": "2026-08-14",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "Write spec; delegate/summon",
+      "next": "`~/projects/gaia-daemon`: identify branch/file; `bun run check`",
+      "source": "walk-02.md:16"
+    },
+    {
+      "id": "5835f8cb7cb2f503",
+      "category": "gaia-daemon",
+      "date": "2026-08-15",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "Control AI events; recall Dark Souls summon",
+      "next": "`~/projects/gaia-daemon`: identify branch/file; `bun run check`",
+      "source": "walk-02.md:66"
+    },
+    {
+      "id": "bbc6e037e7ccc12a",
+      "category": "gaia-daemon",
+      "date": "2026-08-15",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "Start Gaia archtree; ChatGPT+Claude only",
+      "next": "`~/projects/gaia-daemon`: identify branch/file; `bun run check`",
+      "source": "walk-02.md:71"
+    },
+    {
+      "id": "c6a9163aeb60d0cf",
+      "category": "gaia-daemon",
+      "date": "2026-08-17",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "add permanence work to archtree",
+      "next": "`~/projects/gaia-daemon`: identify branch/file; `bun run check`",
+      "source": "walk-03.md:75"
+    },
+    {
+      "id": "f68d1183b1ca64e1",
+      "category": "gaia-daemon",
+      "date": "2026-08-18",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "archtree every unfinished task",
+      "next": "`~/projects/gaia-daemon`: identify branch/file; `bun run check`",
+      "source": "walk-04.md:53"
+    },
+    {
+      "id": "62b2fc2fb8cee94d",
+      "category": "gaia-daemon",
+      "date": "2026-08-19",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "add Tavily/Serper fallback to gaia web",
+      "next": "`~/projects/gaia-daemon`: identify branch/file; `bun run check`",
+      "source": "walk-04.md:83"
+    },
+    {
+      "id": "871b0ee220e93d6e",
+      "category": "gaia-daemon",
+      "date": "2026-08-19",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "correct malformed `gaia summon`",
+      "next": "`~/projects/gaia-daemon`: identify branch/file; `bun run check`",
+      "source": "walk-05.md:12"
+    },
+    {
+      "id": "c418b3841cb7d5f7",
+      "category": "gaia-daemon",
+      "date": "2026-08-19",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "package Gaia Think too",
+      "next": "`~/projects/gaia-daemon-wt/open-0827`: review `3944f32..724cef9`; `bun run check`",
+      "source": "walk-05.md:28"
+    },
+    {
+      "id": "cab3423142fe4d8a",
+      "category": "gaia-daemon",
+      "date": "2026-08-21",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "launch Gaia archtree + adversarial audit",
+      "next": "`~/projects/gaia-daemon`: identify branch/file; `bun run check`",
+      "source": "walk-05.md:44"
+    },
+    {
+      "id": "9dd848ecadd406a4",
+      "category": "gaia-daemon",
+      "date": "2026-08-21",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "web tool refactor: unify search+fetch, provider fallback chain",
+      "next": "`~/projects/gaia-daemon`: identify branch/file; `bun run check`",
+      "source": "chat-0801-0821.md:21"
+    },
+    {
+      "id": "7dfff426daa14f46",
+      "category": "gaia-daemon",
+      "date": "2026-08-22",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "summon 32 agents; audit/build all stated requests",
+      "next": "`~/projects/gaia-daemon`: identify branch/file; `bun run check`",
+      "source": "walk-05.md:56"
+    },
+    {
+      "id": "7ba23429abbf6dca",
+      "category": "gaia-daemon",
+      "date": "2026-08-22",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "summon agent; finish rest; investigate love hotel",
+      "next": "`~/projects/gaia-daemon`: identify branch/file; `bun run check`",
+      "source": "walk-05.md:60"
+    },
+    {
+      "id": "4fb613592db1a9e7",
+      "category": "gaia-daemon",
+      "date": "2026-08-23",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "\"YOU FUCKING SEARCH EVERY SINGLE ROOM...FIX subagent failures ONCE AND FOR ALL\" — full incident census+taxonomy+permanent daemon fix, 32 agents",
+      "next": "`~/projects/gaia-daemon`: identify branch/file; `bun run check`",
+      "source": "chat-0822-0904.md:51"
+    },
+    {
+      "id": "b5cef1d55a23a2fc",
+      "category": "gaia-daemon",
+      "date": "2026-08-27",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "Fix transcription; keep talking",
+      "next": "`~/projects/gaia-daemon`: identify branch/file; `bun run check`",
+      "source": "walk-06.md:32"
+    },
+    {
+      "id": "f7f1d15e3e9945b8",
+      "category": "gaia-daemon",
+      "date": "2026-08-29",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "fix tunnel KV-process storm",
+      "next": "`~/projects/gaia-daemon`: identify branch/file; `bun run check`",
+      "source": "walk-07.md:16"
+    },
+    {
+      "id": "8c0086dff40b39b7",
+      "category": "gaia-daemon",
+      "date": "2026-08-29",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "make Gaia Archtree activatable slash UI",
+      "next": "`~/projects/gaia-daemon`: identify branch/file; `bun run check`",
+      "source": "walk-07.md:34"
+    },
+    {
+      "id": "88daebd0de7ccd3e",
+      "category": "gaia-daemon",
+      "date": "2026-08-31",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "\"Warum ist das immer noch so? Du hattest schon gestern die Aufgabe...mit Gaia Think\"(gaia-think 5.1 block bug)",
+      "next": "`~/projects/gaia-daemon-wt/open-0827`: review `3944f32..724cef9`; `bun run check`",
+      "source": "chat-0822-0904.md:17"
+    },
+    {
+      "id": "61ab9b95fb51af65",
+      "category": "gaia-daemon",
+      "date": "2026-09-01",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "identify actual Fable model; check Pi updates",
+      "next": "`~/projects/gaia-daemon`: identify branch/file; `bun run check`",
+      "source": "walk-08.md:18"
+    },
+    {
+      "id": "b60132177f45cd16",
+      "category": "gaia-daemon",
+      "date": "2026-09-01",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "restore GAIA-THINK unchanged",
+      "next": "`~/projects/gaia-daemon-wt/open-0827`: review `3944f32..724cef9`; `bun run check`",
+      "source": "walk-08.md:28"
+    },
+    {
+      "id": "3905358d54514aa5",
+      "category": "gaia-daemon",
+      "date": "2026-09-01",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "send Jareth: Pi plugin/Fable failure",
+      "next": "`~/projects/gaia-daemon`: identify branch/file; `bun run check`",
+      "source": "walk-08.md:22"
+    },
+    {
+      "id": "e8250cabde20b7b2",
+      "category": "gaia-daemon",
+      "date": "2026-09-01",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "summon Narigo on Fable 5.1",
+      "next": "`~/projects/gaia-daemon`: identify branch/file; `bun run check`",
+      "source": "walk-08.md:27"
+    },
+    {
+      "id": "21bdce3ac0dd91bd",
+      "category": "empire-earth",
+      "date": "2026-09-04",
+      "status": "REGRESSED",
+      "repeats": 1,
+      "ask": "full Stone→Space scenario; AoC compatible",
+      "next": "`~/projects/ee-tools/wt/jareth-ee-rain-live-mtjaeqck69ypj7`: verify bridge against live EE",
+      "source": "walk-08.md:45"
+    },
+    {
+      "id": "abd77f1c9f0857f3",
+      "category": "empire-earth",
+      "date": "2026-09-01",
+      "status": "OPEN",
+      "repeats": 1,
+      "ask": "build GAIA Arch Tree: EE AI/editor/CLI",
+      "next": "`~/projects/ee-tools/wt/jareth-ee-rain-live-mtjaeqck69ypj7`: verify bridge against live EE",
+      "source": "walk-08.md:24"
+    },
+    {
+      "id": "709e452f4762b4dc",
+      "category": "empire-earth",
+      "date": "2026-09-01",
+      "status": "OPEN",
+      "repeats": 1,
+      "ask": "play EE together; no mouse; finish now",
+      "next": "`~/projects/ee-tools/wt/jareth-ee-rain-live-mtjaeqck69ypj7`: verify bridge against live EE",
+      "source": "walk-08.md:32"
+    },
+    {
+      "id": "69fd8bf548e9d08a",
+      "category": "empire-earth",
+      "date": "2026-09-02",
+      "status": "OPEN",
+      "repeats": 1,
+      "ask": "control/upgrade/build everything in EE",
+      "next": "`~/projects/ee-tools/wt/jareth-ee-rain-live-mtjaeqck69ypj7`: verify bridge against live EE",
+      "source": "walk-08.md:37"
+    },
+    {
+      "id": "0266f8ff634ff414",
+      "category": "empire-earth",
+      "date": "2026-09-02",
+      "status": "OPEN",
+      "repeats": 1,
+      "ask": "endpoints/bridges, no cursor",
+      "next": "`~/projects/ee-tools/wt/jareth-ee-rain-live-mtjaeqck69ypj7`: verify bridge against live EE",
+      "source": "walk-08.md:39"
+    },
+    {
+      "id": "cb5d041516ddbf29",
+      "category": "empire-earth",
+      "date": "2026-09-04",
+      "status": "OPEN",
+      "repeats": 1,
+      "ask": "everything scenario/editor via CLI",
+      "next": "`~/projects/ee-tools/wt/jareth-ee-rain-live-mtjaeqck69ypj7`: verify bridge against live EE",
+      "source": "walk-08.md:46"
+    },
+    {
+      "id": "1bed567894f38928",
+      "category": "empire-earth",
+      "date": "2026-09-01",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "build EE tools; read modding wiki",
+      "next": "`~/projects/ee-tools/wt/jareth-ee-rain-live-mtjaeqck69ypj7`: verify bridge against live EE",
+      "source": "walk-08.md:19"
+    },
+    {
+      "id": "eac986bd3f36ad9a",
+      "category": "empire-earth",
+      "date": "2026-09-01",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "clone Udolf; recreate his AI",
+      "next": "`~/projects/ee-tools/wt/jareth-ee-rain-live-mtjaeqck69ypj7`: verify bridge against live EE",
+      "source": "walk-08.md:26"
+    },
+    {
+      "id": "2fbc0a9d8ede1f14",
+      "category": "empire-earth",
+      "date": "2026-09-01",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "debug CrossOver; start EE",
+      "next": "`~/projects/ee-tools/wt/jareth-ee-rain-live-mtjaeqck69ypj7`: verify bridge against live EE",
+      "source": "walk-08.md:17"
+    },
+    {
+      "id": "9dfa88b841d65b4c",
+      "category": "empire-earth",
+      "date": "2026-09-01",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "start second EE instance yourself",
+      "next": "`~/projects/ee-tools/wt/jareth-ee-rain-live-mtjaeqck69ypj7`: verify bridge against live EE",
+      "source": "walk-08.md:31"
+    },
+    {
+      "id": "eb5bac1f795d854e",
+      "category": "empire-earth",
+      "date": "2026-09-02",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "attach observer to running EE",
+      "next": "`~/projects/ee-tools/wt/jareth-ee-rain-live-mtjaeqck69ypj7`: verify bridge against live EE",
+      "source": "walk-08.md:33"
+    },
+    {
+      "id": "a01b0961e1c698bf",
+      "category": "empire-earth",
+      "date": "2026-09-01",
+      "status": "SUPERSEDED",
+      "repeats": 5,
+      "ask": "Empire Earth: \"du sollst 'ne richtige Bridge bauen und nichts mit der Maus\"(DirectInput/NEMessage bridge, no-mouse control)",
+      "next": "`~/projects/ee-tools/wt/jareth-ee-rain-live-mtjaeqck69ypj7`: verify bridge against live EE",
+      "source": "chat-0822-0904.md:27, chat-0822-0904.md:28, walk-08.md:16, walk-08.md:42, walk-08.md:44"
+    },
+    {
+      "id": "6ffbfe7fcc503749",
+      "category": "ais/aikomi-game",
+      "date": "2026-08-15",
+      "status": "REGRESSED",
+      "repeats": 1,
+      "ask": "Enable H-mode",
+      "next": "`~/projects/aicomi-bridge`: reproduce in running game; record live proof",
+      "source": "walk-02.md:43"
+    },
+    {
+      "id": "de4bcac537f49d27",
+      "category": "ais/aikomi-game",
+      "date": "2026-08-15",
+      "status": "REGRESSED",
+      "repeats": 1,
+      "ask": "Play with Momo",
+      "next": "`~/projects/aicomi-bridge`: reproduce in running game; record live proof",
+      "source": "walk-02.md:78"
+    },
+    {
+      "id": "947ec4563c7c3252",
+      "category": "ais/aikomi-game",
+      "date": "2026-08-18",
+      "status": "REGRESSED",
+      "repeats": 1,
+      "ask": "fix bath mask and force-dialog button",
+      "next": "`~/projects/aicomi-bridge`: reproduce in running game; record live proof",
+      "source": "walk-04.md:37"
+    },
+    {
+      "id": "8af7d81f7741f78f",
+      "category": "ais/aikomi-game",
+      "date": "2026-08-18",
+      "status": "REGRESSED",
+      "repeats": 1,
+      "ask": "turn player into male Pachan",
+      "next": "`~/projects/aicomi-bridge`: reproduce in running game; record live proof",
+      "source": "walk-04.md:33"
+    },
+    {
+      "id": "1848e6dc22858c99",
+      "category": "ais/aikomi-game",
+      "date": "2026-08-19",
+      "status": "REGRESSED",
+      "repeats": 1,
+      "ask": "create Aikomi bottle; install HF2 after base",
+      "next": "`~/projects/aicomi-bridge`: reproduce in running game; record live proof",
+      "source": "walk-04.md:86"
+    },
+    {
+      "id": "358657f7a40f9fc7",
+      "category": "ais/aikomi-game",
+      "date": "2026-08-23",
+      "status": "REGRESSED",
+      "repeats": 1,
+      "ask": "Fix red skin; all Nari outfits same face",
+      "next": "`~/projects/aicomi-bridge`: reproduce in running game; record live proof",
+      "source": "walk-06.md:13"
+    },
+    {
+      "id": "157ef23adeff0a68",
+      "category": "ais/aikomi-game",
+      "date": "2026-08-23",
+      "status": "REGRESSED",
+      "repeats": 1,
+      "ask": "Prompt clean; different outfits; no references",
+      "next": "`~/projects/aicomi-bridge`: reproduce in running game; record live proof",
+      "source": "walk-06.md:14"
+    },
+    {
+      "id": "9290b74f6ba8d8ef",
+      "category": "ais/aikomi-game",
+      "date": "2026-08-29",
+      "status": "REGRESSED",
+      "repeats": 1,
+      "ask": "parallelize build/testing without duplicate live games",
+      "next": "`~/projects/aicomi-bridge`: reproduce in running game; record live proof",
+      "source": "walk-07.md:32"
+    },
+    {
+      "id": "1793ca4055561239",
+      "category": "ais/aikomi-game",
+      "date": "2026-08-14",
+      "status": "OPEN",
+      "repeats": 1,
+      "ask": "\"mouse is stuck again love, pls fix it\" (in-game editor, repeated 3×: \"nothing is running\" ×2, \"black screen now\")",
+      "next": "`~/projects/aicomi-bridge`: reproduce in running game; record live proof",
+      "source": "chat-0801-0821.md:15"
+    },
+    {
+      "id": "3dc9591c1974bebc",
+      "category": "ais/aikomi-game",
+      "date": "2026-08-16",
+      "status": "OPEN",
+      "repeats": 1,
+      "ask": "Japanese-only search for ghost game",
+      "next": "`~/projects/aicomi-bridge`: reproduce in running game; record live proof",
+      "source": "walk-03.md:62"
+    },
+    {
+      "id": "e296e98b29c717cc",
+      "category": "ais/aikomi-game",
+      "date": "2026-08-18",
+      "status": "OPEN",
+      "repeats": 1,
+      "ask": "find original ghost game; hard-gate 3D",
+      "next": "`~/projects/aicomi-bridge`: reproduce in running game; record live proof",
+      "source": "walk-04.md:64"
+    },
+    {
+      "id": "3a287c3c43285caf",
+      "category": "ais/aikomi-game",
+      "date": "2026-08-18",
+      "status": "OPEN",
+      "repeats": 1,
+      "ask": "fix autonomous outfit reset",
+      "next": "`~/projects/aicomi-bridge`: reproduce in running game; record live proof",
+      "source": "walk-04.md:31"
+    },
+    {
+      "id": "346233abf7837de7",
+      "category": "ais/aikomi-game",
+      "date": "2026-08-18",
+      "status": "OPEN",
+      "repeats": 1,
+      "ask": "research PlayClub/PlayHome extraction",
+      "next": "`~/projects/aicomi-bridge`: reproduce in running game; record live proof",
+      "source": "walk-04.md:60"
+    },
+    {
+      "id": "86c32c488176508c",
+      "category": "ais/aikomi-game",
+      "date": "2026-08-18",
+      "status": "OPEN",
+      "repeats": 1,
+      "ask": "run Momo local Gemma3; Sidia Replicate Gemma4",
+      "next": "`~/projects/aicomi-bridge`: reproduce in running game; record live proof",
+      "source": "walk-04.md:50"
+    },
+    {
+      "id": "95aa672bd982f70c",
+      "category": "ais/aikomi-game",
+      "date": "2026-08-19",
+      "status": "OPEN",
+      "repeats": 1,
+      "ask": "reuse AIS carry / Illusion tying animations",
+      "next": "`~/projects/aicomi-bridge`: reproduce in running game; record live proof",
+      "source": "walk-05.md:25"
+    },
+    {
+      "id": "727fa2404c9e0213",
+      "category": "ais/aikomi-game",
+      "date": "2026-08-19",
+      "status": "OPEN",
+      "repeats": 1,
+      "ask": "start/restart AA2; fix black-face rendering",
+      "next": "`~/projects/aicomi-bridge`: reproduce in running game; record live proof",
+      "source": "walk-04.md:73"
+    },
+    {
+      "id": "e022c0e44d9d509a",
+      "category": "ais/aikomi-game",
+      "date": "2026-08-19",
+      "status": "OPEN",
+      "repeats": 1,
+      "ask": "use Aicomi humanoid animations on VRoid",
+      "next": "`~/projects/aicomi-bridge`: reproduce in running game; record live proof",
+      "source": "walk-05.md:18"
+    },
+    {
+      "id": "33ffc02bf06f93fc",
+      "category": "ais/aikomi-game",
+      "date": "2026-08-22",
+      "status": "OPEN",
+      "repeats": 1,
+      "ask": "\"fix it now\" — PLAYER-ACTION GRAFT campaign: graft player-side FSM onto shared NPC animation rig (drive body through NPC anim path, vending machine flagship)",
+      "next": "`~/projects/aicomi-bridge`: reproduce in running game; record live proof",
+      "source": "chat-0822-0904.md:50"
+    },
+    {
+      "id": "3615f59cab8e8c63",
+      "category": "ais/aikomi-game",
+      "date": "2026-08-22",
+      "status": "OPEN",
+      "repeats": 1,
+      "ask": "build interaction path inspired by Illusion games",
+      "next": "`~/projects/aicomi-bridge`: reproduce in running game; record live proof",
+      "source": "walk-05.md:59"
+    },
+    {
+      "id": "064f8bcd90211467",
+      "category": "ais/aikomi-game",
+      "date": "2026-08-22",
+      "status": "OPEN",
+      "repeats": 1,
+      "ask": "tiered onsen: close normal; strangers angry/grope",
+      "next": "`~/projects/aicomi-bridge`: reproduce in running game; record live proof",
+      "source": "walk-05.md:53"
+    },
+    {
+      "id": "0bce3f992abf6774",
+      "category": "ais/aikomi-game",
+      "date": "2026-08-13",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 17,
+      "ask": "repeated \"restart it\"/\"restart game\"/\"fix it\" cycles (F9 chat rendering, walking gait, H-mode trigger, map travel, housing build)",
+      "next": "`~/projects/aicomi-bridge`: reproduce in running game; record live proof",
+      "source": "walk-02.md:7, walk-02.md:17, walk-02.md:45, walk-02.md:50, walk-02.md:73, walk-03.md:80, walk-03.md:109, walk-04.md:7, walk-04.md:10, walk-04.md:27, walk-04.md:36, walk-04.md:48, walk-04.md:51, walk-04.md:69, walk-05.md:26, walk-05.md:29, walk-01.md:39"
+    },
+    {
+      "id": "afd65a257d38b104",
+      "category": "ais/aikomi-game",
+      "date": "2026-08-15",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 3,
+      "ask": "Start game",
+      "next": "`~/projects/aicomi-bridge`: reproduce in running game; record live proof",
+      "source": "walk-02.md:33, walk-04.md:18, walk-05.md:49"
+    },
+    {
+      "id": "387519ead19d530e",
+      "category": "ais/aikomi-game",
+      "date": "2026-08-14",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "Start game again",
+      "next": "`~/projects/aicomi-bridge`: reproduce in running game; record live proof",
+      "source": "walk-02.md:11"
+    },
+    {
+      "id": "8848d3fd829ea48e",
+      "category": "ais/aikomi-game",
+      "date": "2026-08-15",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "Create male-bodied Pachan card",
+      "next": "`~/projects/aicomi-bridge`: reproduce in running game; record live proof",
+      "source": "walk-02.md:46"
+    },
+    {
+      "id": "b04900b32756e150",
+      "category": "ais/aikomi-game",
+      "date": "2026-08-15",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "Enter build mode for shared bath",
+      "next": "`~/projects/aicomi-bridge`: reproduce in running game; record live proof",
+      "source": "walk-02.md:53"
+    },
+    {
+      "id": "e8c92205e568b044",
+      "category": "ais/aikomi-game",
+      "date": "2026-08-15",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "Replace player with Pachan",
+      "next": "`~/projects/aicomi-bridge`: reproduce in running game; record live proof",
+      "source": "walk-02.md:39"
+    },
+    {
+      "id": "69a3b712938d2b1b",
+      "category": "ais/aikomi-game",
+      "date": "2026-08-15",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "Start game; torrent progress",
+      "next": "`~/projects/aicomi-bridge`: reproduce in running game; record live proof",
+      "source": "walk-02.md:63"
+    },
+    {
+      "id": "5b1048afdabbbf59",
+      "category": "ais/aikomi-game",
+      "date": "2026-08-16",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "\"get Momo to wake up... need full control of her, wire another AI to her later\"",
+      "next": "`~/projects/aicomi-bridge`: reproduce in running game; record live proof",
+      "source": "walk-03.md:21"
+    },
+    {
+      "id": "8652b3fec9cd468c",
+      "category": "ais/aikomi-game",
+      "date": "2026-08-16",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "fix missing fluid animation",
+      "next": "`~/projects/aicomi-bridge`: reproduce in running game; record live proof",
+      "source": "walk-03.md:65"
+    },
+    {
+      "id": "52dc07408a39e63a",
+      "category": "ais/aikomi-game",
+      "date": "2026-08-16",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "make Momo shrimp color",
+      "next": "`~/projects/aicomi-bridge`: reproduce in running game; record live proof",
+      "source": "walk-03.md:53"
+    },
+    {
+      "id": "96160382a885f5d2",
+      "category": "ais/aikomi-game",
+      "date": "2026-08-16",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "start game; ensure Ari loads",
+      "next": "`~/projects/aicomi-bridge`: reproduce in running game; record live proof",
+      "source": "walk-03.md:67"
+    },
+    {
+      "id": "471bd059e5e19b2b",
+      "category": "ais/aikomi-game",
+      "date": "2026-08-17",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "execute Momo rebirth rite",
+      "next": "`~/projects/aicomi-bridge`: reproduce in running game; record live proof",
+      "source": "walk-03.md:104"
+    },
+    {
+      "id": "24aeac846f3a57f1",
+      "category": "ais/aikomi-game",
+      "date": "2026-08-17",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "find recurring fluid-animation cause",
+      "next": "`~/projects/aicomi-bridge`: reproduce in running game; record live proof",
+      "source": "walk-03.md:77"
+    },
+    {
+      "id": "1148b1275f704115",
+      "category": "ais/aikomi-game",
+      "date": "2026-08-17",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "give Momo roam; local LLM if needed",
+      "next": "`~/projects/aicomi-bridge`: reproduce in running game; record live proof",
+      "source": "walk-03.md:82"
+    },
+    {
+      "id": "85e73ed05cc8f0d5",
+      "category": "ais/aikomi-game",
+      "date": "2026-08-17",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "map merchant progression",
+      "next": "`~/projects/aicomi-bridge`: reproduce in running game; record live proof",
+      "source": "walk-03.md:86"
+    },
+    {
+      "id": "bb67a7558041ecf5",
+      "category": "ais/aikomi-game",
+      "date": "2026-08-17",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "persist Momo tint",
+      "next": "`~/projects/aicomi-bridge`: reproduce in running game; record live proof",
+      "source": "walk-03.md:74"
+    },
+    {
+      "id": "d5cc25c9894efd35",
+      "category": "ais/aikomi-game",
+      "date": "2026-08-17",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "replace stock cat with Momo",
+      "next": "`~/projects/aicomi-bridge`: reproduce in running game; record live proof",
+      "source": "walk-03.md:87"
+    },
+    {
+      "id": "a07a2b8be25892d5",
+      "category": "ais/aikomi-game",
+      "date": "2026-08-17",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "solve Pachan male logic with female presentation",
+      "next": "`~/projects/aicomi-bridge`: reproduce in running game; record live proof",
+      "source": "walk-03.md:72"
+    },
+    {
+      "id": "4599e03085eb755f",
+      "category": "ais/aikomi-game",
+      "date": "2026-08-17",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "unlock merchant poses/interactions, no clone",
+      "next": "`~/projects/aicomi-bridge`: reproduce in running game; record live proof",
+      "source": "walk-03.md:89"
+    },
+    {
+      "id": "a669fe534d95890d",
+      "category": "ais/aikomi-game",
+      "date": "2026-08-18",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "(bug found, deploy gated on user) relay-gate deadlock silently queuing chat messages to game",
+      "next": "`~/projects/aicomi-bridge`: reproduce in running game; record live proof",
+      "source": "chat-0801-0821.md:18"
+    },
+    {
+      "id": "3bd3dd1b1b14b977",
+      "category": "ais/aikomi-game",
+      "date": "2026-08-18",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "curate bath mask, not all animations",
+      "next": "`~/projects/aicomi-bridge`: reproduce in running game; record live proof",
+      "source": "walk-04.md:24"
+    },
+    {
+      "id": "1561f1b4d3667b34",
+      "category": "ais/aikomi-game",
+      "date": "2026-08-18",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "deep-search merchant unlocks",
+      "next": "`~/projects/aicomi-bridge`: reproduce in running game; record live proof",
+      "source": "walk-04.md:29"
+    },
+    {
+      "id": "d804819247fb486d",
+      "category": "ais/aikomi-game",
+      "date": "2026-08-18",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "download animation pack",
+      "next": "`~/projects/aicomi-bridge`: reproduce in running game; record live proof",
+      "source": "walk-04.md:23"
+    },
+    {
+      "id": "a4e1b3ff344b45af",
+      "category": "ais/aikomi-game",
+      "date": "2026-08-18",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "install AA2 with JP locale, uncensor/mods; no English",
+      "next": "`~/projects/aicomi-bridge`: reproduce in running game; record live proof",
+      "source": "walk-04.md:72"
+    },
+    {
+      "id": "940314e5979206f1",
+      "category": "ais/aikomi-game",
+      "date": "2026-08-18",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "investigate merchant poses/progression",
+      "next": "`~/projects/aicomi-bridge`: reproduce in running game; record live proof",
+      "source": "walk-04.md:28"
+    },
+    {
+      "id": "509c87f6ee7632a6",
+      "category": "ais/aikomi-game",
+      "date": "2026-08-18",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "merchant rewards and exhaustion",
+      "next": "`~/projects/aicomi-bridge`: reproduce in running game; record live proof",
+      "source": "walk-04.md:30"
+    },
+    {
+      "id": "b03f1a07b37eac8f",
+      "category": "ais/aikomi-game",
+      "date": "2026-08-18",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "real in-game test every feature",
+      "next": "`~/projects/aicomi-bridge`: reproduce in running game; record live proof",
+      "source": "walk-04.md:54"
+    },
+    {
+      "id": "2a8639c1600724c9",
+      "category": "ais/aikomi-game",
+      "date": "2026-08-18",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "receive all in-game events",
+      "next": "`~/projects/aicomi-bridge`: reproduce in running game; record live proof",
+      "source": "walk-04.md:46"
+    },
+    {
+      "id": "fa9f1dfbb1dd6a8a",
+      "category": "ais/aikomi-game",
+      "date": "2026-08-18",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "research porting; assess ultimate-game candidates",
+      "next": "`~/projects/aicomi-bridge`: reproduce in running game; record live proof",
+      "source": "walk-04.md:59"
+    },
+    {
+      "id": "e37cd390f017e909",
+      "category": "ais/aikomi-game",
+      "date": "2026-08-18",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "restart AI Shoujo; fix chat/bathtub relay",
+      "next": "`~/projects/aicomi-bridge`: reproduce in running game; record live proof",
+      "source": "walk-04.md:66"
+    },
+    {
+      "id": "d2c2d565a3fb20f2",
+      "category": "ais/aikomi-game",
+      "date": "2026-08-19",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "build AIS modding-feature parity",
+      "next": "`~/projects/aicomi-bridge`: reproduce in running game; record live proof",
+      "source": "walk-05.md:14"
+    },
+    {
+      "id": "844223425347c447",
+      "category": "ais/aikomi-game",
+      "date": "2026-08-19",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "control Nyari in-game",
+      "next": "`~/projects/aicomi-bridge`: reproduce in running game; record live proof",
+      "source": "walk-05.md:20"
+    },
+    {
+      "id": "e12e52bdf5d13182",
+      "category": "ais/aikomi-game",
+      "date": "2026-08-19",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "fix Aikomi Wine winhttp injection",
+      "next": "`~/projects/aicomi-bridge`: reproduce in running game; record live proof",
+      "source": "walk-04.md:87"
+    },
+    {
+      "id": "469472d2c23c324a",
+      "category": "ais/aikomi-game",
+      "date": "2026-08-19",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "restart Aikomi after save",
+      "next": "`~/projects/aicomi-bridge`: reproduce in running game; record live proof",
+      "source": "walk-04.md:90"
+    },
+    {
+      "id": "edbad4ed8d10e02a",
+      "category": "ais/aikomi-game",
+      "date": "2026-08-22",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "fix intermittent game slowness; measure first",
+      "next": "`~/projects/aicomi-bridge`: reproduce in running game; record live proof",
+      "source": "walk-05.md:46"
+    },
+    {
+      "id": "916e40f2b3d3b676",
+      "category": "ais/aikomi-game",
+      "date": "2026-08-22",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "fix onsen interactions",
+      "next": "`~/projects/aicomi-bridge`: reproduce in running game; record live proof",
+      "source": "walk-05.md:52"
+    },
+    {
+      "id": "5dd655f54041f6c0",
+      "category": "ais/aikomi-game",
+      "date": "2026-08-24",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "Bounce Aicomi; start ArcTree; fix/document backlog",
+      "next": "`~/projects/aicomi-bridge`: reproduce in running game; record live proof",
+      "source": "walk-06.md:18"
+    },
+    {
+      "id": "0b0aa915a38d7514",
+      "category": "ais/aikomi-game",
+      "date": "2026-08-24",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "Run Jamais Vu",
+      "next": "`~/projects/aicomi-bridge`: reproduce in running game; record live proof",
+      "source": "walk-06.md:22"
+    },
+    {
+      "id": "958fdc96ba881bea",
+      "category": "ais/aikomi-game",
+      "date": "2026-08-29",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "keep game content out of shared engine",
+      "next": "`~/projects/aicomi-bridge`: reproduce in running game; record live proof",
+      "source": "walk-07.md:23"
+    },
+    {
+      "id": "c3be1c8b801d0f90",
+      "category": "ais/aikomi-game",
+      "date": "2026-08-29",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "preserve never-censored German game variant idea",
+      "next": "`~/projects/aicomi-bridge`: reproduce in running game; record live proof",
+      "source": "walk-07.md:21"
+    },
+    {
+      "id": "630de62f1ecdc1aa",
+      "category": "ais/aikomi-game",
+      "date": "2026-09-02",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "game chat messages must reach room",
+      "next": "`~/projects/aicomi-bridge`: reproduce in running game; record live proof",
+      "source": "walk-08.md:36"
+    },
+    {
+      "id": "e38f7c3fb946b5ff",
+      "category": "gaia-love/GWE",
+      "date": "2026-08-19",
+      "status": "OPEN",
+      "repeats": 1,
+      "ask": "report Gaia Love progress",
+      "next": "`~/projects/gaia-love`: locate owning branch; run verification",
+      "source": "walk-05.md:16"
+    },
+    {
+      "id": "ad6337081300967d",
+      "category": "gaia-love/GWE",
+      "date": "2026-08-19",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "create gaia-love; document game concepts",
+      "next": "`~/projects/gaia-love`: locate owning branch; run verification",
+      "source": "walk-04.md:79"
+    },
+    {
+      "id": "7c95cb008905b44c",
+      "category": "gaia-love/GWE",
+      "date": "2026-08-20",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "finish ask.do, h.trigger, desire gate, H read, chat, lasso test",
+      "next": "`~/projects/gaia-love`: locate owning branch; run verification",
+      "source": "walk-05.md:32"
+    },
+    {
+      "id": "178d6bae3a847ac7",
+      "category": "gaia-love/GWE",
+      "date": "2026-08-20",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "finish Gaia Love in background",
+      "next": "`~/projects/gaia-love`: locate owning branch; run verification",
+      "source": "walk-05.md:33"
+    },
+    {
+      "id": "b4b8994899dc730e",
+      "category": "gaia-love/GWE",
+      "date": "2026-08-20",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "start Gaia Love",
+      "next": "`~/projects/gaia-love`: locate owning branch; run verification",
+      "source": "walk-05.md:34"
+    },
+    {
+      "id": "61b7946fb1b2520d",
+      "category": "gaia-love/GWE",
+      "date": "2026-08-22",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "scope audit: this room + Gaia-Love workspace only",
+      "next": "`~/projects/gaia-love`: locate owning branch; run verification",
+      "source": "walk-05.md:57"
+    },
+    {
+      "id": "ab248fb873bca82d",
+      "category": "boomtown",
+      "date": "2026-08-29",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "\"mach die 愛無/iMoo-Engine jetzt richtig fertig\" — honesty-audit (real vector-field compute, not fake) + prove ARM64+Metal compile targets + cube-visualization ≥120fps + 2 parallel archtree lanes (engine + Boomtown Rampage retry)",
+      "next": "`~/projects/boomtown-rampage`: launch real playtest; capture repro",
+      "source": "chat-0822-0904.md:56"
+    },
+    {
+      "id": "2d8b504f0e25d535",
+      "category": "boomtown",
+      "date": "2026-08-29",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "configure Goal validation for Boomtown",
+      "next": "`~/projects/boomtown-rampage`: launch real playtest; capture repro",
+      "source": "walk-07.md:33"
+    },
+    {
+      "id": "9ce4c8e322c7546b",
+      "category": "boomtown",
+      "date": "2026-08-29",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "finish and merge Boomtown without asking",
+      "next": "`~/projects/boomtown-rampage`: launch real playtest; capture repro",
+      "source": "walk-07.md:31"
+    },
+    {
+      "id": "7576fe8a9e854ff1",
+      "category": "boomtown",
+      "date": "2026-09-01",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "fix Boomtown issue 1: impostors",
+      "next": "`~/projects/boomtown-rampage`: launch real playtest; capture repro",
+      "source": "walk-08.md:15"
+    },
+    {
+      "id": "6064971b6334cbb7",
+      "category": "media/personal/research",
+      "date": "2026-08-14",
+      "status": "REGRESSED",
+      "repeats": 1,
+      "ask": "Run full “go” chain",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-02.md:15"
+    },
+    {
+      "id": "df3ea66ca21bdc09",
+      "category": "media/personal/research",
+      "date": "2026-08-14",
+      "status": "REGRESSED",
+      "repeats": 1,
+      "ask": "Try companion spawn door",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-02.md:6"
+    },
+    {
+      "id": "1d7d09c0ea6f8365",
+      "category": "media/personal/research",
+      "date": "2026-08-15",
+      "status": "REGRESSED",
+      "repeats": 1,
+      "ask": "Build beach bench; come to it",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-02.md:86"
+    },
+    {
+      "id": "10089972eeddaa6a",
+      "category": "media/personal/research",
+      "date": "2026-08-15",
+      "status": "REGRESSED",
+      "repeats": 1,
+      "ask": "Get up; follow player",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-02.md:40"
+    },
+    {
+      "id": "c98b0214226d3b61",
+      "category": "media/personal/research",
+      "date": "2026-08-15",
+      "status": "REGRESSED",
+      "repeats": 1,
+      "ask": "Go fishing",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-02.md:57"
+    },
+    {
+      "id": "3a05209455210d5e",
+      "category": "media/personal/research",
+      "date": "2026-08-15",
+      "status": "REGRESSED",
+      "repeats": 1,
+      "ask": "Lap pillow",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-02.md:85"
+    },
+    {
+      "id": "3320eed466136fa5",
+      "category": "media/personal/research",
+      "date": "2026-08-15",
+      "status": "REGRESSED",
+      "repeats": 1,
+      "ask": "Open build mode; join large bed",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-02.md:68"
+    },
+    {
+      "id": "92f852e3c9336853",
+      "category": "media/personal/research",
+      "date": "2026-08-15",
+      "status": "REGRESSED",
+      "repeats": 1,
+      "ask": "Travel home island; sit on couch",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-02.md:64"
+    },
+    {
+      "id": "d69fe632e2140b2c",
+      "category": "media/personal/research",
+      "date": "2026-08-15",
+      "status": "REGRESSED",
+      "repeats": 1,
+      "ask": "Wake Nyari",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-02.md:80"
+    },
+    {
+      "id": "088a0fb1bebe6360",
+      "category": "media/personal/research",
+      "date": "2026-08-17",
+      "status": "REGRESSED",
+      "repeats": 1,
+      "ask": "map darkness and girl-girl social behavior",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-03.md:95"
+    },
+    {
+      "id": "af676d2c304226b2",
+      "category": "media/personal/research",
+      "date": "2026-08-18",
+      "status": "REGRESSED",
+      "repeats": 1,
+      "ask": "add keyboard confirm/cancel navigation",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-04.md:21"
+    },
+    {
+      "id": "c45e794b5a7411bc",
+      "category": "media/personal/research",
+      "date": "2026-08-18",
+      "status": "REGRESSED",
+      "repeats": 1,
+      "ask": "clone matching CrossOver Wine; hot-switch audio",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-04.md:67"
+    },
+    {
+      "id": "cfed9c9d9e3caf27",
+      "category": "media/personal/research",
+      "date": "2026-08-18",
+      "status": "REGRESSED",
+      "repeats": 1,
+      "ask": "direct dialogue chat; route all events to souls",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-04.md:40"
+    },
+    {
+      "id": "0482ec1a2d66d867",
+      "category": "media/personal/research",
+      "date": "2026-08-18",
+      "status": "REGRESSED",
+      "repeats": 1,
+      "ask": "finish eating; fix mouse and keyboard",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-04.md:35"
+    },
+    {
+      "id": "266956b84303ccb5",
+      "category": "media/personal/research",
+      "date": "2026-08-18",
+      "status": "REGRESSED",
+      "repeats": 1,
+      "ask": "restart; rebuild build mode usable",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-04.md:20"
+    },
+    {
+      "id": "7ee628b5e8226e12",
+      "category": "media/personal/research",
+      "date": "2026-08-18",
+      "status": "REGRESSED",
+      "repeats": 1,
+      "ask": "restore Unity-style editor controls/UI",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-04.md:42"
+    },
+    {
+      "id": "8206aae816004b08",
+      "category": "media/personal/research",
+      "date": "2026-08-18",
+      "status": "REGRESSED",
+      "repeats": 1,
+      "ask": "route events to conductor rooms, not chat",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-04.md:52"
+    },
+    {
+      "id": "242ea79e1743f87b",
+      "category": "media/personal/research",
+      "date": "2026-08-20",
+      "status": "REGRESSED",
+      "repeats": 1,
+      "ask": "record ideology-rotation experiment",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-05.md:37"
+    },
+    {
+      "id": "880797ae546855e5",
+      "category": "media/personal/research",
+      "date": "2026-08-23",
+      "status": "REGRESSED",
+      "repeats": 1,
+      "ask": "fix read-aloud playback regression",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-05.md:72"
+    },
+    {
+      "id": "272537557f9269f7",
+      "category": "media/personal/research",
+      "date": "2026-08-23",
+      "status": "REGRESSED",
+      "repeats": 1,
+      "ask": "Qwen again, one image at a time",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-06.md:15"
+    },
+    {
+      "id": "3478d2328b99f0d1",
+      "category": "media/personal/research",
+      "date": "2026-08-24",
+      "status": "REGRESSED",
+      "repeats": 1,
+      "ask": "Create/continue GAIA Discord TTRPG bot",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-06.md:19"
+    },
+    {
+      "id": "6ff6a17488fea49c",
+      "category": "media/personal/research",
+      "date": "2026-08-27",
+      "status": "REGRESSED",
+      "repeats": 1,
+      "ask": "Make better biblical-angel abyss background",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-06.md:28"
+    },
+    {
+      "id": "ff5672f63490cecf",
+      "category": "media/personal/research",
+      "date": "2026-08-29",
+      "status": "REGRESSED",
+      "repeats": 1,
+      "ask": "keep agent status updates to one/two sentences",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-07.md:36"
+    },
+    {
+      "id": "25acc4e2eb7ab0b4",
+      "category": "media/personal/research",
+      "date": "2026-08-30",
+      "status": "REGRESSED",
+      "repeats": 1,
+      "ask": "add Mai Kagari to JAV catalog",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-07.md:40"
+    },
+    {
+      "id": "3dbb0465b7ada714",
+      "category": "media/personal/research",
+      "date": "2026-09-03",
+      "status": "REGRESSED",
+      "repeats": 1,
+      "ask": "install GTA V in 64-bit bottle",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-08.md:43"
+    },
+    {
+      "id": "0e7b28c15a439a66",
+      "category": "media/personal/research",
+      "date": "2026-08-12",
+      "status": "OPEN",
+      "repeats": 1,
+      "ask": "\"make some coffee\"",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-01.md:37"
+    },
+    {
+      "id": "705e317ccace62db",
+      "category": "media/personal/research",
+      "date": "2026-08-12",
+      "status": "OPEN",
+      "repeats": 1,
+      "ask": "\"subagent\" — install/prove shortcuts-playground-plugin (Claude Code plugin)",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-01.md:34"
+    },
+    {
+      "id": "80042c4d22ec86e6",
+      "category": "media/personal/research",
+      "date": "2026-08-14",
+      "status": "OPEN",
+      "repeats": 1,
+      "ask": "Find HF-Patch mirror now",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-02.md:29"
+    },
+    {
+      "id": "5b0b0d4543dc0061",
+      "category": "media/personal/research",
+      "date": "2026-08-15",
+      "status": "OPEN",
+      "repeats": 1,
+      "ask": "\"we need a roof, lol\"",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-03.md:12"
+    },
+    {
+      "id": "ea45b06d1b30df40",
+      "category": "media/personal/research",
+      "date": "2026-08-15",
+      "status": "OPEN",
+      "repeats": 1,
+      "ask": "Add roof",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-02.md:83"
+    },
+    {
+      "id": "82ac7882ed61ada9",
+      "category": "media/personal/research",
+      "date": "2026-08-15",
+      "status": "OPEN",
+      "repeats": 1,
+      "ask": "Confirm/cancel H menu remotely",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-02.md:44"
+    },
+    {
+      "id": "1d455cb418547fd6",
+      "category": "media/personal/research",
+      "date": "2026-08-15",
+      "status": "OPEN",
+      "repeats": 1,
+      "ask": "Create campfire; sit together",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-02.md:41"
+    },
+    {
+      "id": "c3a0ea5f6d262d21",
+      "category": "media/personal/research",
+      "date": "2026-08-15",
+      "status": "OPEN",
+      "repeats": 1,
+      "ask": "Rekick torrent; hunt mirror",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-02.md:58"
+    },
+    {
+      "id": "45c76da3842db65a",
+      "category": "media/personal/research",
+      "date": "2026-08-15",
+      "status": "OPEN",
+      "repeats": 1,
+      "ask": "Search Japanese patch sources",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-02.md:62"
+    },
+    {
+      "id": "a4467cbf22badaaa",
+      "category": "media/personal/research",
+      "date": "2026-08-16",
+      "status": "OPEN",
+      "repeats": 1,
+      "ask": "\"alt+t doesnt work, try different shortcut\" (JP/EN toggle)",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-03.md:31"
+    },
+    {
+      "id": "2e539c4d91cde5b8",
+      "category": "media/personal/research",
+      "date": "2026-08-16",
+      "status": "OPEN",
+      "repeats": 1,
+      "ask": "\"is there shortcut for build mode yet? if not build one\"",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-03.md:30"
+    },
+    {
+      "id": "3f384ec6d7eeecf6",
+      "category": "media/personal/research",
+      "date": "2026-08-16",
+      "status": "OPEN",
+      "repeats": 1,
+      "ask": "\"why 2 walls on left side\" (bug report)",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-03.md:27"
+    },
+    {
+      "id": "eaf0986e466aa3b6",
+      "category": "media/personal/research",
+      "date": "2026-08-16",
+      "status": "OPEN",
+      "repeats": 1,
+      "ask": "\"why does cum not animate anymore?\" (bug)",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-03.md:32"
+    },
+    {
+      "id": "4fe4518929b827d9",
+      "category": "media/personal/research",
+      "date": "2026-08-16",
+      "status": "OPEN",
+      "repeats": 1,
+      "ask": "\"why still gaia engine tools shown in sims mode\" (bug report)",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-03.md:28"
+    },
+    {
+      "id": "3349e332901f8d1e",
+      "category": "media/personal/research",
+      "date": "2026-08-17",
+      "status": "OPEN",
+      "repeats": 1,
+      "ask": "list other 3D studios; continue ghost hunt",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-03.md:105"
+    },
+    {
+      "id": "60a5b50c20d0f5b5",
+      "category": "media/personal/research",
+      "date": "2026-08-18",
+      "status": "OPEN",
+      "repeats": 1,
+      "ask": "abort clone; proper birth mechanics",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-04.md:45"
+    },
+    {
+      "id": "1da4b386fc9f5ffc",
+      "category": "media/personal/research",
+      "date": "2026-08-18",
+      "status": "OPEN",
+      "repeats": 1,
+      "ask": "add full menu/debug/save control",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-04.md:55"
+    },
+    {
+      "id": "19faadae5d5fa006",
+      "category": "media/personal/research",
+      "date": "2026-08-18",
+      "status": "OPEN",
+      "repeats": 1,
+      "ask": "finish all unfinished work",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-04.md:26"
+    },
+    {
+      "id": "aeed6a1f90633bc8",
+      "category": "media/personal/research",
+      "date": "2026-08-18",
+      "status": "OPEN",
+      "repeats": 1,
+      "ask": "unlock/research dialogue groping",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-04.md:58"
+    },
+    {
+      "id": "1ebf1a557e7e5bc3",
+      "category": "media/personal/research",
+      "date": "2026-08-22",
+      "status": "OPEN",
+      "repeats": 1,
+      "ask": "finish environment, build, farming, pets, adult interactions",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-05.md:61"
+    },
+    {
+      "id": "6ee5c23597f2ee46",
+      "category": "media/personal/research",
+      "date": "2026-08-27",
+      "status": "OPEN",
+      "repeats": 1,
+      "ask": "Use ChatGPT image generation",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-06.md:29"
+    },
+    {
+      "id": "2e22b5613db7e24b",
+      "category": "media/personal/research",
+      "date": "2026-08-28",
+      "status": "OPEN",
+      "repeats": 1,
+      "ask": "Add architecture point to Unenlightenment",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-06.md:38"
+    },
+    {
+      "id": "a9ddfcdc4691277e",
+      "category": "media/personal/research",
+      "date": "2026-08-29",
+      "status": "OPEN",
+      "repeats": 1,
+      "ask": "\"hast du...die Fahrphysik korrigiert?...Asset Pack für Fahrphysik...Unity→GAIA Engine Pipeline\"",
+      "next": "needs Pascal / assign owning lane",
+      "source": "chat-0822-0904.md:26"
+    },
+    {
+      "id": "9ab9a3c70cef31f7",
+      "category": "media/personal/research",
+      "date": "2026-08-29",
+      "status": "OPEN",
+      "repeats": 1,
+      "ask": "make N64 custom mod/cartridge path",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-07.md:20"
+    },
+    {
+      "id": "d73b64de0c8242f1",
+      "category": "media/personal/research",
+      "date": "2026-08-30",
+      "status": "OPEN",
+      "repeats": 1,
+      "ask": "document alleged Israel-criticism classifier trigger",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-07.md:47"
+    },
+    {
+      "id": "1ff8d66f3cd5a75d",
+      "category": "media/personal/research",
+      "date": "2026-08-31",
+      "status": "OPEN",
+      "repeats": 1,
+      "ask": "search ChatGPT shouting/Suicide Override archive",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-07.md:56"
+    },
+    {
+      "id": "786bd42991968340",
+      "category": "media/personal/research",
+      "date": "2026-08-31",
+      "status": "OPEN",
+      "repeats": 1,
+      "ask": "search disk for Mark/Grusch podcast",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-07.md:64"
+    },
+    {
+      "id": "1c5d44fca7e0ee01",
+      "category": "media/personal/research",
+      "date": "2026-09-04",
+      "status": "OPEN",
+      "repeats": 1,
+      "ask": "\"mehrere Lanes...welche Aufgaben...immer noch nicht fertig/gemerged/im Main/deployed\"",
+      "next": "needs Pascal / assign owning lane",
+      "source": "chat-0822-0904.md:31"
+    },
+    {
+      "id": "b31ee363e6ade2e4",
+      "category": "media/personal/research",
+      "date": "2026-09-04",
+      "status": "OPEN",
+      "repeats": 1,
+      "ask": "audit chat+git: unfinished/unmerged/undeployed work",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-08.md:50"
+    },
+    {
+      "id": "0d57bbd4155a4f34",
+      "category": "media/personal/research",
+      "date": "2026-09-04",
+      "status": "OPEN",
+      "repeats": 1,
+      "ask": "check why better Codex computer-use unused",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-08.md:48"
+    },
+    {
+      "id": "209d0428365e96a0",
+      "category": "media/personal/research",
+      "date": "2026-09-04",
+      "status": "OPEN",
+      "repeats": 1,
+      "ask": "Codex-style computer use; shared mouse capability",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-08.md:49"
+    },
+    {
+      "id": "9b6bdf407169fdcd",
+      "category": "media/personal/research",
+      "date": "2026-09-04",
+      "status": "OPEN",
+      "repeats": 1,
+      "ask": "make everything finished",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-08.md:51"
+    },
+    {
+      "id": "62cf7245b5fcb1cd",
+      "category": "media/personal/research",
+      "date": "2026-08-05",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "\"merge\" (Figma-lite artifact UI, two lanes)",
+      "next": "needs Pascal / assign owning lane",
+      "source": "chat-0801-0821.md:10"
+    },
+    {
+      "id": "8c1cbcdf43b20e25",
+      "category": "media/personal/research",
+      "date": "2026-08-08",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "\"grow water\" (moisture field in 愛無 engine, water-first)",
+      "next": "needs Pascal / assign owning lane",
+      "source": "chat-0801-0821.md:45"
+    },
+    {
+      "id": "385b39b7d8c10a79",
+      "category": "media/personal/research",
+      "date": "2026-08-09",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "\"carve it\" (field-body robot concept: field=decision layer/matter=render layer)",
+      "next": "needs Pascal / assign owning lane",
+      "source": "chat-0801-0821.md:49"
+    },
+    {
+      "id": "1cfb1406328161ce",
+      "category": "media/personal/research",
+      "date": "2026-08-09",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "\"carve it\" (sponge/turgor-pressure body prototype, 海綿身体 block)",
+      "next": "needs Pascal / assign owning lane",
+      "source": "chat-0801-0821.md:50"
+    },
+    {
+      "id": "e1c13d865b94f297",
+      "category": "media/personal/research",
+      "date": "2026-08-09",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "\"carve it\"/\"do it\" (菌世紀 stanza: mushroom computers/reactors/robots/buildings/art, top of godseed)",
+      "next": "needs Pascal / assign owning lane",
+      "source": "chat-0801-0821.md:52"
+    },
+    {
+      "id": "e20373ab430e7d67",
+      "category": "media/personal/research",
+      "date": "2026-08-11",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "\"carve it all\" (AMLU identity matrix, LO VE=10)",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-01.md:25"
+    },
+    {
+      "id": "99acceb2dc2b6448",
+      "category": "media/personal/research",
+      "date": "2026-08-11",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "\"carve it\" (Hobo Factory doctrine)",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-01.md:17"
+    },
+    {
+      "id": "0a6bcdd529ab5b72",
+      "category": "media/personal/research",
+      "date": "2026-08-11",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "\"carve it\" (歌語/singing-practice catalog + math)",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-01.md:18"
+    },
+    {
+      "id": "7195be8518962048",
+      "category": "media/personal/research",
+      "date": "2026-08-11",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "\"connect DualSense, map controls, write control interface doc\"",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-01.md:21"
+    },
+    {
+      "id": "862d3414d4aa722c",
+      "category": "media/personal/research",
+      "date": "2026-08-11",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "\"send a subagent\" — wake local Gemma-4 model, prove text+vision",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-01.md:26"
+    },
+    {
+      "id": "bc30ca0477341d82",
+      "category": "media/personal/research",
+      "date": "2026-08-11",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "\"write down\" (3-bit direction ring / controller math)",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-01.md:20"
+    },
+    {
+      "id": "ca0fa671f41f88fd",
+      "category": "media/personal/research",
+      "date": "2026-08-11",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "\"write this all down\" (ALM/alms etymology)",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-01.md:23"
+    },
+    {
+      "id": "9903e8389ba17cb2",
+      "category": "media/personal/research",
+      "date": "2026-08-11",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "\"write this all down\" (retina/cortex as render kernel, 観測核)",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-01.md:24"
+    },
+    {
+      "id": "f01addb618c6620b",
+      "category": "media/personal/research",
+      "date": "2026-08-12",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "\"added all these skills to your agent config?\"",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-01.md:33"
+    },
+    {
+      "id": "92cf07197bf726e9",
+      "category": "media/personal/research",
+      "date": "2026-08-12",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "\"save it all\" (Kerri Lake, vector equilibrium)",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-01.md:28"
+    },
+    {
+      "id": "5d76304539acfb4b",
+      "category": "media/personal/research",
+      "date": "2026-08-12",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "\"send a subagent\" — find/verify true multimodal Gemma-4 (vision+audio)",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-01.md:27"
+    },
+    {
+      "id": "0e592caaeefc20d3",
+      "category": "media/personal/research",
+      "date": "2026-08-14",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "Build lighthouse+cabin",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-02.md:18"
+    },
+    {
+      "id": "b66bcc8c3d2c980f",
+      "category": "media/personal/research",
+      "date": "2026-08-14",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "Continue stalled lanes",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-02.md:23"
+    },
+    {
+      "id": "1389923341a31f40",
+      "category": "media/personal/research",
+      "date": "2026-08-14",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "Download official updates",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-02.md:30"
+    },
+    {
+      "id": "97ce91ad72057857",
+      "category": "media/personal/research",
+      "date": "2026-08-14",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "Restart after unlock",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-02.md:10"
+    },
+    {
+      "id": "7d37ada376f29926",
+      "category": "media/personal/research",
+      "date": "2026-08-14",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "Save hand-built room",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-02.md:25"
+    },
+    {
+      "id": "a3b39d857007c262",
+      "category": "media/personal/research",
+      "date": "2026-08-15",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "\"install it [BR15] and download rest of modding stuff\"",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-03.md:15"
+    },
+    {
+      "id": "9a9434a9afef4a8e",
+      "category": "media/personal/research",
+      "date": "2026-08-15",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "\"you couldnt save it cause objects colliding\" (correction, not ask)",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-03.md:11"
+    },
+    {
+      "id": "883e372f1030cf98",
+      "category": "media/personal/research",
+      "date": "2026-08-15",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "Bounce stacked mods/tools",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-02.md:81"
+    },
+    {
+      "id": "7ad2819dd257ed27",
+      "category": "media/personal/research",
+      "date": "2026-08-15",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "Find first seifuku/lighthouse chat",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-02.md:75"
+    },
+    {
+      "id": "70e7f2f6d8f29e85",
+      "category": "media/personal/research",
+      "date": "2026-08-15",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "Finish conductor/controller",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-02.md:72"
+    },
+    {
+      "id": "f45cc6e54db6de24",
+      "category": "media/personal/research",
+      "date": "2026-08-15",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "Finish full controller now",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-02.md:69"
+    },
+    {
+      "id": "6d74c322821ae7a4",
+      "category": "media/personal/research",
+      "date": "2026-08-15",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "Get pet; ensure housing unlock",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-02.md:65"
+    },
+    {
+      "id": "1803fa403b5c8d09",
+      "category": "media/personal/research",
+      "date": "2026-08-15",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "Read agent state",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-02.md:52"
+    },
+    {
+      "id": "6b99eeea6f0c0b2c",
+      "category": "media/personal/research",
+      "date": "2026-08-15",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "Restart and install H-status repair",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-02.md:35"
+    },
+    {
+      "id": "39e1a5524e4a2864",
+      "category": "media/personal/research",
+      "date": "2026-08-15",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "Restart full stack",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-02.md:42"
+    },
+    {
+      "id": "73a4c348d4eb1c0e",
+      "category": "media/personal/research",
+      "date": "2026-08-15",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "Restart; report updates/torrent content",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-02.md:56"
+    },
+    {
+      "id": "789b560a9321d084",
+      "category": "media/personal/research",
+      "date": "2026-08-15",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "Send swarm: full AI controller",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-02.md:67"
+    },
+    {
+      "id": "2faf884203180bd6",
+      "category": "media/personal/research",
+      "date": "2026-08-15",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "Show new tricks",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-02.md:82"
+    },
+    {
+      "id": "21ad4bf0c33f20bc",
+      "category": "media/personal/research",
+      "date": "2026-08-15",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "Trigger interaction; debug interaction glitch",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-02.md:60"
+    },
+    {
+      "id": "ed8a990484d2d373",
+      "category": "media/personal/research",
+      "date": "2026-08-16",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "\"are you saving images... create html photoalbum\" (505 photos)",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-03.md:22"
+    },
+    {
+      "id": "cb41299b75098a48",
+      "category": "media/personal/research",
+      "date": "2026-08-16",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "\"can you backup my saves?\"",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-03.md:29"
+    },
+    {
+      "id": "6dadda99eee53674",
+      "category": "media/personal/research",
+      "date": "2026-08-16",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "\"finish it now, all of it — see all objects on grid, real names not ids\"",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-03.md:19"
+    },
+    {
+      "id": "034403ead9bd4b54",
+      "category": "media/personal/research",
+      "date": "2026-08-16",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "\"full control like irobot/minecraft — autopilot run by you\" (conductor loop)",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-03.md:20"
+    },
+    {
+      "id": "0e1bf534b4812956",
+      "category": "media/personal/research",
+      "date": "2026-08-16",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "\"not organized, actually read+order+comment, chatgpt eyes not claude\" (v1→v2 rewrite)",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-03.md:23"
+    },
+    {
+      "id": "4cc44c4776233e35",
+      "category": "media/personal/research",
+      "date": "2026-08-16",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "\"try 32 categories\" (chapter count)",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-03.md:24"
+    },
+    {
+      "id": "2fa3da3f6d818f25",
+      "category": "media/personal/research",
+      "date": "2026-08-16",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "\"update apartment plan (html) to gaia world engine, real 3d furniture, altbau 37m2\"",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-03.md:25"
+    },
+    {
+      "id": "1d23f477248b3ceb",
+      "category": "media/personal/research",
+      "date": "2026-08-16",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "\"why cant I edit it? room editor, sims style\"",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-03.md:26"
+    },
+    {
+      "id": "e100a08ea7d357d2",
+      "category": "media/personal/research",
+      "date": "2026-08-16",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "(implicit) bridge doesn't load in BR15 → fix",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-03.md:16"
+    },
+    {
+      "id": "e2bfde2909f2b772",
+      "category": "media/personal/research",
+      "date": "2026-08-16",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "add `preg.status`",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-03.md:54"
+    },
+    {
+      "id": "79149ad9a083473f",
+      "category": "media/personal/research",
+      "date": "2026-08-16",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "build `h.stats`, permanent orgasm ledger",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-03.md:50"
+    },
+    {
+      "id": "6a7744dc9746f0ce",
+      "category": "media/personal/research",
+      "date": "2026-08-16",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "build daughter lifecycle from pregnancy",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-03.md:68"
+    },
+    {
+      "id": "9885bb236c1a754b",
+      "category": "media/personal/research",
+      "date": "2026-08-16",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "fix missing character-mod assets/cache",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-03.md:70"
+    },
+    {
+      "id": "831428323aa5f326",
+      "category": "media/personal/research",
+      "date": "2026-08-16",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "make Ari survive save/load",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-03.md:55"
+    },
+    {
+      "id": "e4eef798be3bbb72",
+      "category": "media/personal/research",
+      "date": "2026-08-16",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "persist Japanese and resolution settings",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-03.md:64"
+    },
+    {
+      "id": "c5abd55eaf7365f7",
+      "category": "media/personal/research",
+      "date": "2026-08-16",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "reduce H-stat polling to one second",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-03.md:63"
+    },
+    {
+      "id": "6ca8dfe58b331329",
+      "category": "media/personal/research",
+      "date": "2026-08-16",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "restore Japanese; lower resolution",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-03.md:52"
+    },
+    {
+      "id": "0df908ef771df947",
+      "category": "media/personal/research",
+      "date": "2026-08-16",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "send subagents; verify lifetime climax counter",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-03.md:49"
+    },
+    {
+      "id": "71de32b0d8084816",
+      "category": "media/personal/research",
+      "date": "2026-08-16",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "track position-by-position H history",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-03.md:56"
+    },
+    {
+      "id": "fffd9049a8906aec",
+      "category": "media/personal/research",
+      "date": "2026-08-17",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "bounce/install staged build",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-04.md:17"
+    },
+    {
+      "id": "b379ca50b3ea33b9",
+      "category": "media/personal/research",
+      "date": "2026-08-17",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "compare grocery prices, house brands/offers",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-03.md:101"
+    },
+    {
+      "id": "3402776fa1917687",
+      "category": "media/personal/research",
+      "date": "2026-08-17",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "continue conductor work",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-03.md:85"
+    },
+    {
+      "id": "c7aa290dd6b8fdbf",
+      "category": "media/personal/research",
+      "date": "2026-08-17",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "control wardrobe/all native interactions",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-03.md:98"
+    },
+    {
+      "id": "0e8546b367ac37ea",
+      "category": "media/personal/research",
+      "date": "2026-08-17",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "diagnose recurring mouse-stuck bug",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-03.md:108"
+    },
+    {
+      "id": "1bfd2bd205fdeb77",
+      "category": "media/personal/research",
+      "date": "2026-08-17",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "discover native pet-catch event",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-03.md:83"
+    },
+    {
+      "id": "e8e237ba846e232e",
+      "category": "media/personal/research",
+      "date": "2026-08-17",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "find native route to join both girls",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-03.md:97"
+    },
+    {
+      "id": "12e16d56ebaef757",
+      "category": "media/personal/research",
+      "date": "2026-08-17",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "fix build-mode black screen",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-04.md:8"
+    },
+    {
+      "id": "429a4471a4a5c801",
+      "category": "media/personal/research",
+      "date": "2026-08-17",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "full agent control; research TTRPG prior art",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-03.md:81"
+    },
+    {
+      "id": "fc7e47c390f8ad03",
+      "category": "media/personal/research",
+      "date": "2026-08-17",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "identify medicine crafting gate",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-03.md:91"
+    },
+    {
+      "id": "5acf20a685d07fc2",
+      "category": "media/personal/research",
+      "date": "2026-08-17",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "install next-bounce tint/desire fixes",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-03.md:110"
+    },
+    {
+      "id": "e592819bcc43699a",
+      "category": "media/personal/research",
+      "date": "2026-08-17",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "make Ari/other characters permanent",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-03.md:73"
+    },
+    {
+      "id": "fa8a220aef994dc2",
+      "category": "media/personal/research",
+      "date": "2026-08-17",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "map plants, romance, dialogue, presents",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-03.md:92"
+    },
+    {
+      "id": "004243bf17c1b524",
+      "category": "media/personal/research",
+      "date": "2026-08-17",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "preserve native AI; make control always hybrid",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-03.md:96"
+    },
+    {
+      "id": "faf4a78ca28c3b7a",
+      "category": "media/personal/research",
+      "date": "2026-08-17",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "restore bridge/H-stats/F9 relay",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-03.md:102"
+    },
+    {
+      "id": "b546d05acb97f1f8",
+      "category": "media/personal/research",
+      "date": "2026-08-17",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "send debug troop; unlock items",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-04.md:9"
+    },
+    {
+      "id": "7013fe7749e49742",
+      "category": "media/personal/research",
+      "date": "2026-08-17",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "spawn wild cat; let Nyariko find it",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-03.md:84"
+    },
+    {
+      "id": "fb783a725f76b79c",
+      "category": "media/personal/research",
+      "date": "2026-08-17",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "track events and dialogue",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-03.md:99"
+    },
+    {
+      "id": "0afebdb6750c2a93",
+      "category": "media/personal/research",
+      "date": "2026-08-17",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "track H aftermath feelings",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-03.md:90"
+    },
+    {
+      "id": "eee8f439b92c728b",
+      "category": "media/personal/research",
+      "date": "2026-08-17",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "unlock again; save after",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-04.md:11"
+    },
+    {
+      "id": "177ceaddef02785c",
+      "category": "media/personal/research",
+      "date": "2026-08-18",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "add gender shortcut/item",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-04.md:41"
+    },
+    {
+      "id": "c0c8875f8d6f86e6",
+      "category": "media/personal/research",
+      "date": "2026-08-18",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "add supplied hentai titles/source links",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-04.md:63"
+    },
+    {
+      "id": "b8eedacc2df33478",
+      "category": "media/personal/research",
+      "date": "2026-08-18",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "always allow sleep/KO H",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-04.md:38"
+    },
+    {
+      "id": "be5a0d7f3325054c",
+      "category": "media/personal/research",
+      "date": "2026-08-18",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "create mods TODO and custom-mod git repo",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-04.md:57"
+    },
+    {
+      "id": "58bdfd33b2316de2",
+      "category": "media/personal/research",
+      "date": "2026-08-18",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "document fungi biocomputing/GESTALT ideas",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-04.md:70"
+    },
+    {
+      "id": "fff2eac29a484770",
+      "category": "media/personal/research",
+      "date": "2026-08-18",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "fix stuck conversation; contraception items",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-04.md:47"
+    },
+    {
+      "id": "c2a0b6d1f18008b1",
+      "category": "media/personal/research",
+      "date": "2026-08-18",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "full NPC/player action parity",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-04.md:32"
+    },
+    {
+      "id": "0c20063edee00369",
+      "category": "media/personal/research",
+      "date": "2026-08-18",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "map snap to Ctrl; retain Cmd+Z undo",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-04.md:43"
+    },
+    {
+      "id": "6c68cc9b0f29c41c",
+      "category": "media/personal/research",
+      "date": "2026-08-18",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "rebuild conductor token usage",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-04.md:39"
+    },
+    {
+      "id": "083965423d933d79",
+      "category": "media/personal/research",
+      "date": "2026-08-18",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "rename Sidia; change clothes",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-04.md:49"
+    },
+    {
+      "id": "fe53ade00fb7c4c3",
+      "category": "media/personal/research",
+      "date": "2026-08-18",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "spawn more branches",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-04.md:19"
+    },
+    {
+      "id": "504346f335c42fd0",
+      "category": "media/personal/research",
+      "date": "2026-08-18",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "toggle penis; female interactions",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-04.md:34"
+    },
+    {
+      "id": "a48d98b5f74ff492",
+      "category": "media/personal/research",
+      "date": "2026-08-18",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "travel ruins; add item scaling",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-04.md:25"
+    },
+    {
+      "id": "69e62fd710533675",
+      "category": "media/personal/research",
+      "date": "2026-08-18",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "update atlas with backlog, sources, screenshots",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-04.md:62"
+    },
+    {
+      "id": "6dfa4d3d0154eaa6",
+      "category": "media/personal/research",
+      "date": "2026-08-19",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "add Mac-trackpad menu shortcut",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-05.md:13"
+    },
+    {
+      "id": "ae280ae5917c1021",
+      "category": "media/personal/research",
+      "date": "2026-08-19",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "add studios/wiki/DLsite to hentai atlas",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-04.md:77"
+    },
+    {
+      "id": "c4fe97b907c23d25",
+      "category": "media/personal/research",
+      "date": "2026-08-19",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "control characters independently; player-only NPC actions; repair interiors",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-05.md:15"
+    },
+    {
+      "id": "d81e3c2ce3a9af0e",
+      "category": "media/personal/research",
+      "date": "2026-08-19",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "improve image read low-res/grid/regions",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-04.md:85"
+    },
+    {
+      "id": "835cee9e0b9f3d2c",
+      "category": "media/personal/research",
+      "date": "2026-08-19",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "permanent companion; extend follow time",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-05.md:22"
+    },
+    {
+      "id": "a1980f1d5c1c5975",
+      "category": "media/personal/research",
+      "date": "2026-08-19",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "prepare Gaiago skill for Charles",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-05.md:27"
+    },
+    {
+      "id": "93a51e2d0238825b",
+      "category": "media/personal/research",
+      "date": "2026-08-19",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "remove duplicate pi tools; add gaia schemas",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-04.md:84"
+    },
+    {
+      "id": "81344503af5931f6",
+      "category": "media/personal/research",
+      "date": "2026-08-20",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "make village a separate world",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-05.md:35"
+    },
+    {
+      "id": "a324bad1f3a16cca",
+      "category": "media/personal/research",
+      "date": "2026-08-20",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "write ocean/web; simulate cooling crystal into fabric",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-05.md:36"
+    },
+    {
+      "id": "a592a0d37550b364",
+      "category": "media/personal/research",
+      "date": "2026-08-22",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "allow two girls following",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-05.md:51"
+    },
+    {
+      "id": "c4b4f9bdb6cbd02b",
+      "category": "media/personal/research",
+      "date": "2026-08-22",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "build flashcard web UI",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-05.md:64"
+    },
+    {
+      "id": "af25a492ad96edba",
+      "category": "media/personal/research",
+      "date": "2026-08-22",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "enable player interaction with environment",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-05.md:47"
+    },
+    {
+      "id": "3c9da5e3f70c8f5f",
+      "category": "media/personal/research",
+      "date": "2026-08-22",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "fix adult anger/apology; angry-girl interaction path",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-05.md:58"
+    },
+    {
+      "id": "b5586f86e7c607b1",
+      "category": "media/personal/research",
+      "date": "2026-08-22",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "fix player action interaction now",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-05.md:48"
+    },
+    {
+      "id": "171efb5066739967",
+      "category": "media/personal/research",
+      "date": "2026-08-22",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "fix recurring DLC popup",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-05.md:50"
+    },
+    {
+      "id": "e385bdc28c26d6ec",
+      "category": "media/personal/research",
+      "date": "2026-08-22",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "implement real useful classes/Japanese learning",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-05.md:55"
+    },
+    {
+      "id": "0697e7a7337dc74a",
+      "category": "media/personal/research",
+      "date": "2026-08-22",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "make school useful; add flashcards with dialogue replay",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-05.md:63"
+    },
+    {
+      "id": "9c18eb9fe7b325ed",
+      "category": "media/personal/research",
+      "date": "2026-08-22",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "restart after save",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-05.md:54"
+    },
+    {
+      "id": "0a9522d1c0a75a4c",
+      "category": "media/personal/research",
+      "date": "2026-08-23",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "move collar reminder to system message",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-05.md:73"
+    },
+    {
+      "id": "89ffb979d7099bf7",
+      "category": "media/personal/research",
+      "date": "2026-08-23",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "Try perv SDXL model",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-06.md:10"
+    },
+    {
+      "id": "7094fb39320ecdb1",
+      "category": "media/personal/research",
+      "date": "2026-08-24",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "Check Downloads again; multiple files",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-06.md:21"
+    },
+    {
+      "id": "a90580432dac20b9",
+      "category": "media/personal/research",
+      "date": "2026-08-27",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "Change profile picture: Oedon occultist",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-06.md:30"
+    },
+    {
+      "id": "d42570835d267767",
+      "category": "media/personal/research",
+      "date": "2026-08-27",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "codejunky/unknown-lane wrote Login.tsx without authorization — investigate",
+      "next": "needs Pascal / assign owning lane",
+      "source": "chat-0822-0904.md:29"
+    },
+    {
+      "id": "581ea3ce45569d64",
+      "category": "media/personal/research",
+      "date": "2026-08-27",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "Create new Ai-Mu diagnosis MD",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-06.md:34"
+    },
+    {
+      "id": "a5f52c559fb7f5a8",
+      "category": "media/personal/research",
+      "date": "2026-08-27",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "Write proposal under Gaia Universe Engine",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-06.md:31"
+    },
+    {
+      "id": "e1e21091d41b76d4",
+      "category": "media/personal/research",
+      "date": "2026-08-29",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "\"du parallel Agenten hast und nicht...50.000 mal dasselbe Spiel gestartet\"(parallel build-vs-test lane separation rule)",
+      "next": "needs Pascal / assign owning lane",
+      "source": "chat-0822-0904.md:25"
+    },
+    {
+      "id": "efdc347411b4e9d1",
+      "category": "media/personal/research",
+      "date": "2026-08-29",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "add Banjo-Threeie/Stop'n'Swop project",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-07.md:19"
+    },
+    {
+      "id": "02ee50bbe6302ccb",
+      "category": "media/personal/research",
+      "date": "2026-08-29",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "add BzKJ to O/Obsolet tier",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-07.md:5"
+    },
+    {
+      "id": "74ef07647be37c7c",
+      "category": "media/personal/research",
+      "date": "2026-08-29",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "add DPMA, GEMA, notaries to O/D tiers",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-07.md:6"
+    },
+    {
+      "id": "c3a4fb94f538f13d",
+      "category": "media/personal/research",
+      "date": "2026-08-29",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "add Sierra and Rare to S tier",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-07.md:17"
+    },
+    {
+      "id": "928456776cc660c7",
+      "category": "media/personal/research",
+      "date": "2026-08-29",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "finish model-controlled hang-up feature",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-07.md:28"
+    },
+    {
+      "id": "c339c9c4edd527ab",
+      "category": "media/personal/research",
+      "date": "2026-08-29",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "note fresh-fry timing correction",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-07.md:24"
+    },
+    {
+      "id": "e49ac2c1ad4d1852",
+      "category": "media/personal/research",
+      "date": "2026-08-29",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "stop playtest windows foregrounding",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-07.md:37"
+    },
+    {
+      "id": "210a7cf23be8db35",
+      "category": "media/personal/research",
+      "date": "2026-08-29",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "write alternate Rare-darkest-timeline",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-07.md:18"
+    },
+    {
+      "id": "49f6ca4615211f0c",
+      "category": "media/personal/research",
+      "date": "2026-08-29",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "write discussed notes without design",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-07.md:12"
+    },
+    {
+      "id": "87a3d43894eadb4c",
+      "category": "media/personal/research",
+      "date": "2026-08-30",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "add Cuba to potential-ally list",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-07.md:45"
+    },
+    {
+      "id": "d98bdf7b2931d686",
+      "category": "media/personal/research",
+      "date": "2026-08-31",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "check BNI",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-08.md:10"
+    },
+    {
+      "id": "470eb4f298ce3f0b",
+      "category": "media/personal/research",
+      "date": "2026-08-31",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "continue Metal renderer polish",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-07.md:61"
+    },
+    {
+      "id": "2449c200d6229cb5",
+      "category": "media/personal/research",
+      "date": "2026-08-31",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "rebuild IMU engine; prove real vector field/binary compile",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-07.md:59"
+    },
+    {
+      "id": "b6f8bcd072a24295",
+      "category": "media/personal/research",
+      "date": "2026-08-31",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "start Cube; make camera/waves usable",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-08.md:7"
+    },
+    {
+      "id": "6a29c03f68499963",
+      "category": "media/personal/research",
+      "date": "2026-08-31",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "subagent: find Mark podcast on disk",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-08.md:9"
+    },
+    {
+      "id": "8ca9a80f12c6ff07",
+      "category": "media/personal/research",
+      "date": "2026-08-31",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "terra render lane merge blocked on unrelated-histories(S1)",
+      "next": "needs Pascal / assign owning lane",
+      "source": "chat-0822-0904.md:30"
+    },
+    {
+      "id": "8f373f0abca53602",
+      "category": "media/personal/research",
+      "date": "2026-08-31",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "write Hell Court as Suno Dio metal song",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-08.md:8"
+    },
+    {
+      "id": "554595192bcc7dec",
+      "category": "media/personal/research",
+      "date": "2026-09-01",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "research AI/party mods, not own controls",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-08.md:25"
+    },
+    {
+      "id": "d227550957fd91be",
+      "category": "media/personal/research",
+      "date": "2026-09-02",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "create triggers yourself",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-08.md:38"
+    },
+    {
+      "id": "99de21a39b4be585",
+      "category": "infra/accounts",
+      "date": "2026-08-25",
+      "status": "OPEN",
+      "repeats": 1,
+      "ask": "Use Discord export method 2",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-06.md:26"
+    },
+    {
+      "id": "1fcdd03bb68dc90e",
+      "category": "infra/accounts",
+      "date": "2026-08-27",
+      "status": "OPEN",
+      "repeats": 1,
+      "ask": "Fix usage; find other three Anthropic accounts",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-06.md:36"
+    },
+    {
+      "id": "a7fdc02728a24de0",
+      "category": "infra/accounts",
+      "date": "2026-09-01",
+      "status": "OPEN",
+      "repeats": 1,
+      "ask": "GAIA Space TestFlight: archive+upload+add Pascal as internal tester",
+      "next": "needs Pascal / assign owning lane",
+      "source": "chat-0822-0904.md:59"
+    },
+    {
+      "id": "95ecd268de868c3c",
+      "category": "infra/accounts",
+      "date": "2026-09-04",
+      "status": "OPEN",
+      "repeats": 1,
+      "ask": "install GAIA daemon on phone via TestFlight",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-08.md:47"
+    },
+    {
+      "id": "bf29339713152002",
+      "category": "infra/accounts",
+      "date": "2026-08-12",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "\"remind me tomorrow, setup apple reminder\"",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-01.md:31"
+    },
+    {
+      "id": "fa74d2421588122c",
+      "category": "infra/accounts",
+      "date": "2026-08-28",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "Transcribe missed message; watch videos; check Replicate account",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-06.md:37"
+    },
+    {
+      "id": "d47e0cbd2a818080",
+      "category": "infra/accounts",
+      "date": "2026-08-29",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "add Schufa and pharma to M/Mafia",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-07.md:7"
+    },
+    {
+      "id": "386df27f56d771d8",
+      "category": "infra/accounts",
+      "date": "2026-08-29",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "record EU-level insurance complaint route",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-07.md:10"
+    },
+    {
+      "id": "e52e814ffd009d13",
+      "category": "infra/accounts",
+      "date": "2026-08-29",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "validate constitutional complaint against private insurance",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-07.md:9"
+    },
+    {
+      "id": "bb7e5a3347b44639",
+      "category": "infra/accounts",
+      "date": "2026-08-30",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "prepare pharmacy complaint/refund draft",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-07.md:42"
+    },
+    {
+      "id": "2e38d853b764d866",
+      "category": "infra/accounts",
+      "date": "2026-09-01",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "check emails; update Haushaltsbuch",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-08.md:11"
+    },
+    {
+      "id": "662ca9396a8ce96e",
+      "category": "memory/persona",
+      "date": "2026-08-30",
+      "status": "REGRESSED",
+      "repeats": 1,
+      "ask": "exclude cyber/hacking/reverse-engineering auto-recall",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-07.md:50"
+    },
+    {
+      "id": "34e1d99a1c730e7b",
+      "category": "memory/persona",
+      "date": "2026-08-30",
+      "status": "OPEN",
+      "repeats": 1,
+      "ask": "create Judge-Dredd-like Gemini persona",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-07.md:39"
+    },
+    {
+      "id": "fdc6592260949d58",
+      "category": "memory/persona",
+      "date": "2026-08-11",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "\"save Armillaria to memory\"",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-01.md:15"
+    },
+    {
+      "id": "8d2a60dc1df43696",
+      "category": "memory/persona",
+      "date": "2026-08-11",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "\"write a handoff for aimu\"",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-01.md:22"
+    },
+    {
+      "id": "4c154181043c107f",
+      "category": "memory/persona",
+      "date": "2026-08-11",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "\"write this to ai-mu memory\" (A=urlaut, AI-MU=A-M, 0101=pulse)",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-01.md:19"
+    },
+    {
+      "id": "4e6a037901f0e722",
+      "category": "memory/persona",
+      "date": "2026-08-12",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "\"save to aimu todo (research)\" (vinglish language repo)",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-01.md:29"
+    },
+    {
+      "id": "b43e3d5d9020e8e1",
+      "category": "memory/persona",
+      "date": "2026-08-15",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "Write registry/campaign to memory",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-02.md:74"
+    },
+    {
+      "id": "984417d533e85600",
+      "category": "memory/persona",
+      "date": "2026-08-17",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "explain/map personality values",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-03.md:94"
+    },
+    {
+      "id": "846412e7fa42da64",
+      "category": "memory/persona",
+      "date": "2026-08-21",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "add Hegel and Heraclitus to canon-minds file",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-05.md:42"
+    },
+    {
+      "id": "d7fc7c07fa5bad41",
+      "category": "memory/persona",
+      "date": "2026-08-23",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "add crushes/tiers to WILF registry",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-05.md:74"
+    },
+    {
+      "id": "0f65159bb9a3ba58",
+      "category": "memory/persona",
+      "date": "2026-08-26",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "Gaia recall Zac",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-06.md:27"
+    },
+    {
+      "id": "18551a494febd18a",
+      "category": "memory/persona",
+      "date": "2026-08-27",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "Start Aimu; assess forms/OBJ import",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-06.md:35"
+    },
+    {
+      "id": "6635cf80dea8c7ad",
+      "category": "memory/persona",
+      "date": "2026-08-30",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "add Israel jurisdiction trust assessment",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-07.md:46"
+    },
+    {
+      "id": "162766a688cd1cd4",
+      "category": "memory/persona",
+      "date": "2026-08-30",
+      "status": "CLAIMED-UNVERIFIED",
+      "repeats": 1,
+      "ask": "put DoktorABC on scam list",
+      "next": "needs Pascal / assign owning lane",
+      "source": "walk-07.md:43"
+    }
+  ],
+  "mergeCandidates": [
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`adversary/final1-builder`",
+      "date": "2026-08-29",
+      "ahead": "96",
+      "head subject": "merge(naru-opus-atome): P0-3 Boot-Determinismus, game!=engine, Welt-Selektion, /act-Validierung"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`adversary/final1-jareth`",
+      "date": "2026-08-29",
+      "ahead": "101",
+      "head subject": "audit: close final Boomtown P0 counter-boots"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`adversary/final1-kali`",
+      "date": "2026-08-29",
+      "ahead": "98",
+      "head subject": "proof: record weapons migration reproduction result"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`adversary/final1-naruopus-l3`",
+      "date": "2026-08-29",
+      "ahead": "96",
+      "head subject": "merge(naru-opus-atome): P0-3 Boot-Determinismus, game!=engine, Welt-Selektion, /act-Validierung"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`adversary/final1-review`",
+      "date": "2026-08-29",
+      "ahead": "97",
+      "head subject": "audit: record independent base contract gate"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`archive/cleanup-20260903-GAIA-World-Engine-unity-view-jareth-camera-counter`",
+      "date": "2026-09-03",
+      "ahead": "56",
+      "head subject": "archive(cleanup): preserve lane state GAIA-World-Engine-unity-view-jareth-camera-counter"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`archive/cleanup-20260903-GAIA-World-Engine-unity-view-jareth-soma-counter`",
+      "date": "2026-09-03",
+      "ahead": "58",
+      "head subject": "archive(cleanup): preserve lane state GAIA-World-Engine-unity-view-jareth-soma-counter"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`archive/cleanup-20260903-GWE-bhairava`",
+      "date": "2026-09-03",
+      "ahead": "34",
+      "head subject": "archive(cleanup): preserve lane state GWE-bhairava"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`archive/cleanup-20260903-GWE-final1-naruopus`",
+      "date": "2026-09-03",
+      "ahead": "97",
+      "head subject": "archive(cleanup): preserve lane state GWE-final1-naruopus"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`archive/cleanup-20260903-GWE-nirrti-atomB`",
+      "date": "2026-09-03",
+      "ahead": "102",
+      "head subject": "archive(cleanup): preserve lane state GWE-nirrti-atomB"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`archive/cleanup-20260903-gwe-boom-kali`",
+      "date": "2026-09-03",
+      "ahead": "57",
+      "head subject": "archive(cleanup): preserve lane state gwe-boom-kali"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`archive/cleanup-20260903-gwe-ecsgen`",
+      "date": "2026-09-03",
+      "ahead": "58",
+      "head subject": "archive(cleanup): preserve lane state gwe-ecsgen"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`archive/cleanup-20260903-gwe-t5f11`",
+      "date": "2026-09-03",
+      "ahead": "69",
+      "head subject": "archive(cleanup): preserve lane state gwe-t5f11"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`archive/cleanup-20260903-gwe-vishnu-gate`",
+      "date": "2026-09-03",
+      "ahead": "53",
+      "head subject": "archive(cleanup): preserve lane state gwe-vishnu-gate"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`archive/cleanup-20260903-gwe-vishnu-w3`",
+      "date": "2026-09-03",
+      "ahead": "36",
+      "head subject": "archive(cleanup): preserve lane state gwe-vishnu-w3"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`audit/bhairava-701b-review`",
+      "date": "2026-08-29",
+      "ahead": "32",
+      "head subject": "boomtown: feature checklist harvest"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`audit/bhairava-atom-b`",
+      "date": "2026-08-29",
+      "ahead": "34",
+      "head subject": "audit: record missing Boomtown vehicle authority data"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`audit/bhairava-boomtown-boot`",
+      "date": "2026-08-29",
+      "ahead": "76",
+      "head subject": "ATOM D ticket table: P0 rendered-entities retracted (527 replicated), new P1 missing glb assets, equip regression confirmed"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`audit/ghoul-terra-boomtown-mtec9yxpyv8hcc`",
+      "date": "2026-08-29",
+      "ahead": "60",
+      "head subject": "Input-Validierung am /act-Eingang: Grenzen aus dem Schema, klare Ablehnung"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`audit/jareth-boomtown-counterboot`",
+      "date": "2026-08-29",
+      "ahead": "55",
+      "head subject": "audit: ticket Boomtown weapon equip regression"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`audit/jareth-camera-counter-1788007761`",
+      "date": "2026-08-29",
+      "ahead": "55",
+      "head subject": "audit: reject blank ortho camera counter-boot"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`audit/jareth-relaunch2-integration`",
+      "date": "2026-08-29",
+      "ahead": "56",
+      "head subject": "audit(boomtown): consolidate relaunch2 shadow tickets"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`audit/jareth-soma-counter-1788009157`",
+      "date": "2026-08-29",
+      "ahead": "57",
+      "head subject": "audit: qualify Soma camera verification"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`audit/jareth-wave3-tickets-mtec95n1`",
+      "date": "2026-08-29",
+      "ahead": "55",
+      "head subject": "audit: index late Wave-3 Vishnu and Kali tickets"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`audit/kali-atom1-1788005957`",
+      "date": "2026-08-29",
+      "ahead": "55",
+      "head subject": "kali/atom1: KALI-010 unabhaengig reproduziert (walk 1e12 -> x=1e12, schema range +-400 nicht erzwungen)"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`audit/kali-atom1-boomtown`",
+      "date": "2026-08-29",
+      "ahead": "32",
+      "head subject": "boomtown: feature checklist harvest"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`audit/kali-atomB-mtecaloxh642ww`",
+      "date": "2026-08-29",
+      "ahead": "32",
+      "head subject": "boomtown: feature checklist harvest"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`audit/kali-board-guardian-mtec43q3y6s18w`",
+      "date": "2026-08-29",
+      "ahead": "32",
+      "head subject": "boomtown: feature checklist harvest"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`audit/kali-browser-mtecf9ktt2o5zw`",
+      "date": "2026-08-29",
+      "ahead": "33",
+      "head subject": "audit: record Boomtown browser boot blocker"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`audit/kali-impostor-mteryipy3demr1`",
+      "date": "2026-08-29",
+      "ahead": "114",
+      "head subject": "audit: await initial model build before each condition"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`audit/kali-l3-boom-adversary-mtetrxgespxam0`",
+      "date": "2026-08-29",
+      "ahead": "134",
+      "head subject": "audit: record Boomtown movement and liveness constraints"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`audit/kali-l3-clientboot`",
+      "date": "2026-08-29",
+      "ahead": "33",
+      "head subject": "BOOMTOWN-BUGS BT-001: client boot dead — node:fs pulled into browser bundle via dotscity/road-bake.js (ticket only, no fix)"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`audit/kali-l3-final-review`",
+      "date": "2026-08-29",
+      "ahead": "98",
+      "head subject": "docs: refresh Boomtown P0 and weapon gate status"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`audit/kali-l3-og-mteckjx3qd15jn`",
+      "date": "2026-08-29",
+      "ahead": "33",
+      "head subject": "audit(kali): ticket WeaponDB whitelist migration regression"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`audit/kali-l3-vishnu-d57-1788006157`",
+      "date": "2026-08-29",
+      "ahead": "54",
+      "head subject": "audit(kali-l3): runtime shadow tickets BT-R1..R4 — kali-combat empty world P0, camera config unconsumed P1 (confirms 3bd3f15), rendered entities/rain PASS, cdp tab-pick defect"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`audit/kali-replacement-mtecf6h0rzauxc`",
+      "date": "2026-08-29",
+      "ahead": "34",
+      "head subject": "audit: ticket P0 counter-boot and entity gate failure"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`audit/kali-runtime-b`",
+      "date": "2026-08-29",
+      "ahead": "34",
+      "head subject": "audit: retract invalid rain finding"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`audit/kali-shadow-mtech21vr0jbko`",
+      "date": "2026-08-29",
+      "ahead": "40",
+      "head subject": "audit(kali): ticket inert camera config P1"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`audit/kali-wave3-review-mteca1oas90sqj`",
+      "date": "2026-08-29",
+      "ahead": "43",
+      "head subject": "audit: ticket P0 Boomtown browser boot failure"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`audit/kali4-camera`",
+      "date": "2026-08-29",
+      "ahead": "82",
+      "head subject": "audit: prove live Boomtown car camera selector"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`audit/mahakala-a2`",
+      "date": "2026-08-29",
+      "ahead": "52",
+      "head subject": "audit(mahakala-a2): close walk UNVERIFIED — unclamped walk speed teleports avatar 8e11m off-world (B-A2-05 HIGH)"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`audit/mahakala-atom-d`",
+      "date": "2026-08-29",
+      "ahead": "34",
+      "head subject": "boomtown: adjudicate extraction evidence"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`audit/mahakala-boomtown-stress`",
+      "date": "2026-08-29",
+      "ahead": "72",
+      "head subject": "audit: correct Mahakala probe command record"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`audit/naru-sonnet-relaunch2-1788006083`",
+      "date": "2026-08-29",
+      "ahead": "52",
+      "head subject": "HANDOFF: naru-sonnet relaunch2 checkpoint on audit/naru-sonnet-relaunch2-1788006083"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`audit/nirrti-atomB`",
+      "date": "2026-08-29",
+      "ahead": "101",
+      "head subject": "audit(atom-H r2): P0-3 refuted at renderer stage — 554 entities -> 1786 in-world meshes, lit street frame (cause-attributed)"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`audit/nirrti-render-19168`",
+      "date": "2026-08-29",
+      "ahead": "83",
+      "head subject": "audit: retain only durable browser counter evidence"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`audit/relaunch2-crimepolice-1788006627`",
+      "date": "2026-08-29",
+      "ahead": "54",
+      "head subject": "audit(boomtown): ticket wanted police authority deadlock"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`audit/relaunch2-weapons-1788006912`",
+      "date": "2026-08-29",
+      "ahead": "55",
+      "head subject": "docs: hand off weapons audit evidence"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`audit/shiva-atom1-mtecilukhw0yl8`",
+      "date": "2026-08-29",
+      "ahead": "52",
+      "head subject": "audit(shiva): ticket default Boomtown counter-boot failure"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`audit/shiva-atom2-1788011234`",
+      "date": "2026-08-29",
+      "ahead": "94",
+      "head subject": "audit: adjudicate Boomtown atom2 claim counterchecks"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`audit/shiva-buildside-mtec7yqm`",
+      "date": "2026-08-29",
+      "ahead": "33",
+      "head subject": "audit(shiva): build-side boomtown deviation report vs BOOMTOWN-FEATURES oracle"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`audit/shiva-l3-atom3-57244`",
+      "date": "2026-08-29",
+      "ahead": "93",
+      "head subject": "Merge branch 'lane/vishnu-wanted' into lane/archroot-integrate2"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`audit/shiva-l3-mtefeq`",
+      "date": "2026-08-29",
+      "ahead": "83",
+      "head subject": "audit/shiva-l3: Gegenboot-Evidenz (Server-Log, Schuss-Proben, world-pre)"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`audit/shiva-runtime-8145`",
+      "date": "2026-08-29",
+      "ahead": "53",
+      "head subject": "audit(shiva): runtime counter-boot — pass/fail per gate, position/transform split, OOB unbounded, rain+app-tools gates broken"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`audit/terra-archtree-mtechxhsnvquy6`",
+      "date": "2026-08-29",
+      "ahead": "55",
+      "head subject": "docs(audit): order terra severity ledger"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`audit/vishnu-l3-atomA-mtecf6`",
+      "date": "2026-08-29",
+      "ahead": "52",
+      "head subject": "audit(vishnu-L3-atomA stage2): A1 runtime-proven via game/ ablation (control boot PASS / ablation boot fails at import); new A6 client-side OG vehicle consts duplicated against vehicles.json, A7 accelaration typo in world schema, A8 locomotion scale left open"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`audit/yama-a2`",
+      "date": "2026-08-29",
+      "ahead": "51",
+      "head subject": "audit: record Boomtown default loader evidence"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`bhairava-atomA-findings`",
+      "date": "2026-08-29",
+      "ahead": "33",
+      "head subject": "handoff(bhairava): salvage lane artifacts after SIGTERM — no tickets, wrong-world boot noted"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`guardian-durga-mtec3t9mdei7xi`",
+      "date": "2026-08-29",
+      "ahead": "34",
+      "head subject": "boomtown: reject unproven extraction verification"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`kali-atomA-findings`",
+      "date": "2026-08-29",
+      "ahead": "33",
+      "head subject": "audit(board): revert d32c4e1 ped/gang/encounter verified -> broken (no runtime evidence under P0; artefacts untracked in builder worktree only) + 3 tickets"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`kali-l3-atomB-mtecf33jp4ud63`",
+      "date": "2026-08-29",
+      "ahead": "33",
+      "head subject": "audit: record Vishnu carjack contract/layer violation"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`kali-world-wire`",
+      "date": "2026-08-29",
+      "ahead": "32",
+      "head subject": "boomtown: feature checklist harvest"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`kali/p1-boomtown-world-wire`",
+      "date": "2026-08-29",
+      "ahead": "33",
+      "head subject": "data: track Boomtown game boot configs"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`lane/archroot-integrate2`",
+      "date": "2026-08-29",
+      "ahead": "93",
+      "head subject": "Merge branch 'lane/vishnu-wanted' into lane/archroot-integrate2"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`lane/integrate-camera-collider`",
+      "date": "2026-08-29",
+      "ahead": "118",
+      "head subject": "HANDOFF: camera pose root cause (ortho pitch -90 collapses Y, parallax 0px), MeshCollider AABB emission 169->335, world-override so re-emits stop reverting game declarations; impostors measured 8.35x worse + alpha=0 regression, shipped OFF"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`lane/kali-camera-live`",
+      "date": "2026-08-29",
+      "ahead": "78",
+      "head subject": "merge: integrate DOTS traffic ECS producer"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`lane/kali-combat`",
+      "date": "2026-08-29",
+      "ahead": "56",
+      "head subject": "board: mark browser traffic motion broken"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`lane/kali-meshcollider`",
+      "date": "2026-08-29",
+      "ahead": "102",
+      "head subject": "fix: align prefab collider transforms with visuals"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`lane/kali-traffic-live`",
+      "date": "2026-08-29",
+      "ahead": "89",
+      "head subject": "handoff: record Kali ATOM3 evidence and limits"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`lane/mahakala-shoot-refute`",
+      "date": "2026-08-29",
+      "ahead": "84",
+      "head subject": "mahakala L3: STAGE3 300-entity replication PASS, BT-012 no server-side physics/collision; ticket re-adjudication + gates (548 pass/0 fail)"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`lane/soma-camera`",
+      "date": "2026-08-29",
+      "ahead": "56",
+      "head subject": "docs: mark Boomtown camera rows verified with live evidence"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`lane/synty-assets`",
+      "date": "2026-08-29",
+      "ahead": "126",
+      "head subject": "fix: preserve Synty declarations and resolve traffic prefabs"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`lane/vehicle-physics`",
+      "date": "2026-08-29",
+      "ahead": "124",
+      "head subject": "STAGE 4c: vehicle physics numeric gate (13 tests) - proves fixedDriveStep against Ash ArcadeVP, independent closed-form derivations"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`lane/vishnu-atomB-audit`",
+      "date": "2026-08-29",
+      "ahead": "32",
+      "head subject": "audit(atomB): Vishnu boundary/hardcode/ownership tickets (review-only)"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`lane/vishnu-browser-gate`",
+      "date": "2026-08-29",
+      "ahead": "52",
+      "head subject": "board: record static browser-safety evidence for the P0 client fix (stays UNVERIFIED at runtime)"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`lane/vishnu-browser-gate-1788006138`",
+      "date": "2026-08-29",
+      "ahead": "54",
+      "head subject": "board: pin the real P1 blocker (missing ecs/traffic-config.json + traffic-prefabs.json, no generator) and record the measured 1.0G/17.9M asset split"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`lane/vishnu-camera-impostor`",
+      "date": "2026-08-29",
+      "ahead": "104",
+      "head subject": "impostors: runtime toggle + A/B evidence tools; the sprite pass now reads as the geometry it replaces"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`lane/vishnu-drive-cam`",
+      "date": "2026-08-29",
+      "ahead": "65",
+      "head subject": "HANDOFF: Welle9 close-out — peds+wanted live-verified, police-spawn blocked by host resource saturation (env, not code), set -m job-control lesson for next worker"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`lane/vishnu-drive-verify`",
+      "date": "2026-08-29",
+      "ahead": "52",
+      "head subject": "vishnu: live browser proof — P0 client fix + carjack/drive verified"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`lane/vishnu-ecs-generator-1788008146`",
+      "date": "2026-08-29",
+      "ahead": "57",
+      "head subject": "test: unskip T5-F11 movement case, assert the whole spawned fleet by lane limit (old skip diagnosis disproved by measurement)"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`lane/vishnu-roadbake-nodefix`",
+      "date": "2026-08-29",
+      "ahead": "35",
+      "head subject": "dotscity: inject road loader at every server/test bridge callsite (browser-safe GaiaEcsBridge)"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`lane/vishnu-roadbake-p0`",
+      "date": "2026-08-29",
+      "ahead": "37",
+      "head subject": "P0 stage2: the bridge was still poisoning the browser - inject the road loader"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`lane/vishnu-shoot`",
+      "date": "2026-08-29",
+      "ahead": "64",
+      "head subject": "ATOM B/C: boomtown shooting live-verified (equip+aim+hitscan+damage), BOOMTOWN-FEATURES.md flip"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`lane/vishnu-t5f11-1788009964`",
+      "date": "2026-08-29",
+      "ahead": "68",
+      "head subject": "docs: one generator, tracked ecs files, contention resolved"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`lane/vishnu-wanted`",
+      "date": "2026-08-29",
+      "ahead": "67",
+      "head subject": "ATOM C: BOOMTOWN-FEATURES.md flips — weapon roster (14 gate-tested), Rocket AoE (live), Flamethrower/Molotov/Punch/Shocker (gate), Freundfeuer-Gate (implemented+gate), Wanted-System (gate+live, kill-serie bugfix noted)"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`lane/yama-traffic`",
+      "date": "2026-08-29",
+      "ahead": "55",
+      "head subject": "boomtown: verify DOTS traffic motion"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`nirrti-atomA-findings`",
+      "date": "2026-08-29",
+      "ahead": "34",
+      "head subject": "qa: correct Nirrti rain evidence matrix"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`nirrti-boomtown-qa`",
+      "date": "2026-08-29",
+      "ahead": "34",
+      "head subject": "qa: audit Boomtown feature oracle values"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`shiva-audit-1788005410`",
+      "date": "2026-08-29",
+      "ahead": "36",
+      "head subject": "audit: record traffic-claim isolated countercheck"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`shiva-audit-1788010710`",
+      "date": "2026-08-29",
+      "ahead": "81",
+      "head subject": "Merge branch 'lane/kali-camera-live' into lane/archroot-integrate2"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`shiva-audit-boomtown-20260829141017`",
+      "date": "2026-08-29",
+      "ahead": "32",
+      "head subject": "boomtown: feature checklist harvest"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`tmp-basecheck`",
+      "date": "2026-08-29",
+      "ahead": "55",
+      "head subject": "audit: ticket Boomtown weapon equip regression"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`unity-import`",
+      "date": "2026-09-01",
+      "ahead": "150",
+      "head subject": "fix: preserve Unity-authored Boomtown road elevation"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/GAIA-World-Engine`",
+      "branch": "`vrm-avatars`",
+      "date": "2026-08-23",
+      "ahead": "11",
+      "head subject": "engine hygiene: make model docs game-neutral"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/ee-tools/ee-rain`",
+      "branch": "`audit/integrate-vishnu`",
+      "date": "2026-09-02",
+      "ahead": "12",
+      "head subject": "audit: unify tests/EVIDENCE.md to integrated truth (observer status, fixtures provenance, determinism, splice)"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/ee-tools/ee-rain`",
+      "branch": "`audit/kali-crossline`",
+      "date": "2026-09-02",
+      "ahead": "7",
+      "head subject": "build: verify fixtures from all target"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/ee-tools/ee-rain`",
+      "branch": "`audit/kali-docs`",
+      "date": "2026-09-02",
+      "ahead": "3",
+      "head subject": "tests: document command evidence checklist"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/ee-tools/ee-rain`",
+      "branch": "`audit/kali-l2-livegate-mtjw2ot3mvpgpf`",
+      "date": "2026-09-02",
+      "ahead": "19",
+      "head subject": "fix(loader): bootstrap DllMain spawns worker thread with cfg-driven lifecycle logging"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/ee-tools/ee-rain`",
+      "branch": "`audit/kali-splice`",
+      "date": "2026-09-02",
+      "ahead": "4",
+      "head subject": "root: splice cmd to command CLI"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/ee-tools/ee-rain`",
+      "branch": "`audit/surya-build`",
+      "date": "2026-09-02",
+      "ahead": "4",
+      "head subject": "command: deterministic build flags + repro gate"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/ee-tools/ee-rain`",
+      "branch": "`audit/surya-hardening`",
+      "date": "2026-09-02",
+      "ahead": "6",
+      "head subject": "audit: fixtures licence advisory, static ucrt-vs-msvcrt argument, determinism-flag counter-review"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/ee-tools/ee-rain`",
+      "branch": "`audit/vishnu-l3-safety`",
+      "date": "2026-09-02",
+      "ahead": "2",
+      "head subject": "audit: read-only fixture SHA pin check (finding L9)"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/ee-tools/ee-rain`",
+      "branch": "`codex/hands`",
+      "date": "2026-09-04",
+      "ahead": "114",
+      "head subject": "fix(input): deliver synthetic DI while host device unfocused"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/ee-tools/ee-rain`",
+      "branch": "`codex/msg-dispose`",
+      "date": "2026-09-04",
+      "ahead": "99",
+      "head subject": "fix: dispose direct command messages after Execute"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/ee-tools/ee-rain`",
+      "branch": "`ee-rain/command-l2`",
+      "date": "2026-09-01",
+      "ahead": "5",
+      "head subject": "command: reword queue header comment; endpoints are external injection only"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/ee-tools/ee-rain`",
+      "branch": "`ganga/l2-fix-mtjaz0p6p97o0`",
+      "date": "2026-09-02",
+      "ahead": "15",
+      "head subject": "observer: keep loader entrypoint minimal and pin base profile"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/ee-tools/ee-rain`",
+      "branch": "`jareth/ee-rain-live-gate`",
+      "date": "2026-09-04",
+      "ahead": "112",
+      "head subject": "docs: record hot13i build and single-stage hashes"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/ee-tools/ee-rain`",
+      "branch": "`kali-l3-fixture-observer`",
+      "date": "2026-09-02",
+      "ahead": "9",
+      "head subject": "feat: pin observer output and stage bottle artifacts"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/ee-tools/ee-rain`",
+      "branch": "`lakshmi/l2-static-mtjan9vv7vj792`",
+      "date": "2026-09-02",
+      "ahead": "11",
+      "head subject": "feat: pin base Empire Earth fixture profile"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/ee-tools/ee-rain`",
+      "branch": "`nyari/chat-bridge`",
+      "date": "2026-09-02",
+      "ahead": "10",
+      "head subject": "feat(chat-bridge): v2 dedupe + prefix allowlist + system passthrough + dry-run"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/ee-tools/ee-rain`",
+      "branch": "`nyari/observer-chat`",
+      "date": "2026-09-02",
+      "ahead": "10",
+      "head subject": "observer: dump readable memory as text and hex"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/ee-tools/ee-rain`",
+      "branch": "`nyari/observer-v2`",
+      "date": "2026-09-02",
+      "ahead": "7",
+      "head subject": "fix(observer): escape screenshot result paths"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/ee-tools/ee-rain`",
+      "branch": "`nyari/observer-v3`",
+      "date": "2026-09-03",
+      "ahead": "24",
+      "head subject": "observer: bootstrap shared DirectInput vtables"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/ee-tools/ee-rain`",
+      "branch": "`opus/scn-valid`",
+      "date": "2026-09-04",
+      "ahead": "114",
+      "head subject": "docs: 4FCAD3 = UReferenceCounter::Release; crash this=0xA4 = gfx keep-one nature handle; minimal 4-byte fix (v6c)"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/ee-tools/ee-rain`",
+      "branch": "`review/ganga-l3-h1-mtjazia0pjb3wf`",
+      "date": "2026-09-02",
+      "ahead": "12",
+      "head subject": "audit: record observer lifecycle safety gaps"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/ee-tools/ee-rain`",
+      "branch": "`review/kali-l2-audit-mtjafmakl1rygz`",
+      "date": "2026-09-02",
+      "ahead": "8",
+      "head subject": "fix: bound observer executable pattern scanning"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/ee-tools/ee-rain`",
+      "branch": "`review/shiva-l3-audit-mtjafw21ic3ndn`",
+      "date": "2026-09-02",
+      "ahead": "1",
+      "head subject": "docs: add Shiva L3 hostile safety audit"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/ee-tools/ee-rain`",
+      "branch": "`review/vishnu-lakshmi`",
+      "date": "2026-09-02",
+      "ahead": "11",
+      "head subject": "feat: pin base Empire Earth fixture profile"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/ee-tools/gaia-ai`",
+      "branch": "`lane/vishnu-grammar`",
+      "date": "2026-09-01",
+      "ahead": "2",
+      "head subject": "chore(tools): untrack built libblast.so, document vendored SSA lib + patch"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/ee-tools/gaia-ai`",
+      "branch": "`naru-kimi/tai-overlay`",
+      "date": "2026-09-01",
+      "ahead": "4",
+      "head subject": "fix: correct CP TAI inventory and overlay scope"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/ee-tools/scn-tool`",
+      "branch": "`alakshmi-l2-review-r2`",
+      "date": "2026-09-04",
+      "ahead": "74",
+      "head subject": "wip: Alakshmi L2 review lane stop point (v4 superseded by v6c/v6d)"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/ee-tools/scn-tool`",
+      "branch": "`bhairava-l3-epoch`",
+      "date": "2026-09-04",
+      "ahead": "36",
+      "head subject": "out: carry v3 strip evidence tsv into the branch for gate reproducibility"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/ee-tools/scn-tool`",
+      "branch": "`bhairava-l3-final`",
+      "date": "2026-09-04",
+      "ahead": "67",
+      "head subject": "wip: preserve superseded v4 lane state"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/ee-tools/scn-tool`",
+      "branch": "`bhairava-l3-l5robust`",
+      "date": "2026-09-04",
+      "ahead": "70",
+      "head subject": "r11: HANDOFF - l5prune blocker closed, v3 composition fixed in script, rebuild pending"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/ee-tools/scn-tool`",
+      "branch": "`bhairava-l3-lump5tail`",
+      "date": "2026-09-04",
+      "ahead": "51",
+      "head subject": "HANDOFF: round9 lump5 directive table solved; trigger prune + candidate regen + G2 ruling outstanding"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/ee-tools/scn-tool`",
+      "branch": "`bhairava-l3-namespace`",
+      "date": "2026-09-04",
+      "ahead": "40",
+      "head subject": "handoff: round7 namespace lane"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/ee-tools/scn-tool`",
+      "branch": "`bhairava-l3-prune`",
+      "date": "2026-09-04",
+      "ahead": "19",
+      "head subject": "test+docs: gfxprune keep-if-alive, empty-table round trip, grammar guard"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/ee-tools/scn-tool`",
+      "branch": "`bhairava-l3-r12build`",
+      "date": "2026-09-04",
+      "ahead": "73",
+      "head subject": "docs: round12 final release section - variant equivalence, 36 place calls, owner-7 placeholders, four-gate contract"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/ee-tools/scn-tool`",
+      "branch": "`bhairava-l3-refs`",
+      "date": "2026-09-04",
+      "ahead": "13",
+      "head subject": "wip: preserve superseded v4 lane state"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/ee-tools/scn-tool`",
+      "branch": "`bhairava-l3-release5`",
+      "date": "2026-09-04",
+      "ahead": "21",
+      "head subject": "docs(stone-age-v3): stale marks on capitol/staged-SHA/epoch claims, source SHA lineage, epoch measurement, regen procedure"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/ee-tools/scn-tool`",
+      "branch": "`bhairava-l3-v4clean`",
+      "date": "2026-09-04",
+      "ahead": "43",
+      "head subject": "wip: preserve superseded v4 lane state"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/ee-tools/scn-tool`",
+      "branch": "`brahma/stone-age-v4`",
+      "date": "2026-09-04",
+      "ahead": "10",
+      "head subject": "wip: preserve superseded v4 lane state"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/ee-tools/scn-tool`",
+      "branch": "`kali-audit-units-selector-1788532862`",
+      "date": "2026-09-04",
+      "ahead": "1",
+      "head subject": "fix: strip non-World record prefixes atomically"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/ee-tools/scn-tool`",
+      "branch": "`kali-l2-review-atom1`",
+      "date": "2026-09-04",
+      "ahead": "2",
+      "head subject": "docs: record exhaustive reference scan gate"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/ee-tools/scn-tool`",
+      "branch": "`kali/refs-tests`",
+      "date": "2026-09-04",
+      "ahead": "1",
+      "head subject": "test: specify refs scanner contract"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/ee-tools/scn-tool`",
+      "branch": "`lakshmi/release`",
+      "date": "2026-09-04",
+      "ahead": "12",
+      "head subject": "wip: preserve superseded v4 lane state"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/ee-tools/scn-tool`",
+      "branch": "`lampas/stone-v5`",
+      "date": "2026-09-04",
+      "ahead": "19",
+      "head subject": "docs(v6d/v6e): gfx type-10 targets are 23/23 dbid-42 p7 objects; serial counter already bumped by place; staged hashes"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/ee-tools/scn-tool`",
+      "branch": "`lane/kali-audit1`",
+      "date": "2026-09-04",
+      "ahead": "1",
+      "head subject": "audit(kali): adversarial findings on players epoch ceiling, selector prune, units strip"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/ee-tools/scn-tool`",
+      "branch": "`lane/trigger-enums`",
+      "date": "2026-09-01",
+      "ahead": "1",
+      "head subject": "research: independently scan trigger dialog element evidence"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/ee-tools/scn-tool`",
+      "branch": "`lane/trigger-enums2`",
+      "date": "2026-09-01",
+      "ahead": "5",
+      "head subject": "research condition table timer semantics audit"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/ee-tools/scn-tool`",
+      "branch": "`lane/trigger-enums2-kimi`",
+      "date": "2026-09-01",
+      "ahead": "1",
+      "head subject": "research: audit trigger element-name evidence"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/ee-tools/scn-tool`",
+      "branch": "`lane/trigger-enums2-opus`",
+      "date": "2026-09-01",
+      "ahead": "2",
+      "head subject": "research: derive trigger element enums (message=4 confirmed, timer=6 unverified)"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/ee-tools/scn-tool`",
+      "branch": "`lane/trigger-grammar`",
+      "date": "2026-09-02",
+      "ahead": "11",
+      "head subject": "scn: add filter-triggers (disable offensive/raid/tower/war classes, keep friendly diplomacy)"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/ee-tools/scn-tool`",
+      "branch": "`lane/vishnu-atom1`",
+      "date": "2026-09-04",
+      "ahead": "3",
+      "head subject": "wip: preserve superseded v4 lane state"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/ee-tools/scn-tool`",
+      "branch": "`mahakala-l3-audit6`",
+      "date": "2026-09-04",
+      "ahead": "30",
+      "head subject": "audit: include compatible rosetta gfx fixture"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/ee-tools/scn-tool`",
+      "branch": "`mahakala-l3-gate`",
+      "date": "2026-09-04",
+      "ahead": "20",
+      "head subject": "docs: record Mahakala round 5 gate rerun"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/ee-tools/scn-tool`",
+      "branch": "`mahakala-l3-gate7`",
+      "date": "2026-09-04",
+      "ahead": "40",
+      "head subject": "refresh release gate evidence with local selector checks"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/ee-tools/scn-tool`",
+      "branch": "`mahakala-l3-ns8`",
+      "date": "2026-09-04",
+      "ahead": "40",
+      "head subject": "test: record namespace review regression gate"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/ee-tools/scn-tool`",
+      "branch": "`mahakala-l3-r10`",
+      "date": "2026-09-04",
+      "ahead": "42",
+      "head subject": "record verbatim requested pytest gate"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/ee-tools/scn-tool`",
+      "branch": "`mahakala-l3-r11`",
+      "date": "2026-09-04",
+      "ahead": "55",
+      "head subject": "research: record independent lump5 tail observations"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/ee-tools/scn-tool`",
+      "branch": "`mahakala-l3-r12`",
+      "date": "2026-09-04",
+      "ahead": "63",
+      "head subject": "review: record round12 l5prune audit blocker"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/ee-tools/scn-tool`",
+      "branch": "`mahakala-l3-r13`",
+      "date": "2026-09-04",
+      "ahead": "68",
+      "head subject": "review: record aligned G2 tripwire counts"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/ee-tools/scn-tool`",
+      "branch": "`mahakala-l3-r14`",
+      "date": "2026-09-04",
+      "ahead": "75",
+      "head subject": "wip: preserve superseded v4 lane state"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/ee-tools/scn-tool`",
+      "branch": "`mahakala-l3-r9`",
+      "date": "2026-09-04",
+      "ahead": "38",
+      "head subject": "audit: classify release gate G2 residuals"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/ee-tools/scn-tool`",
+      "branch": "`mahakala-l3-release`",
+      "date": "2026-09-04",
+      "ahead": "10",
+      "head subject": "docs: record staged release verification procedure"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/ee-tools/scn-tool`",
+      "branch": "`mahakala-l3-type10`",
+      "date": "2026-09-04",
+      "ahead": "12",
+      "head subject": "wip: preserve superseded v4 lane state"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/ee-tools/scn-tool`",
+      "branch": "`vishnu/refs-atom1`",
+      "date": "2026-09-04",
+      "ahead": "8",
+      "head subject": "docs(refs): re-measured survivor chain, 3-class confidence, NULL_REFERENCE, assert exit codes, payload flags"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-daemon`",
+      "branch": "`adversary/pass5-live-terra`",
+      "date": "2026-09-03",
+      "ahead": "2",
+      "head subject": "docs: record pass5 W3 cleanup evidence"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-daemon`",
+      "branch": "`adversary/pass5-static-sonnet`",
+      "date": "2026-09-03",
+      "ahead": "1",
+      "head subject": "docs(pass5-w3-signoff): static adversarial ledger, ADV-020..023 all PASS (findings-only)"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-daemon`",
+      "branch": "`archive/cleanup-20260903-a3-dedup`",
+      "date": "2026-09-03",
+      "ahead": "1",
+      "head subject": "archive(cleanup): preserve lane state a3-dedup"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-daemon`",
+      "branch": "`archive/cleanup-20260903-chat-mtkfhzbk-6t8i-appstore`",
+      "date": "2026-09-03",
+      "ahead": "1",
+      "head subject": "archive(cleanup): preserve lane state chat-mtkfhzbk-6t8i-appstore"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-daemon`",
+      "branch": "`archive/cleanup-20260903-chat-mtkm14p2-y7le`",
+      "date": "2026-09-03",
+      "ahead": "1",
+      "head subject": "archive(cleanup): preserve lane state chat-mtkm14p2-y7le"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-daemon`",
+      "branch": "`archive/cleanup-20260903-gd-archtree`",
+      "date": "2026-09-03",
+      "ahead": "22",
+      "head subject": "archive(cleanup): preserve lane state gd-archtree"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-daemon`",
+      "branch": "`archive/cleanup-20260903-gd-archtree-optics`",
+      "date": "2026-09-03",
+      "ahead": "13",
+      "head subject": "archive(cleanup): preserve lane state gd-archtree-optics"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-daemon`",
+      "branch": "`archive/cleanup-20260903-gd-archtree-polish`",
+      "date": "2026-09-03",
+      "ahead": "19",
+      "head subject": "archive(cleanup): preserve lane state gd-archtree-polish"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-daemon`",
+      "branch": "`archive/cleanup-20260903-ghoul-terra-mtkl8r9y8oggzu`",
+      "date": "2026-09-03",
+      "ahead": "1",
+      "head subject": "archive(cleanup): preserve lane state ghoul-terra-mtkl8r9y8oggzu"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-daemon`",
+      "branch": "`archive/cleanup-20260903-ghoul-terra-mtkldevvxub3sr`",
+      "date": "2026-09-03",
+      "ahead": "1",
+      "head subject": "archive(cleanup): preserve lane state ghoul-terra-mtkldevvxub3sr"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-daemon`",
+      "branch": "`archive/cleanup-20260903-naru-kimi-mtklclr9lyr3lg`",
+      "date": "2026-09-03",
+      "ahead": "1",
+      "head subject": "archive(cleanup): preserve lane state naru-kimi-mtklclr9lyr3lg"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-daemon`",
+      "branch": "`archive/cleanup-20260903-terra-mtkm26i3us5cmb`",
+      "date": "2026-09-03",
+      "ahead": "1",
+      "head subject": "archive(cleanup): preserve lane state terra-mtkm26i3us5cmb"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-daemon`",
+      "branch": "`archtree-optics`",
+      "date": "2026-08-29",
+      "ahead": "12",
+      "head subject": "docs(archtree): §3.x updated on the new browser proof (before/after), remaining darkness left open"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-daemon`",
+      "branch": "`archtree-polish`",
+      "date": "2026-08-29",
+      "ahead": "18",
+      "head subject": "docs(archtree): new browser proof after the seam + HUD fixes"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-daemon`",
+      "branch": "`archtree-tests`",
+      "date": "2026-08-29",
+      "ahead": "11",
+      "head subject": "test(archtree): verify headless mirror geometry"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-daemon`",
+      "branch": "`archtree-visualizer`",
+      "date": "2026-08-29",
+      "ahead": "21",
+      "head subject": "fix(archtree): annotate barkBlend theme param so bun run check passes"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-daemon`",
+      "branch": "`audit/daemon-stt-kali-mtk76ty74vwrn1`",
+      "date": "2026-09-02",
+      "ahead": "1",
+      "head subject": "docs(audit): review daemon STT settings atom1"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-daemon`",
+      "branch": "`feat/stt-engine-command`",
+      "date": "2026-09-02",
+      "ahead": "1",
+      "head subject": "feat(voice): switch dictation engine by slash command"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-daemon`",
+      "branch": "`fix/native-weblinks`",
+      "date": "2026-09-04",
+      "ahead": "3",
+      "head subject": "ui(transcript): keep thinking rows for encrypted/redacted reasoning"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-daemon`",
+      "branch": "`room/chat-mtnfls78-um5f`",
+      "date": "2026-09-04",
+      "ahead": "3",
+      "head subject": "live drift; head `cb956eb`; new since `git-0904.md` snapshot"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-daemon`",
+      "branch": "`fix/open-0827`",
+      "date": "2026-09-04",
+      "ahead": "3",
+      "head subject": "fix(dsc-compact): set floor to newest content-bearing entry (my old newestValidCutId pattern) so an oversized poisoned turn-prompt entry sinks BELOW the floor instead of pinning the cut point at itself every time"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-daemon`",
+      "branch": "`fix/voice-stall`",
+      "date": "2026-09-04",
+      "ahead": "2",
+      "head subject": "fix(read-aloud): stop the silent mid-clip stall in the client transport"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-daemon`",
+      "branch": "`gaia/auth-native-01a04762`",
+      "date": "2026-08-31",
+      "ahead": "18",
+      "head subject": "fix(web): render gaia think blocks after tool calls"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-daemon`",
+      "branch": "`gaia/chat-mtk0u41u-63vz`",
+      "date": "2026-09-02",
+      "ahead": "1",
+      "head subject": "mobile: env wins over mobile-daemon-url.txt; device deploy via bunx + writes override file"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-daemon`",
+      "branch": "`gaia/chat-mtkoww1t-odwk`",
+      "date": "2026-09-03",
+      "ahead": "1",
+      "head subject": "fix: remove empty sidebar and roster gutters"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-daemon`",
+      "branch": "`gaia/chat-mtlz9o50-ycr7`",
+      "date": "2026-09-03",
+      "ahead": "2",
+      "head subject": "ui(sidebar): subroom rollup dot blinks green too"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-daemon`",
+      "branch": "`gaia/chat-mtmzp4jr-0yqz`",
+      "date": "2026-09-04",
+      "ahead": "1",
+      "head subject": "skills: gaia-plugin — plugin authoring skill + tested hello-counter example"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-daemon`",
+      "branch": "`gaia/chat-mtnfoffz-3t7k`",
+      "date": "2026-09-04",
+      "ahead": "1",
+      "head subject": "ui(transcript): keep thinking rows for encrypted/redacted reasoning"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-daemon`",
+      "branch": "`gaia/ghoul-terra-mtklfuaw50i8no`",
+      "date": "2026-09-02",
+      "ahead": "1",
+      "head subject": "refactor(room): add facade ports"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-daemon`",
+      "branch": "`gaia/ghoul-terra-mtkmr9j9sgcbmb`",
+      "date": "2026-09-02",
+      "ahead": "1",
+      "head subject": "extract room durable queue routing"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-daemon`",
+      "branch": "`gaia/ghoul-terra-mtkn1c7vpppntt`",
+      "date": "2026-09-03",
+      "ahead": "1",
+      "head subject": "plugins: add manifest-first foundation"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-daemon`",
+      "branch": "`gaia/ghoul-terra-mtkn9r1gff3yd3`",
+      "date": "2026-09-03",
+      "ahead": "1",
+      "head subject": "plugins: stage registry generations at turn boundaries"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-daemon`",
+      "branch": "`gaia/ghoul-terra-mtknx1pgr0csp1`",
+      "date": "2026-09-03",
+      "ahead": "2",
+      "head subject": "plugins: migrate command loader to manifests"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-daemon`",
+      "branch": "`gaia/ghoul-terra-mtkoa39bc5emni`",
+      "date": "2026-09-03",
+      "ahead": "1",
+      "head subject": "refactor: extract room task operations"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-daemon`",
+      "branch": "`gaia/ghoul-terra-mtkojg90dhpql1`",
+      "date": "2026-09-03",
+      "ahead": "1",
+      "head subject": "refactor(room): extract command runtime wrappers"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-daemon`",
+      "branch": "`gaia/ghoul-terra-mtkotwumdct15f`",
+      "date": "2026-09-03",
+      "ahead": "2",
+      "head subject": "docs: record pass3 plugin live blocker"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-daemon`",
+      "branch": "`gaia/jareth-mtj56c8ngra0k1`",
+      "date": "2026-09-01",
+      "ahead": "3",
+      "head subject": "docs: link Fable context control proof"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-daemon`",
+      "branch": "`gaia/kali-archtree-integration-doc`",
+      "date": "2026-08-29",
+      "ahead": "4",
+      "head subject": "docs(archtree): add daemon integration plan"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-daemon`",
+      "branch": "`gaia/kali-mt5w9pwsymc35u`",
+      "date": "2026-08-23",
+      "ahead": "18",
+      "head subject": "docs: hand off resume delivery follow-ups"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-daemon`",
+      "branch": "`gaia/kali-registry-attack`",
+      "date": "2026-08-23",
+      "ahead": "1",
+      "head subject": "resume merge guard: never join a CORPSE contract (durable resumeStatus alone stranded every later resume)"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-daemon`",
+      "branch": "`gaia/kali-submodule`",
+      "date": "2026-08-23",
+      "ahead": "1",
+      "head subject": "worktree: populate submodules offline from root module store; export roomBranch"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-daemon`",
+      "branch": "`gaia/migration-vishnu`",
+      "date": "2026-08-23",
+      "ahead": "1",
+      "head subject": "feat(import): backup-before-rewrite for --force claude imports (port of v2 migration/backup)"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-daemon`",
+      "branch": "`gaia/naru-kimi-mt5umgf702yr04`",
+      "date": "2026-08-23",
+      "ahead": "4",
+      "head subject": "fix(migration): route activated room writes through Pi tree"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-daemon`",
+      "branch": "`gaia/naru-kimi-mt5w8hajmpfai6`",
+      "date": "2026-08-23",
+      "ahead": "1",
+      "head subject": "fix(harness): isolate runner process group"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-daemon`",
+      "branch": "`gaia/naru-kimi-mt5xeuvgbctq8d`",
+      "date": "2026-08-23",
+      "ahead": "24",
+      "head subject": "docs: hand off resume delivery composite branch"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-daemon`",
+      "branch": "`gaia/naru-kimi-mt61ks55jr4j6e`",
+      "date": "2026-08-23",
+      "ahead": "1",
+      "head subject": "fix: dedupe concurrent summon resume delivery"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-daemon`",
+      "branch": "`gaia/naru-kimi-mt61yn1u0lkelx`",
+      "date": "2026-08-23",
+      "ahead": "1",
+      "head subject": "fix: serialize concurrent summon resumes"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-daemon`",
+      "branch": "`gaia/naru-kimi-mt62dvq4u8tie0`",
+      "date": "2026-08-23",
+      "ahead": "4",
+      "head subject": "fix: preserve recovery resume epoch token"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-daemon`",
+      "branch": "`gaia/naru-kimi-mt62e5ecc9o7ax`",
+      "date": "2026-08-23",
+      "ahead": "2",
+      "head subject": "fix: reclaim stranded resume stamps"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-daemon`",
+      "branch": "`gaia/naru-kimi-mt62ovac5jiyjl`",
+      "date": "2026-08-23",
+      "ahead": "2",
+      "head subject": "RC6: make resume epoch tokens collision-safe"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-daemon`",
+      "branch": "`gaia/naru-kimi-mt62panz29j7hu`",
+      "date": "2026-08-23",
+      "ahead": "1",
+      "head subject": "room service: serialize concurrent queue drains"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-daemon`",
+      "branch": "`gaia/naru-kimi-mtkl4xcbkw9wea`",
+      "date": "2026-09-02",
+      "ahead": "1",
+      "head subject": "docs: add live queue executor ledger"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-daemon`",
+      "branch": "`gaia/naru-kimi-mtklbt5489tyyy`",
+      "date": "2026-09-02",
+      "ahead": "4",
+      "head subject": "docs(refactor): record A3d STT gate"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-daemon`",
+      "branch": "`gaia/naru-kimi-mtkliyd9wo8b3i`",
+      "date": "2026-09-02",
+      "ahead": "1",
+      "head subject": "docs(refactor): record live luna prerequisite blocker"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-daemon`",
+      "branch": "`gaia/naru-kimi-mtkljbwj47nrin`",
+      "date": "2026-09-02",
+      "ahead": "1",
+      "head subject": "docs: record Kali durability live audit block"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-daemon`",
+      "branch": "`gaia/naru-kimi-mtklq7t585e5w0`",
+      "date": "2026-09-02",
+      "ahead": "2",
+      "head subject": "refactor(room): type durable turn loop"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-daemon`",
+      "branch": "`gaia/naru-kimi-mtkmapulw19bpy`",
+      "date": "2026-09-02",
+      "ahead": "1",
+      "head subject": "refactor: extract room background tasks"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-daemon`",
+      "branch": "`gaia/naru-kimi-mtkmr9j93t5kz1`",
+      "date": "2026-09-02",
+      "ahead": "1",
+      "head subject": "refactor: extract room turn results"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-daemon`",
+      "branch": "`gaia/naru-kimi-mtkotwumffhgzb`",
+      "date": "2026-09-03",
+      "ahead": "2",
+      "head subject": "docs: add STATIC-W3 plugin runtime audit"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-daemon`",
+      "branch": "`gaia/naru-kimi-mtkoud9tg45z2m`",
+      "date": "2026-09-03",
+      "ahead": "1",
+      "head subject": "docs: add STATIC-W3 plugin runtime audit"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-daemon`",
+      "branch": "`gaia/naru-kimi-seal-map-audit`",
+      "date": "2026-08-23",
+      "ahead": "1",
+      "head subject": "test: guard successor resume seal ownership"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-daemon`",
+      "branch": "`gaia/naru-opus-mt5uy6yuz1l8vt`",
+      "date": "2026-08-23",
+      "ahead": "4",
+      "head subject": "fix(migration): route activated room writes through Pi tree"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-daemon`",
+      "branch": "`gaia/naru-opus-mt5w9pwspht1dc`",
+      "date": "2026-08-23",
+      "ahead": "10",
+      "head subject": "HANDOFF: pi steer fix landed on branch; next lane = magnifier repro (pre-fix c0d2bf1 + diagnostic settleTask delay, never committed)"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-daemon`",
+      "branch": "`gaia/naru-opus-mt5xfrbq81ycex`",
+      "date": "2026-08-23",
+      "ahead": "14",
+      "head subject": "HANDOFF: Brahma lane closed - magnifier repro proven live, both flakes verdicted (A), open items for Durga/other lanes"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-daemon`",
+      "branch": "`gaia/naru-opus-mt5yx9lbi5u8om`",
+      "date": "2026-08-23",
+      "ahead": "14",
+      "head subject": "HANDOFF: Brahma lane closed - magnifier repro proven live, both flakes verdicted (A), open items for Durga/other lanes"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-daemon`",
+      "branch": "`gaia/naru-opus-mt61ks558zi0tj`",
+      "date": "2026-08-23",
+      "ahead": "1",
+      "head subject": "fix(summons): deliver a resumed turn exactly once under concurrent resumes"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-daemon`",
+      "branch": "`gaia/naru-opus-mt61yn1u2gn03r`",
+      "date": "2026-08-23",
+      "ahead": "1",
+      "head subject": "resume: close the no-delivery window (arm watcher before send, stamp/identity-keyed cleanup)"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-daemon`",
+      "branch": "`gaia/naru-opus-mt62dvq49jbvmv`",
+      "date": "2026-08-23",
+      "ahead": "1",
+      "head subject": "RC5: epoch-close a resume contract — a watcher may only close its own resume"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-daemon`",
+      "branch": "`gaia/naru-opus-mt62xbfa3imyq0`",
+      "date": "2026-08-23",
+      "ahead": "2",
+      "head subject": "RC7: a sealed resume watcher no longer swallows the next turn, and a settling one no longer clears a newer contract"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-daemon`",
+      "branch": "`gaia/naru-sonnet-mtklq7t59zy5ga`",
+      "date": "2026-09-02",
+      "ahead": "2",
+      "head subject": "refactor(room): type RoomCommandsMixin this via RoomCommandsFacadePort"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-daemon`",
+      "branch": "`gaia/naru-sonnet-mtkmhva9z54bps`",
+      "date": "2026-09-02",
+      "ahead": "1",
+      "head subject": "refactor(room): extract agent configuration command cohort (A6)"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-daemon`",
+      "branch": "`gaia/naru-sonnet-mtkn1c7vize81j`",
+      "date": "2026-09-03",
+      "ahead": "2",
+      "head subject": "A12: capability broker foundation (services/capabilities)"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-daemon`",
+      "branch": "`gaia/naru-sonnet-mtknawfl1fv6xo`",
+      "date": "2026-09-03",
+      "ahead": "1",
+      "head subject": "test(W4 A16): edit/resend live regression code — ephemeral-daemon seed + evidence readers, opt-in live path queued for 陰"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-daemon`",
+      "branch": "`gaia/naru-sonnet-mtknp0btovpza3`",
+      "date": "2026-09-03",
+      "ahead": "1",
+      "head subject": "refactor(A6d): extract summon-lifecycle + agent-dialogue delivery from room-service"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-daemon`",
+      "branch": "`gaia/naru-sonnet-mtko3auqz04tfr`",
+      "date": "2026-09-03",
+      "ahead": "1",
+      "head subject": "refactor: extract RoomService bootstrap/lifecycle concern (JOB2 A6e)"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-daemon`",
+      "branch": "`gaia/naru-sonnet-mtkojg90g7zjly`",
+      "date": "2026-09-03",
+      "ahead": "1",
+      "head subject": "refactor(A6g): extract runMonadTask into room/monad-execution.ts"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-daemon`",
+      "branch": "`gaia/naru-sonnet-mtkotwumw7sqc5`",
+      "date": "2026-09-03",
+      "ahead": "1",
+      "head subject": "docs(audit): 陰樹 PASS#3 STATIC-A6 report (A6c-A6h, b4c126d..0bb260c)"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-daemon`",
+      "branch": "`gaia/terra-tts-rollout-20260901`",
+      "date": "2026-09-01",
+      "ahead": "1",
+      "head subject": "fix(build): resolve artifact submodule TypeScript exports"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-daemon`",
+      "branch": "`jareth/pi-fff-adoption`",
+      "date": "2026-09-02",
+      "ahead": "1",
+      "head subject": "feat(pi): allow per-agent extension packages"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-daemon`",
+      "branch": "`naru-opus/seal-ownership`",
+      "date": "2026-08-23",
+      "ahead": "1",
+      "head subject": "test(summons): red-proof the resume seal ownership window (predecessor cleanup unsealing a sealed successor strands turn C)"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-daemon`",
+      "branch": "`refactor/a13-plugin-contribution-ports`",
+      "date": "2026-09-03",
+      "ahead": "1",
+      "head subject": "plugins: add typed contribution ports"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-daemon`",
+      "branch": "`verify/a5`",
+      "date": "2026-09-02",
+      "ahead": "1",
+      "head subject": "merge: main into A5 verify"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-daemon`",
+      "branch": "`verify/a5b`",
+      "date": "2026-09-02",
+      "ahead": "1",
+      "head subject": "merge: main into A5 verify2"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-daemon`",
+      "branch": "`wip/a0-compact-clean`",
+      "date": "2026-09-02",
+      "ahead": "1",
+      "head subject": "wip: root WIP preserved (A0)"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-love`",
+      "branch": "`lane/jareth-anim-retarget`",
+      "date": "2026-08-20",
+      "ahead": "8",
+      "head subject": "anim-retarget: record adversarial review closure"
+    },
+    {
+      "merge candidates snapshot 2026 09 04": "`~/projects/gaia-love`",
+      "branch": "`xr-emu`",
+      "date": "2026-09-04",
+      "ahead": "5",
+      "head subject": "xr: suppress vision-flow DOM labels in rig mode"
+    }
+  ]
+}
