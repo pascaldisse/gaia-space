@@ -45,8 +45,8 @@
 
 /* Native LiveKit call surface — existing Space tokens only. */
 .call-panel{display:grid;gap:14px;padding:18px;background:var(--surface-sunken)}
-.call-heading{align-items:flex-start}.call-eyebrow{margin:0 0 4px!important;font:600 .72rem var(--font-head);letter-spacing:.08em;text-transform:uppercase;color:var(--accent-text)!important}.call-heading h3{margin:0;color:var(--text-strong)}.call-state{font-size:.84rem}.call-state strong{text-transform:capitalize;color:var(--text-strong)}
-.call-notice,.call-empty{margin:0;padding:10px;border:1px solid var(--surface-border);border-radius:8px;background:var(--accent-soft);color:var(--accent-text);font-size:.85rem}.call-lobby{margin:0;padding:10px;border:1px dashed var(--accent);border-radius:8px;color:var(--accent-text);font-size:.85rem}.call-recording{margin:0;padding:9px 10px;border:1px solid var(--status-danger-ink);border-radius:8px;background:var(--status-danger-bg);color:var(--status-danger-ink);font-size:.85rem;font-weight:600}.call-room{margin:0}
+/* .call-heading/.call-eyebrow/.call-state: dead, superseded by .call-topbar/.call-state-chip. */
+.call-notice{margin:0;padding:10px;border:1px solid var(--surface-border);border-radius:8px;background:var(--accent-soft);color:var(--accent-text);font-size:.85rem}.call-lobby{margin:0;padding:10px;border:1px dashed var(--accent);border-radius:8px;color:var(--accent-text);font-size:.85rem}.call-recording{margin:0;padding:9px 10px;border:1px solid var(--status-danger-ink);border-radius:8px;background:var(--status-danger-bg);color:var(--status-danger-ink);font-size:.85rem;font-weight:600}.call-room{margin:0}
 /* Bounded call stage: the tiles area never grows with participant/video count, so
    pages embedding CallPanel (message list, chat sidebar) keep their own scrolling. */
 .call-stage{--call-stage-height:360px;--call-stage-height-theatre:70vh;flex:none;height:var(--call-stage-height);min-height:0;position:relative;border-radius:10px;overflow:hidden;background:#060a14}
@@ -89,7 +89,7 @@
 .call-drawer .call-chat-messages{max-height:none;overflow-y:auto;padding:8px 10px;background:transparent}
 .call-drawer .call-chat-messages p{background:rgba(255,255,255,.07);color:#fff}
 .call-drawer .call-chat-compose{padding:8px 10px;border-top:1px solid rgba(255,255,255,.14)}
-.call-controls{display:grid;gap:12px;padding-top:2px;border-top:1px solid var(--surface-border)}.call-toggle-group{display:flex;flex-wrap:wrap;gap:7px;padding-top:12px}.call-toggle-group button.active{border-color:var(--accent);background:var(--accent-soft);color:var(--accent-text)}
+/* .call-controls/.call-toggle-group: dead, superseded by .call-control-bar/.call-btn. */
 .call-chat{display:grid;gap:8px;padding:11px;border:1px solid var(--surface-border);border-radius:var(--radius-option);background:var(--ctl-bg)}.call-chat-heading,.call-chat-compose{display:flex;align-items:center;gap:8px}.call-chat-heading{justify-content:space-between;font-size:.84rem}.call-chat-heading span{color:var(--text-faint);font-size:.76rem}.call-chat-messages{display:grid;gap:6px;max-height:10rem;overflow:auto}.call-chat-messages p{display:grid;gap:2px;margin:0;padding:7px 8px;border-radius:6px;background:var(--surface);font-size:.83rem}.call-chat-messages p>strong{font-size:.76rem;color:var(--accent-text)}.call-chat-messages p>span{overflow-wrap:anywhere}.call-chat-messages>p{color:var(--text-faint)}.call-chat-compose input{min-width:0;flex:1}.call-chat-compose button{flex:none}
 
 .call-transcript{display:grid;gap:8px;padding:11px;border:1px solid var(--surface-border);border-radius:var(--radius-option);background:var(--ctl-bg)}
