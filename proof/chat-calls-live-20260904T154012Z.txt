@@ -1,0 +1,15 @@
+UTC=20260904T154012Z
+url=https://paloptic.com/space/
+master=d998f8b
+run=33889761133
+run_url=https://github.com/pascaldisse/gaia-space/actions/runs/33889761133
+bundle=index-GdjZbkP2.js
+harness=bun run shot --login
+A=proof/chat-calls-live-20260904T154012Z-a-channel.png
+A.visible=Call|Video|⋯; header=one-line; attach-select=absent; inline-delete=absent
+B=proof/chat-calls-live-20260904T154012Z-b-calendar-composer.png
+B.visible=New meeting|Video call|External link|In person
+C=proof/chat-calls-live-20260904T154012Z-c-call-panel.png
+C.video-click=CallPanel opened; state=disconnected
+C.console_errors=401 /api/cmd/get_organization|401 /api/cmd/finance_access_check|401 /api/auth/me|403 /api/cmd/list_directory_feed
+production-fixture=ephemeral user/channel removed after capture
