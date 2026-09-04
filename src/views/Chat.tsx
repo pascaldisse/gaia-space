@@ -2,6 +2,7 @@ import { createResource, createSignal, createEffect, onCleanup, For, Show } from
 import { useDeepLink, linkProps, route } from "../router";
 import { currentUser, isWeb, projects, reloadProjects, setProjectId } from "../session";
 import { meetingsApi, type Meeting } from "../api/meetings";
+import { buildChannelCallMeeting, findLiveChannelMeeting } from "./channelCall";
 import CallPanel from "./CallPanel";
 import { navLayout } from "../nav";
 import { actingProfileId, bumpChannels, setActingProfileId } from "../chatIdentity";
@@ -66,7 +67,6 @@ const GROUP_ORDER: { key: ChannelContentType; label: string }[] = [
 
 const QUICK_EMOJI = ["👍", "❤️", "😂", "🎉", "👀"];
 const CHAT_POLL_MS = Number(import.meta.env.VITE_CHAT_POLL_MS) || 5000;
-const CHAT_CALL_DURATION_SECONDS = Number(import.meta.env.VITE_CHAT_CALL_DURATION_SECONDS) || 60 * 60;
 
 /** Two-letter monogram for the message avatar (light shell only). */
 
@@ -138,14 +138,13 @@ export default function Chat(props: { embedded?: boolean } = {}) {
   const [meetings, { refetch: refetchMeetings }] = createResource(actingProfileId, (id) =>
     id ? meetingsApi.list(id) : Promise.resolve<Meeting[]>([]),
   );
-  const liveMeeting = () => (meetings() ?? []).find((meeting) => meeting.channel_id === activeChannelId() && meeting.video_status === "live");
+  const liveMeeting = () => findLiveChannelMeeting(meetings(), activeChannelId() ?? "");
   const [openCall, setOpenCall] = createSignal<{ meeting: Meeting; audioOnly: boolean }>();
   const openExistingCall = (meeting: Meeting, audioOnly = false) => setOpenCall({ meeting, audioOnly });
   const startCall = async (audioOnly: boolean) => {
     const channel = activeChannel(); const organizer = actingProfileId();
     if (!channel || !organizer) return;
-    const starts_at = Math.floor(Date.now() / 1_000);
-    const meeting: Meeting = { id: newId("meeting"), title: channel.name ?? channel.content_type, description: null, starts_at, ends_at: starts_at + CHAT_CALL_DURATION_SECONDS, rrule: null, location: null, organizer_id: organizer, channel_id: channel.id, visibility: "participants", modification_preference: "organizer-only", archived: false, video_provider: "livekit", video_room_id: null, join_url: null, meeting_url: null, video_status: "scheduled", video_started_at: null, video_ended_at: null, video_ended_by: null, source_entity_type: null, source_entity_id: null };
+    const meeting = buildChannelCallMeeting(channel, organizer);
     try { await meetingsApi.create(meeting); setOpenCall({ meeting, audioOnly }); void refetchMeetings(); }
     catch (reason) { fail(reason); }
   };

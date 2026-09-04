@@ -1,12 +1,14 @@
-import { For, Show, createEffect, createMemo, createResource, createSignal, type JSX } from "solid-js";
+import { For, Show, createEffect, createMemo, createResource, createSignal, onCleanup, type JSX } from "solid-js";
 import { chatApi, type Channel } from "../api/chat";
 import { selectedChannel } from "../chatChannelSelection";
 import { isDirectMessage, dmLabel } from "../chatPartition";
 import { Avatar } from "../components/Avatar";
 import { bumpChannels } from "../chatIdentity";
-import { meetingsApi } from "../api/meetings";
+import { meetingsApi, type Meeting } from "../api/meetings";
+import { buildChannelCallMeeting, findLiveChannelMeeting } from "./channelCall";
+import CallPanel from "./CallPanel";
 import { personalApi } from "../api/personal";
-import { currentUser, humanError, profileId, profiles, projects, reloadProfiles, reloadProjects } from "../session";
+import { currentUser, humanError, isWeb, profileId, profiles, projects, reloadProfiles, reloadProjects } from "../session";
 import { channelTabs, linkProps, navigate, route } from "../router";
 import { GhostPill, PillMenu } from "../components/controls";
 import ConfirmDialog from "../components/ConfirmDialog";
@@ -14,6 +16,7 @@ import DeleteButton from "../components/DeleteButton";
 import EmptyState from "../components/EmptyState";
 import Chat from "./Chat";
 import "./ChannelWorkspace.css";
+import "./Meetings.css";
 import { UI_LOCALE } from "../calendar";
 import { metricTone } from "../statusTone";
 
@@ -69,6 +72,7 @@ const WORK_TABS: Partial<Record<TabKey, string | undefined>> = {
   notes: "chats",
 };
 
+const CHANNEL_CALL_REFRESH_MS = Number(import.meta.env.VITE_CHANNEL_CALL_REFRESH_MS) || 15_000;
 const hhmm = (seconds: number) =>
   new Date(seconds * 1000).toLocaleTimeString(UI_LOCALE, { hour: "2-digit", minute: "2-digit" });
 
@@ -121,7 +125,24 @@ export default function ChannelWorkspace(): JSX.Element {
   const [statusOpen, setStatusOpen] = createSignal(false);
   const [teamOpen, setTeamOpen] = createSignal(false);
   // Meetings carry `channel_id`, so "next meeting" is genuinely channel-scoped here.
-  const [meetings] = createResource(actingProfileId, (id) => (id ? meetingsApi.list(id) : Promise.resolve([])));
+  const [meetings, { refetch: refetchMeetings }] = createResource(actingProfileId, (id) =>
+ id ? meetingsApi.list(id) : Promise.resolve<Meeting[]>([]),
+);
+createEffect(() => {
+ if (!actingProfileId()) return;
+ const timer = window.setInterval(() => { void refetchMeetings(); }, CHANNEL_CALL_REFRESH_MS);
+ onCleanup(() => window.clearInterval(timer));
+});
+const [openCall, setOpenCall] = createSignal<{ meeting: Meeting; audioOnly: boolean }>();
+const openExistingCall = (meeting: Meeting, audioOnly = false) => setOpenCall({ meeting, audioOnly });
+const startCall = async (audioOnly: boolean) => {
+ const current = channel(); const organizer = actingProfileId();
+ if (!current || !organizer) return;
+ const meeting = buildChannelCallMeeting(current, organizer);
+ try { await meetingsApi.create(meeting); setOpenCall({ meeting, audioOnly }); await refetchMeetings(); }
+ catch (reason) { setMemberError(humanError(reason)); }
+};
+const liveMeeting = () => findLiveChannelMeeting(meetings(), channelId());
 
   const memberCount = () => members()?.length ?? 0;
   /** "Replies needed" = unread mentions of me IN THIS CHANNEL. */
@@ -335,7 +356,9 @@ export default function ChannelWorkspace(): JSX.Element {
             {/* The same red button every other surface uses — red at rest, so the act
                 is recognised before it is read. It was this view's own grey control,
                 which is exactly the inconsistency the shared button exists to end. */}
-            <DeleteButton label="Delete conversation" onRequest={() => setConfirmDelete(true)} />
+            <button type="button" class="ghost small" aria-label="Call" title="Call" onClick={() => void startCall(true)}>Call</button>
+<button type="button" class="ghost small" aria-label="Video" title="Video" onClick={() => void startCall(false)}>Video</button>
+<DeleteButton label="Delete conversation" onRequest={() => setConfirmDelete(true)} />
           </div>
         </div>
 
@@ -377,10 +400,12 @@ export default function ChannelWorkspace(): JSX.Element {
             </div>
           )}
         </Show>
+        <Show when={liveMeeting()}>{(meeting) => <div class="cw-live-call" role="status">Call live <span aria-hidden="true">·</span> <button type="button" class="ghost small" onClick={() => openExistingCall(meeting())}>Join</button></div>}</Show>
       </header>
 
       <div class="cw-body" classList={{ "with-rail": !!channelProjectId() || teamOpen() }}>
         <section class="cw-panel cw-chat">
+          <Show when={openCall()}>{(call) => <div class="cw-call-panel"><CallPanel meeting={call().meeting} audioOnly={call().audioOnly} identity={isWeb() ? currentUser()?.profile_id ?? "" : actingProfileId() ?? ""} displayName={isWeb() ? currentUser()?.display_name ?? "" : nameOf(actingProfileId())}/></div>}</Show>
           {/* THE ONLY BODY THIS SURFACE HAS NOW: the messages. The five guest views
               that used to be mounted here are mounted by views/ProjectWorkspace.tsx
               instead, under the project's single tab row — one home each, not two.

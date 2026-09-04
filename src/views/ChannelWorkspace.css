@@ -231,3 +231,7 @@ cursor: pointer;
 .cw-rail-toggle.active { border-color: var(--teal); }
 .cw-dm-title { display: flex; align-items: center; gap: 9px; }
 .cw-presence { width: 8px; height: 8px; border-radius: 50%; background: var(--teal); }
+
+.cw-live-call { display: flex; align-items: center; gap: .35rem; padding: .35rem 0 .7rem; color: var(--accent-text); font-size: .84rem; }
+.cw-call-panel { flex: 0 0 auto; padding: 0 18px; overflow: auto; }
+.cw-call-panel .call-panel { margin: 12px 0; }
