@@ -1,0 +1,18 @@
+UTC=20260904T173928Z
+url=https://paloptic.com/space/channel/<ephemeral>/messages
+master=f1959069aad3cdf4f24f25082a3849009da2407f
+run=33900554657
+run_url=https://github.com/pascaldisse/gaia-space/actions/runs/33900554657
+bundle=index-DZTNRf3Y.js
+header=proof/cw-slim-live-20260904T173928Z-header.png
+menu=proof/cw-slim-live-20260904T173928Z-menu.png
+panel=proof/cw-slim-live-20260904T173928Z-panel.png
+harness=bun run shot --login; production; fresh ephemeral GlobalAdmin account+public channel
+pixels.oneRow=yes; own visual inspection: # CW Slim Proof · PUBLIC chip · 2 members · manage · Call · Video · ⋯ in one header row
+pixels.noPlaceholder=yes; no inline Attach picker; no inline red Delete
+pixels.menu=yes; own visual inspection: Attach to project…; Delete conversation
+pixels.panel=no; own visual inspection: Video click, 6s wait; CallPanel absent; no create_meeting request observed
+pixels.dm=not-applicable; fresh proof account had no DM channels
+fixture=ephemeral; channel+account cleanup=completed
+orphan_sweep=completed; vite:5175 untouched
+UNVERIFIED=Video-to-CallPanel production path
