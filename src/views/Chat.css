@@ -468,3 +468,4 @@
 .link-card .link-description { color: var(--muted, #9dac9f); font-size: .9em; }
 .link-card.status-refused, .link-card.status-failed { border-left-color: #a6613f; }
 .mention-kind { margin-left: .45em; padding: .08em .35em; border-radius: 999px; color: #a8c7ff; background: #243b67; font-size: .72em; text-transform: uppercase; }
+.chat-topbar-spacer{flex:1}.chat-live-call{display:flex;align-items:center;gap:.35rem;padding:.35rem .9rem;border-bottom:1px solid var(--surface-border);color:var(--accent-text);background:var(--accent-soft);font-size:.84rem}
