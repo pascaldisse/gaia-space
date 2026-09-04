@@ -472,3 +472,4 @@
 /* Call controls are persistent channel-header actions, not hover-only row actions. */
 .chat-topbar button.ghost.small{opacity:1}
 .chat-live-call{display:flex;align-items:center;gap:.35rem;padding:.35rem .9rem;border-bottom:1px solid var(--surface-border);color:var(--accent-text);background:var(--accent-soft);font-size:.84rem}
+.chat-call-panel{padding:0 .9rem}.chat-call-panel .call-panel{margin:12px 0}

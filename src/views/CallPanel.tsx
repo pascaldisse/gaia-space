@@ -74,7 +74,7 @@ function DevicePicker(props: { label: string; kind: DeviceKind; devices: MediaDe
   </select></label>;
 }
 
-export default function CallPanel(props: { meeting: Meeting; identity: string; displayName: string; audioOnly?: boolean }) {
+export default function CallPanel(props: { meeting: Meeting; identity: string; displayName: string; audioOnly?: boolean; autoJoin?: boolean }) {
   const [room, setRoom] = createSignal<Room>();
   const [state, setState] = createSignal("disconnected");
   const [participants, setParticipants] = createSignal<Participant[]>([]);
@@ -163,6 +163,10 @@ void syncTranscript();
       setError(`Could not join this call: ${String(reason)}`);
     }
   };
+  let autoJoinRequested = false;
+  createEffect(() => {
+    if (props.autoJoin && !autoJoinRequested) { autoJoinRequested = true; void connect(); }
+  });
   const leave = async () => {
     const current = room();
     if (current) await current.disconnect();

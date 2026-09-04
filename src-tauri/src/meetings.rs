@@ -389,6 +389,57 @@ pub fn create_meeting(mut meeting: Meeting) -> Result<()> {
     notify_meeting_change_on(&c, &meeting, "meeting.created");
     Ok(())
 }
+/// Atomically mint a channel call and invite the channel's effective roster.
+/// Channel membership has one source of truth: `chat::list_channel_members_impl`.
+fn create_channel_call_on(c: &mut rusqlite::Connection, meeting: Meeting) -> Result<Meeting> {
+    let channel_id = meeting
+        .channel_id
+        .clone()
+        .ok_or("Channel calls require a channel")?;
+    let organizer_id = meeting
+        .organizer_id
+        .clone()
+        .ok_or("Channel calls require an organizer")?;
+    validate_meeting(&meeting)?;
+    let tx = c.transaction().map_err(|e| e.to_string())?;
+    if let Some(existing) = tx
+        .query_row(
+            &format!("SELECT {MEETING_COLUMNS} FROM meetings m WHERE m.channel_id=?1 AND m.archived=0 AND m.video_status='live' ORDER BY m.starts_at DESC LIMIT 1"),
+            [&channel_id],
+            row_to_meeting,
+        )
+        .optional()
+        .map_err(|e| e.to_string())?
+    {
+        return Ok(existing);
+    }
+    let members = chat::list_channel_members_impl(&tx, &channel_id)?;
+    if members.is_empty() {
+        return Err("Channel calls require at least one channel member".into());
+    }
+    let meeting_url = normalize_meeting_url(meeting.meeting_url.as_deref())?;
+    tx.execute("INSERT INTO meetings(id,title,description,starts_at,ends_at,rrule,location,organizer_id,channel_id,visibility,modification_preference,archived,video_provider,video_status,source_entity_type,source_entity_id,meeting_url) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)", rusqlite::params![meeting.id, meeting.title, meeting.description, meeting.starts_at, meeting.ends_at, meeting.rrule, meeting.location, meeting.organizer_id, meeting.channel_id, meeting.visibility, meeting.modification_preference, meeting.archived, meeting.video_provider, meeting.video_status, meeting.source_entity_type, meeting.source_entity_id, meeting_url]).map_err(|e| e.to_string())?;
+    for member in members {
+        let status = if member.profile_id == organizer_id {
+            "accepted"
+        } else {
+            "invited"
+        };
+        tx.execute(
+            "INSERT INTO meeting_participants(meeting_id,profile_id,status) VALUES(?1,?2,?3)",
+            rusqlite::params![meeting.id, member.profile_id, status],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(meeting)
+}
+
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn create_channel_call(meeting: Meeting) -> Result<Meeting> {
+    create_channel_call_on(&mut db::conn()?, meeting)
+}
+
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn update_meeting(meeting: Meeting) -> Result<()> {
     validate_meeting(&meeting)?;
@@ -759,6 +810,30 @@ pub fn expand_meeting_occurrences(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn channel_call_invites_dm_members_and_grants_recipient_read_scope() {
+        let mut c = crate::db::open_in_memory().unwrap();
+        crate::db::migrate(&c).unwrap();
+        for profile_id in ["caller", "recipient"] {
+            c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES(?1,?1,?1,unixepoch())", [profile_id]).unwrap();
+        }
+        c.execute("INSERT INTO channels(id,content_type,name,archived) VALUES('dm-call','dm','Caller · Recipient',0)", []).unwrap();
+        for profile_id in ["caller", "recipient"] {
+            c.execute("INSERT INTO channel_members(channel_id,profile_id,administrator) VALUES('dm-call',?1,0)", [profile_id]).unwrap();
+        }
+        let created = create_channel_call_on(&mut c, Meeting {
+            id: "dm-call-meeting".into(), title: "Caller · Recipient".into(), description: None,
+            starts_at: 100, ends_at: 3_700, rrule: None, location: None, organizer_id: Some("caller".into()), channel_id: Some("dm-call".into()),
+            visibility: "participants".into(), modification_preference: "organizer-only".into(), archived: false,
+            video_provider: Some("livekit".into()), video_room_id: None, join_url: None, meeting_url: None, video_status: "scheduled".into(),
+            video_started_at: None, video_ended_at: None, video_ended_by: None, source_entity_type: None, source_entity_id: None,
+        }).unwrap();
+        assert_eq!(created.id, "dm-call-meeting");
+        let participants: Vec<(String, String)> = c.prepare("SELECT profile_id,status FROM meeting_participants WHERE meeting_id='dm-call-meeting' ORDER BY profile_id").unwrap().query_map([], |row| Ok((row.get(0)?, row.get(1)?))).unwrap().collect::<rusqlite::Result<_>>().unwrap();
+        assert_eq!(participants, vec![("caller".into(), "accepted".into()), ("recipient".into(), "invited".into())]);
+        assert!(meeting_readable_on(&c, "dm-call-meeting", "recipient").unwrap(), "invited DM recipient must pass MEETING_READ_SCOPE");
+    }
+
     /// ISSUE #5 REPRO: the exact JSON body the composer sends (`Meetings.tsx` create /
     /// `Calendar.tsx` create) walked through serde into `create_meeting` on a migrated
     /// database. Nothing is hand-built here: a hand-built struct cannot fail the way a
