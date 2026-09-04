@@ -248,4 +248,61 @@ describe("channel workspace", () => {
     expect(host.querySelector(".cw-metrics .cw-pill-button")).toBeNull();
     expect(host.querySelector(".cw-metrics .cw-pill")?.textContent).toContain("1");
   });
+
+  // ── HEADER SLIM (stage: cw-slim-header) ────────────────────────────────────
+  // The header used to stack a full-width "Attach to project…" select and the
+  // literal words "Not part of a project yet" under every project-less channel,
+  // plus an inline red Delete button beside Call/Video. Both are gone: the facts
+  // stay, the acts move behind the `⋯` menu, revealed only on request.
+  test("header never renders the 'Not part of a project yet' placeholder", async () => {
+    const host = await mount("c-loose");
+    expect(host.textContent).not.toContain("Not part of a project yet");
+  });
+
+  test("no Attach-to-project select is rendered before the ⋯ menu is opened", async () => {
+    const host = await mount("c-loose");
+    expect(host.querySelector(".cw-actionbar")).toBeNull();
+    expect(host.textContent).not.toContain("Adds Overview, Tasks, Calendar, Files, Notes");
+    const trigger = host.querySelector<HTMLButtonElement>('[aria-label="Channel actions"]')!;
+    trigger.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await settle();
+    const attach = Array.from(document.querySelectorAll(".context-item"))
+      .find((node) => node.textContent?.trim() === "Attach to project…") as HTMLElement | undefined;
+    expect(attach).toBeTruthy();
+    attach!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await settle();
+    const bar = host.querySelector(".cw-actionbar");
+    expect(bar).toBeTruthy();
+    expect(bar?.querySelector(".pill-menu-trigger")?.textContent).toContain("Attach to project…");
+  });
+
+  test("⋯ → Delete conversation opens the ConfirmDialog; there is no inline red Delete", async () => {
+    const host = await mount("c-loose");
+    expect(host.querySelector(".delete-button")).toBeNull();
+    const trigger = host.querySelector<HTMLButtonElement>('[aria-label="Channel actions"]')!;
+    trigger.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await settle();
+    const del = Array.from(document.querySelectorAll(".context-item"))
+      .find((node) => node.textContent?.trim() === "Delete conversation") as HTMLElement | undefined;
+    expect(del).toBeTruthy();
+    del!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await settle();
+    expect(document.body.textContent).toContain("Delete conversation?");
+  });
+
+  test("Call and Video stay direct buttons in the header for a project-less channel", async () => {
+    const host = await mount("c-loose");
+    expect(host.querySelector('[aria-label="Call"]')).toBeTruthy();
+    expect(host.querySelector('[aria-label="Video"]')).toBeTruthy();
+  });
+
+  test("a project channel offers no Attach item in its ⋯ menu (already attached)", async () => {
+    const host = await mount("c-project");
+    const trigger = host.querySelector<HTMLButtonElement>('[aria-label="Channel actions"]')!;
+    trigger.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await settle();
+    const items = Array.from(document.querySelectorAll(".context-item")).map((node) => node.textContent?.trim());
+    expect(items).not.toContain("Attach to project…");
+    expect(items).toContain("Delete conversation");
+  });
 });
