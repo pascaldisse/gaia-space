@@ -98,15 +98,24 @@ if (command === "list_meeting_transcript_segments") return [{ id: "segment-1", m
   expect(host.textContent).toContain("Connected · 2");
   expect(remoteAudioAttachments).toHaveLength(1);
   expect(remoteAudioAttachments[0]).toBeInstanceOf(HTMLAudioElement);
+  // Device pickers live behind the ⋯ "more options" menu now, not in the open flow.
+  (Array.from(host.querySelectorAll("button")).find(button => button.getAttribute("aria-label") === "More options: devices, room id") as HTMLButtonElement).click();
+  await settle();
   expect(host.querySelectorAll("select")).toHaveLength(3);
+  // Chat lives in the collapsible drawer, default closed: open it before composing.
+  (Array.from(host.querySelectorAll("button")).find(button => button.getAttribute("aria-label") === "Toggle in-call chat") as HTMLButtonElement).click();
+  await settle();
   const chat = host.querySelector('input[aria-label="Chat message"]') as HTMLInputElement;
   chat.value = "Ship it"; chat.dispatchEvent(new Event("input", { bubbles: true }));
   (Array.from(host.querySelectorAll("button")).find(button => button.textContent === "Send") as HTMLButtonElement).click();
   await settle();
   expect(calls.some(call => call.includes('chat:') && call.includes("Ship it"))).toBe(true);
   expect(host.textContent).toContain("Ship it");
-expect(host.textContent).toContain("Caption proof");
-expect(ipcCommands).toContain("list_meeting_transcript_segments");
+  // Captions share the same drawer as chat: switching tabs, not a second panel.
+  (Array.from(host.querySelectorAll("button")).find(button => button.textContent?.startsWith("Captions")) as HTMLButtonElement).click();
+  await settle();
+  expect(host.textContent).toContain("Caption proof");
+  expect(ipcCommands).toContain("list_meeting_transcript_segments");
   (Array.from(host.querySelectorAll("button")).find(button => button.textContent === "Mute microphone") as HTMLButtonElement).click();
   (Array.from(host.querySelectorAll("button")).find(button => button.textContent === "Turn camera off") as HTMLButtonElement).click();
   (Array.from(host.querySelectorAll("button")).find(button => button.textContent === "Share screen") as HTMLButtonElement).click();

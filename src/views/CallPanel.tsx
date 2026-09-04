@@ -270,19 +270,21 @@ export default function CallPanel(props: { meeting: Meeting; identity: string; d
   const copyRoomId = async () => {
     const id = join()?.room ?? props.meeting.video_room_id;
     if (!id) return;
-    try { await navigator.clipboard.writeText(id); setNotice("Room id copied."); }
+    try { await navigator.clipboard.writeText(id); setNotice("Room id copied."); setMenuOpen(false); }
     catch (reason) { setError(`Could not copy room id: ${String(reason)}`); }
   };
+  // Drawer holds chat OR captions, never both: one collapsible side panel inside the
+  // stage, toggled by its own control-bar button, default closed. The ⋯ menu is the
+  // same idea for the device pickers + room id, which are settings, not stage content.
+  const [drawerTab, setDrawerTab] = createSignal<"chat" | "captions">();
+  const toggleDrawer = (tab: "chat" | "captions") => setDrawerTab(current => current === tab ? undefined : tab);
+  const [menuOpen, setMenuOpen] = createSignal(false);
   onCleanup(() => { void room()?.disconnect(); });
   return <section class="call-panel" aria-label="Live call">
     <header class="call-topbar">
       <p class="call-state-chip" data-call-state={state()}><Show when={join()}><strong>{stateLabel()}</strong></Show><Show when={!join()}>{props.meeting.title}</Show></p>
       <Show when={room()} fallback={<button class="primary" disabled={state() === "connecting" || waitingForAdmission()} onClick={() => void requestJoin()}>{state() === "connecting" ? "Joining…" : waitingForAdmission() ? "Waiting for admission…" : "Join call"}</button>}>
-        <span class="call-leave-group">
-          <button type="button" class="ghost small call-theatre-toggle" aria-pressed={theatre()} onClick={() => setTheatre(value => !value)}>{theatre() ? "Collapse" : "Expand"}</button>
-          <button class="danger" onClick={() => void leave()}>Leave call</button>
-          <Show when={organizer()}><button class="danger" onClick={() => void endCall()}>End call</button></Show>
-        </span>
+        <button type="button" class="ghost small call-theatre-toggle" aria-pressed={theatre()} onClick={() => setTheatre(value => !value)}>{theatre() ? "Collapse" : "Expand"}</button>
       </Show>
     </header>
     <Show when={error()}><p class="meeting-error" role="alert">{error()}</p></Show>
@@ -297,9 +299,42 @@ export default function CallPanel(props: { meeting: Meeting; identity: string; d
       </div>
       <Show when={connected() && remoteParticipants().length === 0}><p class="call-waiting">Waiting for others…</p></Show>
       <Show when={selfParticipant()} keyed>{self => <div class="call-pip" aria-label="Your preview">{props.audioOnly ? <AudioParticipant participant={self} /> : <VideoTile participant={self} />}</div>}</Show>
+      <Show when={room()}>
+        <Show when={drawerTab()} keyed>{tab => <aside class="call-drawer" aria-label={tab === "chat" ? "In-call chat" : "Live captions"}>
+          <div class="call-drawer-head">
+            <div class="call-drawer-tabs">
+              <button type="button" classList={{ active: tab === "chat" }} onClick={() => setDrawerTab("chat")}>Chat<Show when={chatMessages().length}> ({chatMessages().length})</Show></button>
+              <button type="button" classList={{ active: tab === "captions" }} onClick={() => setDrawerTab("captions")}>Captions<Show when={transcriptSegments().length}> ({transcriptSegments().length})</Show></button>
+            </div>
+            <button type="button" class="ghost small" aria-label="Close drawer" onClick={() => setDrawerTab(undefined)}>×</button>
+          </div>
+          <Show when={tab === "chat"}>
+            <div class="call-chat-messages" aria-live="polite"><Show when={chatMessages().length === 0}><p>Messages sent here are delivered to people currently in this call.</p></Show><For each={chatMessages()}>{message => <p><strong>{message.author}</strong><span>{message.text}</span></p>}</For></div>
+            <form class="call-chat-compose" onSubmit={event => { event.preventDefault(); void sendChat(); }}><input aria-label="Chat message" value={chatDraft()} onInput={event => setChatDraft(event.currentTarget.value)} maxlength={2_000} placeholder="Message everyone in this call" /><button disabled={!chatDraft().trim()}>Send</button></form>
+          </Show>
+          <Show when={tab === "captions"}>
+            <div class="call-chat-messages" aria-live="polite"><Show when={transcriptSegments().length === 0}><p>Captions appear here when a transcriber submits transcript segments.</p></Show><For each={transcriptSegments()}>{segment => <p><strong>{segment.speaker_id ?? "Unknown speaker"}</strong><span>{segment.text}</span></p>}</For></div>
+          </Show>
+        </aside>}</Show>
+        <Show when={menuOpen()}><div class="call-menu" role="menu" aria-label="More call options">
+          <button type="button" class="ghost small" onClick={() => void copyRoomId()}>Copy room id</button>
+          <DevicePicker label="Microphone" kind="audioinput" devices={devices().audioinput} disabled={!connected()} onChange={id => void switchDevice("audioinput", id)} /><Show when={!props.audioOnly}><DevicePicker label="Camera" kind="videoinput" devices={devices().videoinput} disabled={!connected()} onChange={id => void switchDevice("videoinput", id)} /></Show><DevicePicker label="Speaker" kind="audiooutput" devices={devices().audiooutput} disabled={!connected()} onChange={id => void switchDevice("audiooutput", id)} />
+        </div></Show>
+        <div class="call-control-bar" role="toolbar" aria-label="Call controls">
+          <button type="button" class="call-btn call-btn-mic" classList={{ active: microphoneOn() }} aria-pressed={microphoneOn()} aria-label={microphoneOn() ? "Mute microphone" : "Unmute microphone"} onClick={() => void toggleMicrophone()}>{microphoneOn() ? "Mute microphone" : "Unmute microphone"}</button>
+          <Show when={!props.audioOnly}>
+            <button type="button" class="call-btn call-btn-camera" classList={{ active: cameraOn() }} aria-pressed={cameraOn()} aria-label={cameraOn() ? "Turn camera off" : "Turn camera on"} onClick={() => void toggleCamera()}>{cameraOn() ? "Turn camera off" : "Turn camera on"}</button>
+            <button type="button" class="call-btn call-btn-share" classList={{ active: screenSharing() }} aria-pressed={screenSharing()} aria-label={screenSharing() ? "Stop sharing" : "Share screen"} onClick={() => void toggleScreenShare()}>{screenSharing() ? "Stop sharing" : "Share screen"}</button>
+          </Show>
+          <button type="button" class="call-btn call-btn-captions" classList={{ active: drawerTab() === "captions" }} aria-pressed={drawerTab() === "captions"} aria-label="Toggle live captions" onClick={() => toggleDrawer("captions")}>Captions</button>
+          <button type="button" class="call-btn call-btn-chat" classList={{ active: drawerTab() === "chat" }} aria-pressed={drawerTab() === "chat"} aria-label="Toggle in-call chat" onClick={() => toggleDrawer("chat")}>Chat</button>
+          <Show when={recordingAvailable()}><button type="button" class="call-btn call-btn-record" classList={{ active: recordingInProgress(), recording: true }} aria-pressed={recordingInProgress()} disabled={!!activeRecording() && !recordingInProgress()} onClick={() => void toggleRecording()}>{recordingInProgress() ? "Stop recording" : activeRecording() ? `Recording ${activeRecording()!.status}…` : "Start recording"}</button></Show>
+          <button type="button" class="call-btn call-btn-menu" aria-pressed={menuOpen()} aria-expanded={menuOpen()} aria-label="More options: devices, room id" onClick={() => setMenuOpen(value => !value)}>⋯</button>
+          <button type="button" class="call-btn call-btn-leave danger" aria-label="Leave call" onClick={() => void leave()}>Leave call</button>
+          <Show when={organizer()}><button type="button" class="call-btn call-btn-end danger outline" aria-label="End call" onClick={() => void endCall()}>End call</button></Show>
+        </div>
+      </Show>
     </div>
-    <Show when={room()}><section class="call-chat" aria-label="In-call chat"><div class="call-chat-heading"><strong>Chat</strong><span>{chatMessages().length} message{chatMessages().length === 1 ? "" : "s"}</span></div><div class="call-chat-messages" aria-live="polite"><Show when={chatMessages().length === 0}><p>Messages sent here are delivered to people currently in this call.</p></Show><For each={chatMessages()}>{message => <p><strong>{message.author}</strong><span>{message.text}</span></p>}</For></div><form class="call-chat-compose" onSubmit={event => { event.preventDefault(); void sendChat(); }}><input aria-label="Chat message" value={chatDraft()} onInput={event => setChatDraft(event.currentTarget.value)} maxlength={2_000} placeholder="Message everyone in this call" /><button disabled={!chatDraft().trim()}>Send</button></form></section><section class="call-transcript" aria-label="Live captions"><div class="call-chat-heading"><strong>Live captions</strong><span>{transcriptSegments().length} segment{transcriptSegments().length === 1 ? "" : "s"}</span></div><div class="call-chat-messages" aria-live="polite"><Show when={transcriptSegments().length === 0}><p>Captions appear here when a transcriber submits transcript segments.</p></Show><For each={transcriptSegments()}>{segment => <p><strong>{segment.speaker_id ?? "Unknown speaker"}</strong><span>{segment.text}</span></p>}</For></div></section><Show when={recordings().length}><section class="call-transcript" aria-label="Recording history"><div class="call-chat-heading"><strong>Recording history</strong><span>{recordings().length} job{recordings().length === 1 ? "" : "s"}</span></div><div class="call-chat-messages"><For each={recordings()}>{item => <p><strong>{item.status}</strong><span>{item.filepath ?? "No file path"} · started {timeLabel(item.started_at)}{item.stopped_at === null ? "" : ` · stopped ${timeLabel(item.stopped_at)}`}{item.last_error ? ` · ${item.last_error}` : ""}</span></p>}</For></div></section></Show><footer class="call-controls"><div class="call-toggle-group"><button classList={{ active: microphoneOn() }} aria-pressed={microphoneOn()} onClick={() => void toggleMicrophone()}>{microphoneOn() ? "Mute microphone" : "Unmute microphone"}</button><Show when={!props.audioOnly}><button classList={{ active: cameraOn() }} aria-pressed={cameraOn()} onClick={() => void toggleCamera()}>{cameraOn() ? "Turn camera off" : "Turn camera on"}</button><button classList={{ active: screenSharing() }} aria-pressed={screenSharing()} onClick={() => void toggleScreenShare()}>{screenSharing() ? "Stop sharing" : "Share screen"}</button></Show><Show when={recordingAvailable()}><button classList={{ active: recordingInProgress(), recording: true }} aria-pressed={recordingInProgress()} disabled={!!activeRecording() && !recordingInProgress()} onClick={() => void toggleRecording()}>{recordingInProgress() ? "Stop recording" : activeRecording() ? `Recording ${activeRecording()!.status}…` : "Start recording"}</button></Show><button type="button" class="ghost small" onClick={() => void copyRoomId()}>Copy room id</button></div>
-      <div class="call-devices"><DevicePicker label="Microphone" kind="audioinput" devices={devices().audioinput} disabled={!connected()} onChange={id => void switchDevice("audioinput", id)} /><Show when={!props.audioOnly}><DevicePicker label="Camera" kind="videoinput" devices={devices().videoinput} disabled={!connected()} onChange={id => void switchDevice("videoinput", id)} /></Show><DevicePicker label="Speaker" kind="audiooutput" devices={devices().audiooutput} disabled={!connected()} onChange={id => void switchDevice("audiooutput", id)} /></div>
-    </footer></Show>
+    <Show when={recordings().length}><section class="call-transcript" aria-label="Recording history"><div class="call-chat-heading"><strong>Recording history</strong><span>{recordings().length} job{recordings().length === 1 ? "" : "s"}</span></div><div class="call-chat-messages"><For each={recordings()}>{item => <p><strong>{item.status}</strong><span>{item.filepath ?? "No file path"} · started {timeLabel(item.started_at)}{item.stopped_at === null ? "" : ` · stopped ${timeLabel(item.stopped_at)}`}{item.last_error ? ` · ${item.last_error}` : ""}</span></p>}</For></div></section></Show>
   </section>;
 }

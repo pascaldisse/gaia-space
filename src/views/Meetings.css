@@ -69,6 +69,26 @@
 .call-pip{--call-pip-width:160px;position:absolute;right:10px;bottom:10px;width:var(--call-pip-width);aspect-ratio:16/9;border-radius:8px;overflow:hidden;box-shadow:0 4px 14px rgba(0,0,0,.4);z-index:1}
 .call-pip .call-tile,.call-pip .call-audio-participant{height:100%;border-radius:8px}
 .call-pip video[data-source="camera"]{transform:scaleX(-1)}
+/* Meet-style bottom-center overlay: never part of layout flow, always on the stage. */
+.call-control-bar{position:absolute;left:50%;bottom:12px;transform:translateX(-50%);display:flex;flex-wrap:wrap;justify-content:center;align-items:center;gap:6px;max-width:calc(100% - 20px);padding:7px 9px;border-radius:999px;background:rgba(10,16,28,.72);backdrop-filter:blur(6px);z-index:3}
+.call-btn{border:1px solid rgba(255,255,255,.16);border-radius:999px;background:rgba(255,255,255,.08);color:#fff;padding:8px 12px;font:600 .74rem var(--font-head);white-space:nowrap;cursor:pointer}
+.call-btn:hover{border-color:rgba(255,255,255,.32)}
+.call-btn.active{background:var(--accent);border-color:var(--accent);color:var(--brand-navy)}
+.call-btn.recording.active{background:var(--status-danger-ink);border-color:var(--status-danger-ink);color:#fff}
+.call-btn-leave{background:var(--status-danger-ink);border-color:var(--status-danger-ink);color:#fff}
+.call-btn-end.outline{background:transparent;border-color:var(--status-danger-ink);color:#ff9f9f}
+.call-btn-menu{font-size:1rem;padding:8px 11px}
+/* ⋯ opens this: devices + room id, settings rather than stage content. */
+.call-menu{position:absolute;right:10px;bottom:60px;display:grid;gap:8px;padding:12px;min-width:14rem;border-radius:10px;background:var(--surface);border:1px solid var(--surface-border);box-shadow:0 10px 28px rgba(0,0,0,.4);z-index:4}
+/* Collapsible chat/captions drawer, default closed, lives inside the bounded stage. */
+.call-drawer{position:absolute;top:10px;right:10px;bottom:60px;width:min(20rem,calc(100% - 20px));display:grid;grid-template-rows:auto 1fr auto;border-radius:10px;overflow:hidden;background:rgba(9,14,26,.94);color:#fff;z-index:2;box-shadow:0 8px 24px rgba(0,0,0,.4)}
+.call-drawer-head{display:flex;align-items:center;justify-content:space-between;padding:8px 10px;border-bottom:1px solid rgba(255,255,255,.14)}
+.call-drawer-tabs{display:flex;gap:4px}
+.call-drawer-tabs button{border:0;background:transparent;color:#b9c4d8;padding:5px 9px;border-radius:6px;font:600 .76rem var(--font-head);cursor:pointer}
+.call-drawer-tabs button.active{background:rgba(255,255,255,.12);color:#fff}
+.call-drawer .call-chat-messages{max-height:none;overflow-y:auto;padding:8px 10px;background:transparent}
+.call-drawer .call-chat-messages p{background:rgba(255,255,255,.07);color:#fff}
+.call-drawer .call-chat-compose{padding:8px 10px;border-top:1px solid rgba(255,255,255,.14)}
 .call-controls{display:grid;gap:12px;padding-top:2px;border-top:1px solid var(--surface-border)}.call-toggle-group{display:flex;flex-wrap:wrap;gap:7px;padding-top:12px}.call-toggle-group button.active{border-color:var(--accent);background:var(--accent-soft);color:var(--accent-text)}
 .call-chat{display:grid;gap:8px;padding:11px;border:1px solid var(--surface-border);border-radius:var(--radius-option);background:var(--ctl-bg)}.call-chat-heading,.call-chat-compose{display:flex;align-items:center;gap:8px}.call-chat-heading{justify-content:space-between;font-size:.84rem}.call-chat-heading span{color:var(--text-faint);font-size:.76rem}.call-chat-messages{display:grid;gap:6px;max-height:10rem;overflow:auto}.call-chat-messages p{display:grid;gap:2px;margin:0;padding:7px 8px;border-radius:6px;background:var(--surface);font-size:.83rem}.call-chat-messages p>strong{font-size:.76rem;color:var(--accent-text)}.call-chat-messages p>span{overflow-wrap:anywhere}.call-chat-messages>p{color:var(--text-faint)}.call-chat-compose input{min-width:0;flex:1}.call-chat-compose button{flex:none}
 
