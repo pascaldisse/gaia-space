@@ -3307,6 +3307,27 @@ fn bind_required_object_identity(
     Ok(())
 }
 
+fn bind_session_identity_write(
+    name: &str,
+    body: &mut Value,
+    profile_id: &str,
+) -> Result<(), (StatusCode, Json<Value>)> {
+    match name {
+        "create_meeting" | "create_channel_call" => bind_required_object_identity(
+            body,
+            "meeting",
+            "organizer_id",
+            "organizerId",
+            profile_id,
+        )
+        .map_err(|e| err(StatusCode::BAD_REQUEST, &e)),
+        _ => Err(err(
+            StatusCode::BAD_REQUEST,
+            "unsupported identity-write command",
+        )),
+    }
+}
+
 fn project_owner(project_id: &str) -> Result<Option<String>, String> {
     db::conn()
         .map_err(|e| e.to_string())?
@@ -4292,17 +4313,9 @@ fn authorize_command(
             }
             Ok(())
         }
-        CommandPolicy::SessionIdentityWrite => match name {
-            "create_meeting" => bind_required_object_identity(
-                body,
-                "meeting",
-                "organizer_id",
-                "organizerId",
-                &user.profile_id,
-            ),
-            _ => unreachable!("identity-write policy must name an identity-write command"),
+        CommandPolicy::SessionIdentityWrite => {
+            bind_session_identity_write(name, body, &user.profile_id)
         }
-        .map_err(|e| err(StatusCode::BAD_REQUEST, &e)),
         CommandPolicy::DocumentCreate => {
             bind_document_create(user, body).map_err(|e| err(StatusCode::FORBIDDEN, &e))?;
             require_catalog_right(
@@ -10885,6 +10898,74 @@ mod tests {
             authors,
             vec![Some("pa".into()), Some("pa".into()), Some("pa".into())]
         );
+    }
+
+    #[tokio::test]
+    async fn channel_call_identity_is_session_bound_and_invites_the_dm_roster() {
+        let _serial = test_lock();
+        setup();
+        let c = db::conn().unwrap();
+        c.execute(
+            "INSERT INTO channels(id,content_type,name,archived) VALUES('channel-call-dm','dm','Alice and Bob',0)",
+            [],
+        )
+        .unwrap();
+        c.execute(
+            "INSERT INTO channel_members(channel_id,profile_id,administrator) VALUES('channel-call-dm','pa',1),('channel-call-dm','pb',0)",
+            [],
+        )
+        .unwrap();
+        let (status, value) = call(
+            cookie("ta"),
+            "create_channel_call",
+            json!({"meeting":{
+                "id":"channel-call-identity",
+                "title":"Alice and Bob",
+                "description":null,
+                "starts_at":1893456000,
+                "ends_at":1893459600,
+                "rrule":null,
+                "location":null,
+                "organizer_id":"pb",
+                "channel_id":"channel-call-dm",
+                "visibility":"participants",
+                "modification_preference":"organizer-only",
+                "archived":false,
+                "video_provider":"livekit",
+                "video_status":"scheduled"
+            }}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "create_channel_call: {value}");
+        let organizer: String = c
+            .query_row(
+                "SELECT organizer_id FROM meetings WHERE id='channel-call-identity'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(organizer, "pa");
+        let participants: Vec<(String, String)> = c
+            .prepare(
+                "SELECT profile_id,status FROM meeting_participants WHERE meeting_id='channel-call-identity' ORDER BY profile_id",
+            )
+            .unwrap()
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(
+            participants,
+            vec![("pa".into(), "accepted".into()), ("pb".into(), "invited".into())]
+        );
+    }
+
+    #[test]
+    fn unmapped_identity_write_is_a_bad_request_not_a_panic() {
+        let mut body = json!({"meeting":{}});
+        let error = bind_session_identity_write("unknown_identity_write", &mut body, "pa")
+            .expect_err("an unmapped identity-write command must fail closed");
+        assert_eq!(error.0, StatusCode::BAD_REQUEST);
     }
 
     /// Reads the stored row as an independent check: assertions above run through the HTTP

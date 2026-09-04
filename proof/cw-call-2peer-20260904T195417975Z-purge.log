@@ -1,0 +1,8 @@
+base_url=https://paloptic.com/space pattern="^(calls-proof|cw-calls|cw-slim|cw-video|cw-inspect|proof-|zz-proof-)|proof|inspect|CW CSS|CW Video Live|CW Slim" min_age_minutes=0 dry_run=false verify=false
+total_users=9 matched=1 eligible=1 deferred=0
+ELIGIBLE  zz-proof-b-1788551657975-42c6cb9e	zz-proof-B	f9fa261c6c32b9cdec2824d4b72ae60fcfc4f9f65823d81a4ae6826f7c3c2688
+DELETED  zz-proof-b-1788551657975-42c6cb9e	f9fa261c6c32b9cdec2824d4b72ae60fcfc4f9f65823d81a4ae6826f7c3c2688
+deleted_ok=1 deleted_fail=0
+base_url=https://paloptic.com/space pattern="^(calls-proof|cw-calls|cw-slim|cw-video|cw-inspect|proof-|zz-proof-)|proof|inspect|CW CSS|CW Video Live|CW Slim" min_age_minutes=20 dry_run=true verify=true
+total_users=8 matched=0 eligible=0 deferred=0
+VERIFY OK: no proof-pattern accounts remain.

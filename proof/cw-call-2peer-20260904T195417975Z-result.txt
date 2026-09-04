@@ -1,0 +1,19 @@
+run=20260904T195417975Z
+bundle=index-7JnHOJv8.js
+revision=/opt/gaia-space/REVISION=295959c93cd98725da3f9daafddce1cee17521e9
+health.authenticated_api_users=200,200,200,200,200
+health.db_holder=none
+health.sqlite3_orphan=none
+health.service=active
+create_channel_call=http_502
+journal=tokio panic src/bin/space-server.rs:4303:18; internal error: entered unreachable code: identity-write policy must name an identity-write command
+channel.id=zz-proof-channel-1788551657975-42c6cb9e
+room.id=not_minted
+pixels.a-started=LOOKED; Direct message header; visible error "create_channel_call: bad response (HTTP 502)"; no Connected state
+pixels.b-elsewhere=LOOKED; Home route; no incoming call before A attempt
+pixels.banner=UNVERIFIED; call creation failed
+both.connected=UNVERIFIED; A wait connected timed out
+same.room=UNVERIFIED; no room minted
+second.click.minted=UNVERIFIED; unreachable after create failure
+purge=VERIFY OK: no proof-pattern accounts remain.
+verdict=C other; 502 caused by server tokio worker panic, not stale SQLite holder/orphan process
