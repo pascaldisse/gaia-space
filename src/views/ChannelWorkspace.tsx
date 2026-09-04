@@ -6,6 +6,7 @@ import { Avatar } from "../components/Avatar";
 import { bumpChannels } from "../chatIdentity";
 import { meetingsApi, type Meeting } from "../api/meetings";
 import { buildChannelCallMeeting, channelCallLabel, findLiveChannelMeeting, resolveChannelCall } from "./channelCall";
+import { consumeChannelCallJoin, pendingChannelCallJoin } from "./channelCallJoin";
 import CallPanel from "./CallPanel";
 import { personalApi } from "../api/personal";
 import { currentUser, humanError, isWeb, profileId, profiles, projects, reloadProfiles, reloadProjects } from "../session";
@@ -134,6 +135,13 @@ createEffect(() => {
 });
 const [openCall, setOpenCall] = createSignal<{ meeting: Meeting; audioOnly: boolean; autoJoin?: boolean }>();
 const openExistingCall = (meeting: Meeting, audioOnly = false) => setOpenCall({ meeting, audioOnly, autoJoin: true });
+createEffect(() => {
+  // Global shell accepts on every route. Once its navigation lands here, this is the
+  // one existing CallPanel join path (and no duplicate LiveKit join implementation).
+  if (!pendingChannelCallJoin() || !channelId()) return;
+  const request = consumeChannelCallJoin(channelId());
+  if (request) openExistingCall(request.meeting, request.audioOnly);
+});
 const startCall = async (audioOnly: boolean) => {
  const current = channel(); const organizer = actingProfileId();
  setMemberError("");

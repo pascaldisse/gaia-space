@@ -1,4 +1,4 @@
-import { For, Show, createEffect, createMemo, createResource, createSignal, type JSX } from "solid-js";
+import { For, Show, createEffect, createMemo, createResource, createSignal, onCleanup, type JSX } from "solid-js";
 import "./SpaceShell.css";
 // Light chat surface. Scoped under `.theme-space-light`, which only this shell sets:
 // loading it here (not lazily from the workspace) keeps the rules deterministic.
@@ -15,6 +15,10 @@ import { chatApi, newId as newMessageId, type ChannelSummary } from "../api/chat
 import { setSelectedChannel } from "../chatChannelSelection";
 import { documentsApi, ORGANIZATION_LIBRARY_ID } from "../api/documents";
 import { platformApi } from "../api/platform";
+import { meetingsApi, type Meeting } from "../api/meetings";
+import { CALL_RING_SECONDS, findIncomingCalls } from "../views/channelCall";
+import { ringSoundEnabled } from "../callRing";
+import { requestChannelCallJoin } from "../views/channelCallJoin";
 import { currentUser, isWeb, profileId, profiles, reloadProfiles, projects, reloadProjects, workspaceId, workspaces } from "../session";
 import { attentionCount, attentionFilterCount, asActivityFilter, setAttentionProfile, unreadChannelTotal, type ActivityFilter } from "../attention";
 import { isViewAvailable, linkEntity, linkProps, navigate, route, type Route } from "../router";
@@ -156,6 +160,74 @@ const [mobileSidebarOpen, setMobileSidebarOpen] = createSignal(false);
     () => [actingProfileId(), channelsVersion()] as const,
     ([id]) => (id ? chatApi.listChannelsWithMeta(id) : Promise.resolve<ChannelSummary[]>([])),
   );
+
+  // Current server transport has no meeting event stream; poll once at the app shell,
+  // never separately in every route/channel.
+  const CALL_RING_POLL_MS = Number(import.meta.env.VITE_CALL_RING_POLL_MS) || 3_000;
+  const [dismissedCalls, setDismissedCalls] = createSignal<Set<string>>(new Set());
+  const [incomingMeetings, setIncomingMeetings] = createSignal<Meeting[]>([]);
+  const [incoming, { refetch: refetchIncoming }] = createResource(
+    actingProfileId,
+    async (id) => {
+      if (!id) return [] as Meeting[];
+      const meetings = await meetingsApi.list(id);
+      const candidates = findIncomingCalls(meetings, id, Math.floor(Date.now() / 1_000), CALL_RING_SECONDS, dismissedCalls());
+      const settled = await Promise.all(candidates.map(async meeting => {
+        const mine = (await meetingsApi.participants(meeting.id, id)).find(person => person.profile_id === id);
+        return mine?.status === "accepted" || mine?.status === "declined" ? null : meeting;
+      }));
+      return settled.filter((meeting): meeting is Meeting => !!meeting);
+    },
+  );
+  createEffect(() => setIncomingMeetings(incoming() ?? []));
+  createEffect(() => {
+    if (!actingProfileId()) return;
+    const timer = window.setInterval(() => { void refetchIncoming(); }, CALL_RING_POLL_MS);
+    onCleanup(() => window.clearInterval(timer));
+  });
+  const incomingCall = () => incomingMeetings()[0];
+  const dismissIncomingCall = (meetingId: string) => setDismissedCalls(value => new Set([...value, meetingId]));
+  const acceptIncomingCall = async () => {
+    const meeting = incomingCall(); const self = actingProfileId();
+    if (!meeting || !self || !meeting.channel_id) return;
+    try {
+      await meetingsApi.rsvp(meeting.id, self, "accepted");
+      dismissIncomingCall(meeting.id);
+      requestChannelCallJoin({ meeting, audioOnly: false });
+      navigate({ view: "Chat", entityType: "channel", entityId: meeting.channel_id, tab: "messages" });
+      if (typeof Notification !== "undefined" && Notification.permission === "default") void Notification.requestPermission();
+    } finally { void refetchIncoming(); }
+  };
+  const declineIncomingCall = async () => {
+    const meeting = incomingCall(); const self = actingProfileId();
+    if (!meeting || !self) return;
+    dismissIncomingCall(meeting.id);
+    try { await meetingsApi.rsvp(meeting.id, self, "declined"); }
+    finally { void refetchIncoming(); }
+  };
+  createEffect(() => {
+    const meeting = incomingCall();
+    if (!meeting) return;
+    const original = document.title; let alternate = false;
+    const caller = () => profiles()?.find(person => person.id === meeting.organizer_id)?.display_name || meeting.organizer_id || "Someone";
+    const updateTitle = () => { document.title = alternate ? `☎ Incoming call · ${caller()}` : "Incoming call"; alternate = !alternate; };
+    updateTitle(); const timer = window.setInterval(updateTitle, 1_000);
+    onCleanup(() => { window.clearInterval(timer); document.title = original; });
+  });
+  createEffect(() => {
+    if (!incomingCall() || !ringSoundEnabled() || typeof AudioContext === "undefined") return;
+    let context: AudioContext | undefined;
+    const chirp = () => {
+      try {
+        context ??= new AudioContext(); const oscillator = context.createOscillator(); const gain = context.createGain();
+        oscillator.frequency.setValueAtTime(880, context.currentTime); gain.gain.setValueAtTime(.035, context.currentTime);
+        gain.gain.exponentialRampToValueAtTime(.001, context.currentTime + .16);
+        oscillator.connect(gain).connect(context.destination); oscillator.start(); oscillator.stop(context.currentTime + .16);
+      } catch { /* browser autoplay policy can refuse an ungestured ring */ }
+    };
+    chirp(); const timer = window.setInterval(chirp, 1_500);
+    onCleanup(() => { window.clearInterval(timer); void context?.close(); });
+  });
   // projects() is lazy (auth must land first); ask once so group headers can resolve names.
   void reloadProjects().catch(() => undefined);
 
@@ -583,6 +655,14 @@ const [mobileSidebarOpen, setMobileSidebarOpen] = createSignal(false);
 
   return (
     <div class="space-chat-shell theme-space-light" data-nav-placement={navPlacement()} data-mobile-nav-placement={mobileNavPlacement()} classList={{ "no-sidebar": !hasSidebar(), "sidebar-collapsed": sidebarCollapsed(), "mobile-sidebar-open": mobileSidebarOpen() }}>
+      <Show when={incomingCall()}>{meeting => {
+        const caller = () => profiles()?.find(person => person.id === meeting().organizer_id)?.display_name || meeting().organizer_id || "Someone";
+        const channel = () => (channels() ?? []).find(item => item.id === meeting().channel_id)?.name || meeting().title;
+        return <section class="incoming-call-ring" role="alert" aria-label="Incoming call">
+          <div><strong>{caller()}</strong><span> is calling in #{channel()}</span></div>
+          <div class="incoming-call-actions"><button type="button" class="decline" onClick={() => void declineIncomingCall()}>Decline</button><button type="button" class="accept" onClick={() => void acceptIncomingCall()}>Accept</button></div>
+        </section>;
+      }}</Show>
       <Show when={channelMenu()}>
         {(menu) => <ContextMenu x={menu().x} y={menu().y} items={menu().items} onClose={() => setChannelMenu(null)} />}
       </Show>

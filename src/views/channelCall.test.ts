@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { type Channel } from "../api/chat";
 import { type Meeting } from "../api/meetings";
-import { buildChannelCallMeeting, CHANNEL_CALL_RING_SECONDS, findLiveChannelMeeting, resolveChannelCall } from "./channelCall";
+import { buildChannelCallMeeting, CHANNEL_CALL_RING_SECONDS, findIncomingCalls, findLiveChannelMeeting, resolveChannelCall } from "./channelCall";
 const channel: Channel = { id: "channel-1", content_type: "public", name: "Design", description: null, project_id: null, archived: false };
 const meeting = (id: string, channel_id: string | null, video_status: Meeting["video_status"], starts_at = 100, organizer_id = "me"): Meeting => ({
 id, title: "Design", description: null, starts_at, ends_at: 200, rrule: null, location: null,
@@ -21,8 +21,16 @@ expect(resolveChannelCall([meeting("other", "channel-2", "live"), live], "channe
 expect(resolveChannelCall([ringing], "channel-1", 100 + CHANNEL_CALL_RING_SECONDS)).toBe(ringing);
 expect(resolveChannelCall([meeting("old", "channel-1", "scheduled", 1)], "channel-1", 1 + CHANNEL_CALL_RING_SECONDS + 1)).toBeNull();
 });
+test("finds only current incoming calls and honors local RSVP dismissals", () => {
+  const scheduled = meeting("scheduled", "channel-1", "scheduled", 100, "other");
+  const live = { ...meeting("live", "channel-1", "live", 1, "other"), video_started_at: 100 };
+  expect(findIncomingCalls([scheduled, live], "me", 120, 60)).toEqual([scheduled, live]);
+  expect(findIncomingCalls([scheduled], "me", 161, 60)).toEqual([]);
+  expect(findIncomingCalls([scheduled], "other", 120, 60)).toEqual([]);
+  expect(findIncomingCalls([scheduled, meeting("ended", "channel-1", "ended", 100, "other")], "me", 120, 60, new Set(["scheduled"]))).toEqual([]);
+});
 test("banner excludes the organizer and ended calls", () => {
-const live = meeting("live", "channel-1", "live", 100, "other");
+const live = { ...meeting("live", "channel-1", "live", 100, "other"), video_started_at: 100 };
 expect(findLiveChannelMeeting([live], "channel-1", "me", 200)).toBe(live);
 expect(findLiveChannelMeeting([live], "channel-1", "other", 200)).toBeUndefined();
 expect(findLiveChannelMeeting([meeting("ended", "channel-1", "ended")], "channel-1", "me", 200)).toBeUndefined();

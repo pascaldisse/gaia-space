@@ -11,6 +11,7 @@ import { humanError, profileId } from "../session";
 import PageHeader from "../components/PageHeader";
 import { PALETTES, palette, setPalette } from "../theme";
 import { PillSelect } from "../components/controls";
+import { ringSoundEnabled, setCallRingSoundEnabled } from "../callRing";
 import "./Settings.css";
 
 const when = (seconds: number | null) => seconds ? new Date(seconds * 1000).toLocaleString(UI_LOCALE) : "never";
@@ -104,6 +105,11 @@ export default function Settings() {
   const allViews = () => NAV_GROUPS.flatMap(group => group.views);
   return <section class="personal-view settings-view">
     <PageHeader icon="settings" title="Settings" subline="Preferences for your account" />
+
+    <div class="settings-card">
+      <h2>Incoming calls</h2>
+      <label class="settings-option"><input type="checkbox" checked={ringSoundEnabled()} onChange={event => setCallRingSoundEnabled(event.currentTarget.checked)} /><span><strong>Ring sound</strong> — play a sound for incoming channel calls</span></label>
+    </div>
 
     <div class="settings-card">
       <h2>Navigation layout</h2>

@@ -483,3 +483,18 @@
 .space-chat-shell .space-sidebar{display:flex;position:fixed;z-index:40;inset:0;width:100dvw;max-width:100dvw;padding:max(16px,env(safe-area-inset-top)) max(16px,env(safe-area-inset-right)) max(16px,env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left));transform:translateX(-100%);transition:transform .18s ease;border:0}.space-chat-shell.mobile-sidebar-open .space-sidebar{transform:translateX(0)}.space-chat-shell .mobile-sidebar-back{display:inline-flex;min-height:44px;align-items:center;width:max-content;margin-bottom:12px}
 .space-chat-shell .more-panel{left:max(12px,env(safe-area-inset-left));right:max(12px,env(safe-area-inset-right));width:auto;bottom:calc(var(--nav-mobile-bar-size) + 12px)}.space-chat-shell[data-mobile-nav-placement="top"] .more-panel{top:calc(var(--nav-mobile-bar-size) + 12px);bottom:auto}
 }
+/* App-wide incoming-call surface — outside routes so it rings on every page. */
+.space-chat-shell .incoming-call-ring {
+position: fixed; z-index: 120; top: max(12px, env(safe-area-inset-top)); left: 50%; transform: translateX(-50%);
+width: min(760px, calc(100vw - 24px)); min-height: 56px; box-sizing: border-box;
+display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 14px 12px 18px;
+border: 1px solid rgba(255,255,255,.3); border-radius: 14px; background: #241633; color: #fff;
+box-shadow: 0 16px 44px rgba(20, 10, 30, .32);
+}
+.space-chat-shell .incoming-call-ring strong { margin-right: 5px; }
+.space-chat-shell .incoming-call-ring span { color: rgba(255,255,255,.78); }
+.space-chat-shell .incoming-call-actions { display: flex; gap: 8px; flex: none; }
+.space-chat-shell .incoming-call-actions button { min-height: 34px; border-radius: 9px; padding: 0 13px; font: inherit; font-weight: 700; cursor: pointer; }
+.space-chat-shell .incoming-call-actions .decline { border: 1px solid rgba(255,255,255,.32); background: transparent; color: #fff; }
+.space-chat-shell .incoming-call-actions .accept { border: 0; background: var(--teal); color: #04231e; }
+@media (max-width: 520px) { .space-chat-shell .incoming-call-ring { align-items: flex-start; flex-direction: column; }.space-chat-shell .incoming-call-actions { width: 100%; }.space-chat-shell .incoming-call-actions button { flex: 1; } }
