@@ -147,9 +147,8 @@ export default function CallPanel(props: { meeting: Meeting; identity: string; d
     try {
       setError("");
       const participant = (await meetingsApi.participants(props.meeting.id, props.identity)).find(item => item.profile_id === props.identity);
-      if (participant?.status === "accepted") return connect();
-      if (participant?.status === "invited") { setWaitingForAdmission(true); setNotice("You are in the lobby. The organizer must admit you before you can join."); return; }
-      throw new Error("You need an invitation before entering this meeting lobby.");
+      if (participant?.status === "accepted" || participant?.status === "invited") return connect();
+      throw new Error("You need an invitation before entering this meeting call.");
     } catch (reason) { setError(`Could not request entry: ${String(reason)}`); }
   };
   createEffect(() => {

@@ -213,17 +213,20 @@ test("a meeting that already has a bound room shows it before anyone joins", asy
   expect(host.textContent).toContain("by me");
 });
 
-test("an invited attendee waits in the lobby until the organizer accepts the RSVP", async () => {
+test("an invited attendee joins without an RSVP round trip", async () => {
   (window as any).__TAURI_INTERNALS__ = { invoke: async (command: string) => {
     ipcCommands.push(command);
     if (command === "list_meeting_participants") return [{ meeting_id: "meeting-1", profile_id: "me", status: "invited" }];
+    if (command === "join_meeting_call") return { url: "ws://livekit.test", room: "meeting-meeting-1", token: "signed-token" };
+    if (command === "recording_actor_status") return { available: true, profile_id: "me", source: "sole_profile", reason: null };
+    if (command === "list_meeting_recordings" || command === "list_meeting_transcript_segments") return [];
     throw new Error(`unexpected command: ${command}`);
   } };
   const host = document.createElement("div"); document.body.append(host);
   dispose = render(() => <CallPanel meeting={{ ...meeting, organizer_id: "host" }} identity="me" displayName="Me" />, host);
   (host.querySelector("button") as HTMLButtonElement).click();
   await settle();
-  expect(ipcCommands).toEqual(["list_meeting_participants"]);
-  expect(host.textContent).toContain("Lobby request sent");
-  expect(host.textContent).toContain("Waiting for admission…");
+  expect(ipcCommands).toContain("list_meeting_participants");
+  expect(ipcCommands).toContain("join_meeting_call");
+  expect(host.textContent).toContain("Connected");
 });
