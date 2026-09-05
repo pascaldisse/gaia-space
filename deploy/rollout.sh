@@ -168,6 +168,7 @@ assert post["integrity"] == "ok", post["integrity"]
 renamed = {name: f"{name}_legacy" for name in (
     "issues", "issue_comments", "issue_activities", "issue_attachments",
     "issue_tracker_links", "issue_links", "issue_assignees",
+    "issue_board_positions", "issue_tags",
 )}
 lost = {k: (pre[k], post.get(renamed.get(k, k))) for k in pre
         if k not in ("user_version", "integrity") and int(post.get(renamed.get(k, k), -1)) < int(pre[k])}
