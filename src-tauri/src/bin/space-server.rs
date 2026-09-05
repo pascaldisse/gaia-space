@@ -2738,6 +2738,8 @@ enum CommandPolicy {
     /// gate only binds `actor_id` to the session identity.
     TodoOwnerDelete,
     TodoCompletionWrite,
+    TodoLinkRead,
+    TodoLinkWrite,
     /// The channel Notes & Decisions log. Read and write share one posture: the session
     /// identity is rebound onto the request (`bind_session_identity` already covers
     /// `profile_id`/`author_id`), and `channel_notes.rs` then applies project membership
@@ -2838,11 +2840,11 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
             CommandPolicy::ProjectTodoRead
         }
         "create_todo" => CommandPolicy::TodoCreate,
-        "update_todo" | "postpone_todo" | "convert_todo_to_issue" => {
-            CommandPolicy::TodoOwnerWrite
-        }
+        "update_todo" | "postpone_todo" => CommandPolicy::TodoOwnerWrite,
         "delete_todo" => CommandPolicy::TodoOwnerDelete,
         "set_todo_completion" => CommandPolicy::TodoCompletionWrite,
+        "list_todo_links" => CommandPolicy::TodoLinkRead,
+        "add_todo_link" | "delete_todo_link" => CommandPolicy::TodoLinkWrite,
         "list_channel_notes" => CommandPolicy::ChannelNoteRead,
         "create_channel_note" | "update_channel_note" | "delete_channel_note" => {
             CommandPolicy::ChannelNoteWrite
@@ -4236,6 +4238,24 @@ fn authorize_command(
                 ))
             }
         }
+        CommandPolicy::TodoLinkRead | CommandPolicy::TodoLinkWrite => {
+            let todo_id: String = if name == "add_todo_link" {
+                body.get("input").and_then(|input| input.get("todo_id")).and_then(Value::as_str).map(str::to_string).ok_or_else(|| err(StatusCode::BAD_REQUEST, "input.todo_id is required"))?
+            } else if name == "delete_todo_link" {
+                let id: String = arg(body, "id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
+                db::conn().map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?
+                    .query_row("SELECT todo_id FROM todo_links WHERE id=?1", [&id], |row| row.get(0))
+                    .map_err(|_| err(StatusCode::FORBIDDEN, "todo access denied"))?
+            } else {
+                arg(body, "todo_id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?
+            };
+            if user.role != "GlobalAdmin" && !todo_owned_by(&user.profile_id, &todo_id)
+                && !personal::todo_assigned_by(&todo_id, &user.profile_id).map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))? {
+                return Err(err(StatusCode::FORBIDDEN, "todo access denied"));
+            }
+            if name == "delete_todo_link" { put_arg(body, "actor_id", json!(user.profile_id)); }
+            Ok(())
+        }
         CommandPolicy::NotificationWrite => {
             let notification_id: String =
                 arg(body, "id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
@@ -5576,55 +5596,17 @@ async fn cmd(
         Ok(user) => user,
         Err(e) => return e.into_response(),
     };
+    const LEGACY_TICKET_COMMANDS: &[&str] = &[
+        "create_issue", "clone_issue", "move_issue_to_project", "update_issue", "archive_issue", "get_issue", "get_issue_detail", "list_issues", "list_issue_statuses", "set_issue_assignees", "list_issue_assignees", "add_issue_child", "list_issue_comments", "create_issue_comment", "list_issue_activities", "list_issue_tracker_links", "add_issue_tracker_link", "remove_issue_tracker_link", "add_issue_attachment", "delete_issue_attachment", "list_issue_attachments", "remove_issue_link", "create_board", "update_board", "delete_board", "list_boards", "list_board_columns", "save_board_column", "delete_board_column", "get_board_card_settings", "save_board_card_settings", "move_issue_on_board", "list_board_issues", "list_backlog_issues", "remove_issue_from_board", "bulk_move_issues_on_board", "bulk_remove_issues_from_board", "bulk_update_issues_sprints", "create_sprint", "launch_sprint", "close_sprint", "update_sprint", "delete_sprint", "archive_sprint", "list_sprints", "list_swimlanes", "save_swimlane", "delete_swimlane", "list_planning_tags", "save_planning_tag", "delete_planning_tag", "set_issue_tags", "list_checklists", "save_checklist", "delete_checklist", "list_checklist_items", "save_checklist_item", "delete_checklist_item", "toggle_checklist_item", "list_time_tracking_entries", "save_time_tracking_entry", "delete_time_tracking_entry", "issue_time_total",
+    ];
+    if LEGACY_TICKET_COMMANDS.contains(&name.as_str()) {
+        return Json(json!({"error":"tickets merged into tasks (09-05)"})).into_response();
+    }
     if let Err(e) = authorize_command(&user, &name, &mut body) {
         return e.into_response();
     }
     if name == "list_projects" {
         return match platform::list_projects() { Ok(projects) => Json(json!({"ok":true,"value":projects.into_iter().filter(|project| project_readable(&user,&project.id).unwrap_or(false)).collect::<Vec<_>>() })).into_response(), Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR,&e).into_response() };
-    }
-    // An unscoped issue list is answered per project the caller may read: one round trip
-    // for a whole portfolio, and never a row from a project that is not theirs.
-    if name == "list_issue_statuses"
-        && arg::<Option<String>>(&body, "project_id")
-            .ok()
-            .flatten()
-            .is_none()
-    {
-        return match issues::list_issue_statuses(None) {
-            Ok(rows) => Json(json!({"ok":true,"value":rows.into_iter().filter(|status| project_readable(&user,&status.project_id).unwrap_or(false)).collect::<Vec<_>>()})).into_response(),
-            Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR,&e).into_response(),
-        };
-    }
-    if name == "list_boards"
-        && arg::<Option<String>>(&body, "project_id")
-            .ok()
-            .flatten()
-            .is_none()
-    {
-        return match issues::list_boards(None) {
-            Ok(rows) => Json(json!({"ok":true,"value":rows.into_iter().filter(|board| project_readable(&user,&board.project_id).unwrap_or(false)).collect::<Vec<_>>()})).into_response(),
-            Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR,&e).into_response(),
-        };
-    }
-    if name == "list_issues"
-        && arg::<Option<String>>(&body, "project_id")
-            .ok()
-            .flatten()
-            .is_none()
-    {
-        // Every OTHER filter of the request still applies — dropping them here would
-        // answer a search for "needle" with the whole haystack, silently.
-        let include_archived = arg::<Option<bool>>(&body, "include_archived")
-            .ok()
-            .flatten();
-        let text = arg::<Option<String>>(&body, "text").ok().flatten();
-        let status_id = arg::<Option<String>>(&body, "status_id").ok().flatten();
-        let assignee_id = arg::<Option<String>>(&body, "assignee_id").ok().flatten();
-        let tag_id = arg::<Option<String>>(&body, "tag_id").ok().flatten();
-        return match issues::list_issues(None, text, status_id, assignee_id, tag_id, None, None, include_archived) {
-            Ok(rows) => Json(json!({"ok":true,"value":rows.into_iter().filter(|issue| project_readable(&user,&issue.project_id).unwrap_or(false)).collect::<Vec<_>>()})).into_response(),
-            Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR,&e).into_response(),
-        };
     }
     // A confidential absence reason never leaves the process for a reader who is not
     // the person themselves or an administrator: redaction happens here, at the one
@@ -5741,7 +5723,6 @@ async fn cmd(
     "save_ui_extension" => applications::save_ui_extension(value: applications::UiExtension),
     "delete_ui_extension" => applications::delete_ui_extension(id: String),
     "add_channel_member" => chat::add_channel_member(channel_id: String, member_id: String, administrator: bool),
-    "add_issue_child" => issues::add_issue_child(parent_id: String, child_id: String),
     "add_message_attachment" => chat::add_message_attachment(message_id: String, attachment: chat::NewMessageAttachment),
     "set_message_attachment_state" => chat::set_message_attachment_state(message_id: String, id: String, state: String, error: Option<String>),
     "remove_message_attachment" => chat::remove_message_attachment(message_id: String, id: String),
@@ -5754,20 +5735,16 @@ async fn cmd(
     "budget_export_statement" => budget::budget_export_statement(document_id: String, month: String, profile_id: Option<String>),
     "archive_document" => documents::archive_document(id: String, archived: bool),
     "delete_document" => documents::delete_document(id: String, actor_id: String),
-    "archive_issue" => issues::archive_issue(id: String, archived: bool),
     "archive_meeting" => meetings::archive_meeting(id: String, archived: bool),
     "attach_meeting_channel" => meetings::attach_meeting_channel(id: String),
     "delete_meeting" => meetings::delete_meeting(id: String),
     "archive_role" => platform::archive_role(id: String, archived: bool),
-    "archive_sprint" => issues::archive_sprint(id: String, archived: bool),
     "archive_team" => platform::archive_team(id: String, archived: bool),
     "attempt_merge" => review::attempt_merge(id: String, repo_path: String, review_id: String, source_branch: String, target_branch: String, actor_id: String),
     "cf_get_values" => platform::cf_get_values(entity_type: String, entity_id: String),
     "cf_set_value" => platform::cf_set_value(definition_id: String, entity_id: String, value_json: String),
     "check_right" => platform::check_right(profile_id: String, right_code: String, scope_type: String, scope_id: Option<String>),
-    "close_sprint" => issues::close_sprint(id: String),
     "create_absence" => personal::create_absence(input: personal::AbsenceInput),
-    "create_board" => issues::create_board(input: issues::BoardInput),
     "create_cf_definition" => platform::create_cf_definition(input: platform::CfDefinitionInput),
     "create_channel" => chat::create_channel(channel: chat::Channel, member_ids: Vec<String>),
     "create_deploy_target" => pipelines::create_deploy_target(target: pipelines::DeployTarget),
@@ -5777,10 +5754,6 @@ async fn cmd(
     "create_document_folder" => documents::create_document_folder(folder: documents::DocumentFolder, owner_id: Option<String>),
     "create_entity_channel" => chat::create_entity_channel(entity_type: String, entity_id: String, name: Option<String>),
     "ensure_thread_channel" => chat::ensure_thread_channel(root_message_id: String, title: Option<String>, acting_profile_id: Option<String>),
-    "create_issue" => issues::create_issue(input: issues::IssueInput),
-    "clone_issue" => issues::clone_issue(input: issues::IssueTransferInput),
-    "move_issue_to_project" => issues::move_issue_to_project(input: issues::IssueTransferInput),
-    "create_issue_status" => issues::create_issue_status(input: issues::StatusInput),
     "create_meeting" => meetings::create_meeting(meeting: meetings::Meeting),
     "create_channel_call" => meetings::create_channel_call(meeting: meetings::Meeting),
     "create_job_artifact" => pipelines::create_job_artifact(input: pipelines::JobArtifactInput),
@@ -5795,7 +5768,6 @@ async fn cmd(
     "create_review_discussion" => review::create_review_discussion(discussion: review::NewDiscussion),
     "create_role" => platform::create_role(input: platform::RoleInput),
     "create_role_assignment" => platform::create_role_assignment(input: platform::RoleAssignmentInput),
-    "create_sprint" => issues::create_sprint(input: issues::SprintInput),
     "create_team" => platform::create_team(input: platform::TeamInput),
     "create_todo" => personal::create_todo(input: personal::TodoInput),
     "current_absences" => personal::current_absences(date: String),
@@ -5811,26 +5783,16 @@ async fn cmd(
     "set_dashboard_preferences" => personal::set_dashboard_preferences_http(preferences: personal::DashboardPreferences),
     "get_calendar_options" => personal::get_calendar_options_http(profile_id: String),
     "set_calendar_options" => personal::set_calendar_options_http(options: personal::CalendarOptions),
-    "delete_board" => issues::delete_board(id: String),
-    "delete_board_column" => issues::delete_board_column(id: String),
-    "delete_checklist" => issues::delete_checklist(id: String),
-    "delete_checklist_item" => issues::delete_checklist_item(id: String),
     "delete_deploy_target" => pipelines::delete_deploy_target(id: String),
-    "delete_issue_status" => issues::delete_issue_status(id: String),
-    "delete_issue_attachment" => issues::delete_issue_attachment(id: String),
     "delete_message" => chat::delete_message(id: String),
     "delete_messenger_contact" => platform::delete_messenger_contact(id: String, profile_id: String),
     "delete_package_repository" => pipelines::delete_package_repository(id: String),
     "delete_package_version" => pipelines::delete_package_version(id: String),
     "delete_pipeline_script" => pipelines::delete_pipeline_script(id: String),
-    "delete_planning_tag" => issues::delete_planning_tag(id: String),
     "delete_quality_gate_rule" => review::delete_quality_gate_rule(id: String),
     "delete_role_assignment" => platform::delete_role_assignment(id: String),
-    "delete_sprint" => issues::delete_sprint(id: String),
     "delete_subscription_scope" => personal::delete_subscription_scope(profile_id: String, event_type: String, target_type: String, target_id: String),
     "delete_subscription_setting" => personal::delete_subscription_setting(profile_id: String, event_type: String),
-    "delete_swimlane" => issues::delete_swimlane(id: String),
-    "delete_time_tracking_entry" => issues::delete_time_tracking_entry(id: String),
     "delete_todo" => personal::delete_todo(id: String, actor_id: String),
     "list_channel_notes" => channel_notes::list_channel_notes(channel_id: String, profile_id: String),
     "create_channel_note" => channel_notes::create_channel_note(input: channel_notes::ChannelNoteInput),
@@ -5849,8 +5811,6 @@ async fn cmd(
     "get_document" => documents::get_document_scoped(id: String, profile_id: String),
     "get_document_publication" => documents::get_document_publication(document_id: String),
     "publish_document" => documents::publish_document(document_id: String, published: bool, slug: Option<String>),
-    "get_issue" => issues::get_issue(id: String),
-    "get_issue_detail" => issues::get_issue_detail(id: String),
     "get_meeting" => meetings::get_meeting_scoped(id: String, profile_id: String),
     "get_profile" => platform::get_profile(id: String),
     "get_profile_email_status" => platform::get_profile_email_status(profile_id: String),
@@ -5864,16 +5824,9 @@ async fn cmd(
     "get_blog_post" => blogs::get_blog_post_scoped(id: String, profile_id: String, allow_all: bool),
     "publish_blog_draft" => blogs::publish_blog_draft_scoped(input: blogs::PublishBlogDraftInput, profile_id: String, allow_all: bool),
     "invite_meeting_participant" => meetings::invite_meeting_participant(meeting_id: String, profile_id: String),
-    "issue_time_total" => issues::issue_time_total(issue_id: String),
     "join_channel" => chat::join_channel(channel_id: String, profile_id: String),
-    "launch_sprint" => issues::launch_sprint(id: String),
     "leave_channel" => chat::leave_channel(channel_id: String, profile_id: String),
     "list_absences" => personal::list_absences(profile_id: Option<String>),
-    "list_backlog_issues" => issues::list_backlog_issues(board_id: String),
-    "list_board_columns" => issues::list_board_columns(board_id: String),
-    "list_board_issues" => issues::list_board_issues(board_id: String, sprint_id: Option<String>),
-    "get_board_card_settings" => issues::get_board_card_settings(board_id: String),
-    "list_boards" => issues::list_boards(project_id: Option<String>),
     "list_cf_definitions" => platform::list_cf_definitions(entity_type: Option<String>),
     "list_membership_edit_requests" => platform::list_membership_edit_requests(membership_id: Option<String>),
     "request_membership_edit" => platform::request_membership_edit(membership: platform::TeamMembership, requested_by: String),
@@ -5882,8 +5835,6 @@ async fn cmd(
     "list_channels" => chat::list_channels(),
     "list_channels_with_meta" => chat::list_channels_with_meta(profile_id: String),
     "list_unread_threads" => chat::list_unread_threads(profile_id: String),
-    "list_checklist_items" => issues::list_checklist_items(checklist_id: String),
-    "list_checklists" => issues::list_checklists(issue_id: String),
     "list_deploy_targets" => pipelines::list_deploy_targets(),
     "list_deployments_for_target" => pipelines::list_deployments_for_target(target_id: String),
     "list_doc_versions" => documents::list_doc_versions_scoped(document_id: String, profile_id: String),
@@ -5895,10 +5846,6 @@ async fn cmd(
     "list_favorite_documents" => documents::list_favorite_documents(profile_id: String),
     "set_document_favorite" => documents::set_document_favorite(profile_id: String, document_id: String, favorite: bool),
     "move_favorite_document" => documents::move_favorite_document(profile_id: String, document_id: String, group_name: Option<String>, position: i64),
-    "list_issue_statuses" => issues::list_issue_statuses(project_id: Option<String>),
-    "list_issues" => issues::list_issues(project_id: Option<String>, text: Option<String>, status_id: Option<String>, assignee_id: Option<String>, tag_id: Option<String>, custom_field_id: Option<String>, custom_field_value_json: Option<String>, include_archived: Option<bool>),
-    "list_issue_attachments" => issues::list_issue_attachments(issue_id: String),
-    "add_issue_attachment" => issues::add_issue_attachment(issue_id: String, attachment: issues::IssueAttachmentInput),
     "list_job_runs" => pipelines::list_job_runs(),
     "list_job_runs_for_script" => pipelines::list_job_runs_for_script(script_id: String),
     "list_job_artifacts" => pipelines::list_job_artifacts(job_run_id: String),
@@ -5943,7 +5890,6 @@ async fn cmd(
     "list_package_repository_acl" => pipelines::list_package_repository_acl(repository_id: String),
     "list_package_versions" => pipelines::list_package_versions(repository_id: String, query: Option<String>),
     "list_pipeline_scripts" => pipelines::list_pipeline_scripts(),
-    "list_planning_tags" => issues::list_planning_tags(project_id: String),
     "get_organization" => organization::get_organization(),
     "update_organization" => organization::update_organization(value: organization::Organization),
     "get_org_settings" => organization::get_org_settings(),
@@ -5997,7 +5943,6 @@ async fn cmd(
     "assign_project_team_role" => platform::assign_project_team_role(project_id: String, team_id: String, project_role_id: String),
     "remove_project_team_role" => platform::remove_project_team_role(project_id: String, team_id: String, project_role_id: String),
     "list_safe_merge_runs" => review::list_safe_merge_runs(review_id: String),
-    "list_sprints" => issues::list_sprints(board_id: Option<String>),
     "list_app_installs" => applications::list_app_installs(),
     "list_app_tokens" => applications::list_app_tokens(application_id: String),
     "list_marketplace_apps" => applications::list_marketplace_apps(),
@@ -6010,12 +5955,13 @@ async fn cmd(
     "uninstall_app" => applications::uninstall_app(id: String),
     "list_subscription_scopes" => personal::list_subscription_scopes(profile_id: String),
     "list_subscription_settings" => personal::list_subscription_settings(profile_id: String),
-    "list_swimlanes" => issues::list_swimlanes(board_id: String, sprint_id: Option<String>),
     "list_team_memberships" => platform::list_team_memberships(team_id: Option<String>, profile_id: Option<String>),
     "list_teams" => platform::list_teams(),
     "list_thread_replies" => chat::list_thread_replies(thread_of: String, acting_profile_id: Option<String>),
-    "list_time_tracking_entries" => issues::list_time_tracking_entries(issue_id: String),
     "list_todos" => personal::list_todos(profile_id: String, include_done: Option<bool>),
+    "list_todo_links" => personal::list_todo_links(todo_id: String),
+    "add_todo_link" => personal::add_todo_link(input: personal::TodoLinkInput),
+    "delete_todo_link" => personal::delete_todo_link(id: String, actor_id: String),
     "list_project_todos" => personal::list_project_todos(project_id: String, profile_id: String, include_done: Option<bool>, admin: Option<bool>),
     "list_team_todos" => personal::list_team_todos(profile_id: String, include_done: Option<bool>, admin: Option<bool>),
     "list_project_member_ids" => personal::project_member_ids(project_id: String),
@@ -6033,7 +5979,6 @@ async fn cmd(
     "move_document" => documents::move_document(id: String, container_type: String, container_id: Option<String>, folder_id: Option<String>),
     "move_document_folder" => documents::move_document_folder(id: String, parent_id: Option<String>),
     "delete_document_folder" => documents::delete_document_folder(id: String, actor_id: String),
-    "move_issue_on_board" => issues::move_issue_on_board(board_id: String, issue_id: String, column_id: String, sprint_id: Option<String>, swimlane_id: Option<String>, position: Option<i64>),
     "open_merge_request" => review::open_merge_request(req: review::NewMergeRequest),
     "apply_package_retention" => pipelines::apply_package_retention(repository_id: String),
     "package_retention_candidates" => pipelines::package_retention_candidates(repository_id: String),
@@ -6045,30 +5990,20 @@ async fn cmd(
     "download_package_payload" => pipelines::download_package_payload(repository_id: String, package_name: String, version: String, filename: String),
     "remove_channel_member" => chat::remove_channel_member(channel_id: String, member_id: String),
     "remove_package_repository_acl" => pipelines::remove_package_repository_acl(repository_id: String, profile_id: String),
-    "remove_issue_from_board" => issues::remove_issue_from_board(board_id: String, issue_id: String),
-    "remove_issue_link" => issues::remove_issue_link(id: String),
     "remove_reaction" => chat::remove_reaction(message_id: String, profile_id: String, emoji: String),
     "remove_team_membership" => platform::remove_team_membership(id: String),
     "restore_doc_version" => documents::restore_doc_version(document_id: String, version: i64, actor: Option<String>),
     "review_diff" => review::review_diff(repo_path: String, source_branch: String, target_branch: String),
     "register_worker" => pipelines::register_worker(worker: pipelines::Worker),
-    "save_board_column" => issues::save_board_column(input: issues::ColumnInput),
-    "save_board_card_settings" => issues::save_board_card_settings(settings: issues::BoardCardSettings),
     "save_test_report" => pipelines::save_test_report(report: pipelines::TestReport),
     "ingest_teamcity_test_messages" => pipelines::ingest_teamcity_test_messages(input: pipelines::TeamCityTestReportInput),
-    "save_checklist" => issues::save_checklist(input: issues::ChecklistInput),
-    "save_checklist_item" => issues::save_checklist_item(input: issues::ChecklistItemInput),
     "save_document" => documents::save_document(id: String, title: String, body: Option<String>, actor: Option<String>),
     "save_messenger_contact" => platform::save_messenger_contact(value: platform::MessengerContact),
-    "save_planning_tag" => issues::save_planning_tag(input: issues::TagInput),
     "save_subscription_scope" => personal::save_subscription_scope(scope: personal::SubscriptionScope),
     "save_subscription_setting" => personal::save_subscription_setting(setting: personal::SubscriptionSetting),
-    "save_swimlane" => issues::save_swimlane(input: issues::SwimlaneInput),
-    "save_time_tracking_entry" => issues::save_time_tracking_entry(input: issues::TimeEntryInput),
     "schedule_deployment" => pipelines::schedule_deployment(req: pipelines::ScheduleDeploymentRequest),
     "seed_rights" => platform::seed_rights(),
     "set_discussion_resolved" => review::set_discussion_resolved(id: String, resolved: bool),
-    "set_issue_tags" => issues::set_issue_tags(issue_id: String, tag_ids: Vec<String>),
     "set_message_pinned" => chat::set_message_pinned(id: String, pinned: bool),
     "save_message_draft" => chat::save_message_draft(channel_id: String, author_id: String, thread_key: Option<String>, text: String),
     "delete_message_draft" => chat::delete_message_draft(channel_id: String, author_id: String, thread_key: Option<String>),
@@ -6087,13 +6022,11 @@ async fn cmd(
     "set_participant_state" => review::set_participant_state(review_id: String, profile_id: String, state: Option<String>),
     "set_profile_email_status" => platform::set_profile_email_status(value: platform::ProfileEmailStatus),
     "set_role_rights" => platform::set_role_rights(role_id: String, right_codes: Vec<String>),
-    "toggle_checklist_item" => issues::toggle_checklist_item(id: String, item_done: bool),
     "transition_deployment" => pipelines::transition_deployment(id: String, status: String),
     "trigger_pipeline_script" => pipelines::trigger_pipeline_script(script_id: String),
     "trigger_pipeline_on_push" => pipelines::trigger_pipeline_on_push(script_id: String, repository: String, branch: String),
     "trigger_pipeline_event" => pipelines::trigger_pipeline_event(script_id: String, event: pipelines::TriggerEvent),
     "due_scheduled_runs" => pipelines::due_scheduled_runs(now: i64),
-    "update_board" => issues::update_board(board: issues::Board),
     "update_cf_definition" => platform::update_cf_definition(definition: platform::CfDefinition),
     "update_channel" => chat::update_channel(channel: chat::Channel),
     "delete_channel" => chat::delete_channel(id: String, actor_id: String),
@@ -6102,10 +6035,6 @@ async fn cmd(
     "update_document_folder" => documents::update_document_folder(folder: documents::DocumentFolder),
     "add_project_member" => personal::add_project_member(project_id: String, member_id: String),
     "remove_project_member" => personal::remove_project_member(project_id: String, member_id: String),
-    "set_issue_assignees" => issues::set_issue_assignees(issue_id: String, profile_ids: Vec<String>),
-    "list_issue_assignees" => issues::list_issue_assignees(issue_id: String),
-    "update_issue" => issues::update_issue(issue: issues::Issue),
-    "update_issue_status" => issues::update_issue_status(status: issues::IssueStatus),
     "update_meeting" => meetings::update_meeting(meeting: meetings::Meeting),
     "update_message" => chat::update_message(id: String, text: String, mention_ids: Option<Vec<String>>, mention_team_ids: Option<Vec<String>>, mention_targets: Option<Vec<chat::MentionTarget>>),
     "list_mentions_for_profile" => chat::list_mentions_for_profile(profile_id: String, unread_only: Option<bool>),
@@ -6121,13 +6050,11 @@ async fn cmd(
     "update_quality_gate_rule" => review::update_quality_gate_rule(rule: review::QualityGateRule),
     "update_review" => review::update_review(review: review::Review),
     "update_role" => platform::update_role(role: platform::Role),
-    "update_sprint" => issues::update_sprint(sprint: issues::Sprint),
     "update_team" => platform::update_team(team: platform::Team),
     "update_team_membership" => platform::update_team_membership(membership: platform::TeamMembership),
     "update_todo" => personal::update_todo(todo: personal::Todo),
     "set_todo_completion" => personal::set_todo_completion(id: String, done: bool),
     "postpone_todo" => personal::postpone_todo(id: String, days: i64),
-    "convert_todo_to_issue" => personal::convert_todo_to_issue(id: String, project_id: String, status_id: Option<String>),
     })
 }
 /// OAuth2 authorization endpoint (RFC 6749 §3.1). The resource owner is the caller's
@@ -11338,6 +11265,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "tickets merged into tasks"]
     async fn issue_reads_deny_nonmembers_and_allow_owner() {
         let _serial = test_lock();
         setup();
@@ -11362,6 +11290,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "tickets merged into tasks"]
     async fn issue_attachment_write_allows_project_members_and_refuses_outsiders() {
         let _serial = test_lock();
         setup();
@@ -11390,6 +11319,7 @@ mod tests {
     /// An issue is worked by PEOPLE: several at once, sub-issues included, and only
     /// people who belong to the project. Outsiders can neither read nor assign.
     #[tokio::test]
+    #[ignore = "tickets merged into tasks"]
     async fn issue_assignment_takes_several_project_members_and_refuses_outsiders() {
         let _serial = test_lock();
         setup();
@@ -11628,19 +11558,11 @@ mod tests {
                 json!({"board_id":"private-board-id"}),
             )
             .await;
-            assert_eq!(status, StatusCode::FORBIDDEN, "{command}: {value}");
-            assert!(value.get("value").is_none(), "{command}: {value}");
+            assert_eq!(status, StatusCode::OK, "{command}: {value}");
+            assert_eq!(value["error"], "tickets merged into tasks (09-05)");
         }
-        assert_eq!(
-            call(
-                cookie("ta"),
-                "list_board_issues",
-                json!({"board_id":"private-board-id"})
-            )
-            .await
-            .0,
-            StatusCode::OK
-        );
+        let (_, value) = call(cookie("ta"), "list_board_issues", json!({"board_id":"private-board-id"})).await;
+        assert_eq!(value["error"], "tickets merged into tasks (09-05)");
         let (status, value) = call(
             cookie("td"),
             "goto_search",
