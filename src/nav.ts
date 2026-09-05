@@ -15,7 +15,10 @@ export const NAV_GROUPS: NavGroup[] = [
   // "Tasks", not "My tasks": this group holds the SHARED work surfaces (Team Tasks =
   // everybody's running project work, Project Tasks = one project's), so a possessive
   // label made people skip the only cross-team view there is.
-  { id: "tasks", label: "Tasks", icon: "check", views: ["To-Do", "Team Tasks", "Project Tasks"] },
+  // The Task Ledger is an EXTRA reading surface (generated, read-only), not a
+  // replacement for the task area: it joins the group AFTER the three working
+  // surfaces so nobody meets it first and mistakes it for "Tasks".
+  { id: "tasks", label: "Tasks", icon: "check", views: ["To-Do", "Team Tasks", "Project Tasks", "Task Ledger"] },
   // Projects is ONE destination: open a project → its boards → their issues.
   // Issues/Boards/Packages stay routable (deep links, Go to) but are not tabs.
   { id: "projects", label: "Projects", icon: "layers", views: ["Projects", "Development", "Repos", "Code Reviews", "Pipelines", "Dev Environments"] },
@@ -109,10 +112,10 @@ export const viewLabel = (view: string) => VIEW_LABELS[view] ?? view;
 // to. Storing it would let the two disagree, which is exactly the defect this
 // mapping exists to prevent.
 // ---------------------------------------------------------------------------
-export type RailMode = "home" | "chats" | "projects" | "library" | "development" | "more";
+export type RailMode = "home" | "chats" | "tasks" | "projects" | "library" | "development" | "more";
 export type NavPlacement = "left" | "right" | "top" | "bottom";
 export type MobileNavPlacement = "top" | "bottom";
-export const MOBILE_RAIL_MODES: readonly RailMode[] = ["home", "chats", "projects", "library", "more"];
+export const MOBILE_RAIL_MODES: readonly RailMode[] = ["home", "chats", "tasks", "projects", "more"];
 
 /** Every view has EXACTLY ONE home mode. A view that is absent here belongs to
  *  "more", whose sidebar is built from the LIVE view registry — so a newly
@@ -122,8 +125,13 @@ const MODE_OF_VIEW: Record<string, RailMode> = {
   Dashboard: "home",
   Chat: "chats",
   Inbox: "home",
-  "To-Do": "home",
-  "Team Tasks": "home",
+  /* TASKS IS A MODE OF ITS OWN. These three used to be mapped to "home", whose
+     sidebar is deliberately empty, and `moreViews()` lists only what is mapped to
+     "more" — so the task area was reachable by URL and by nothing else. A working
+     surface that no menu names has been deleted in every way that matters. */
+  "To-Do": "tasks",
+  "Team Tasks": "tasks",
+  "Task Ledger": "tasks",
   // Every project-scoped surface belongs to the PROJECTS mode, not to Tasks and not
   // to More. They were unmapped, so all four fell into More and piled up there as
   // "Projects, Project Overview, Project Steering, Project Settings" — four entries

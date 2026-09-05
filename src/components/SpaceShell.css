@@ -165,6 +165,12 @@
   font-size: 14px;
 }
 .space-chat-shell .more-item:hover { background: var(--wash-2); }
+/* THE MORE PANEL'S DESTINATIONS SECTION IS A PHONE AFFORDANCE. On desktop every one
+   of those modes has its own rail button, so listing them here would print the rail
+   twice; on a phone the rail carries five destinations and this is the way back to
+   the rest. Hidden by width, exactly where the mobile rail takes over (720px). */
+.space-chat-shell .more-mobile-only { display: none; }
+@media (max-width: 720px) { .space-chat-shell .more-mobile-only { display: contents; } }
 .space-chat-shell .more-item.active { background: var(--teal-soft); color: #006b5e; font-weight: 700; }
 
 /* ── sidebar ──────────────────────────────────────────────────────────── */

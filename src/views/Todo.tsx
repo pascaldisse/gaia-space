@@ -39,6 +39,12 @@ export default function Todo() {
   /** Done is folded away by default — it is the part of the list you are finished
    *  with, and it only ever grows. */
   const [showDone,setShowDone]=createSignal(false);
+  /* MY TASKS SHOWS TASKS. Tracker work assigned to you is REAL work, but it is not a
+     task on this list: it lives in Development, is edited there, and cannot be ticked
+     off, dated or dragged here. Mixing both under one heading made the surface read as
+     a ticket ledger. It becomes a second pane instead — present, counted, one click
+     away, and never in front of the list this page is named after. */
+  const [pane,setPane]=createSignal<"tasks"|"tickets">("tasks");
   const [todos,{refetch}]=createResource(profileId,id=>id?personalApi.todos(id,true):Promise.resolve([]));
   /* A FAILED READ IS NOT AN EMPTY LIST (mirrors TeamTasks/ProjectTasks, 6de55cc): a
      rejected `list_todos` is carried as `todos.error` and shown as one alert below,
@@ -299,7 +305,20 @@ const issueKind=(issue:Issue)=>issueFacts()?.find(fact=>fact.issue.id===issue.id
     <Show when={loadError()}>{err=><p class="personal-error" role="alert">Could not load tasks: {String(err())}</p>}</Show>
     <Show when={error()}><p class="personal-error">{error()}</p></Show>
 
-    <Show when={!showsEmptyPrimary()}>
+    {/* The tab row exists only when there IS tracker work: a tab reading "Tickets 0"
+        would advertise an empty room. */}
+    <Show when={assignedIssues()?.length}>
+      <div class="task-panes" role="tablist" aria-label="My work">
+        <button type="button" role="tab" aria-selected={pane()==="tasks"} classList={{active:pane()==="tasks"}} onClick={()=>setPane("tasks")}>
+          Tasks<span class="count">{openCount()}</span>
+        </button>
+        <button type="button" role="tab" aria-selected={pane()==="tickets"} classList={{active:pane()==="tickets"}} onClick={()=>setPane("tickets")}>
+          Tickets<span class="count">{assignedIssues()!.length}</span>
+        </button>
+      </div>
+    </Show>
+
+    <Show when={!showsEmptyPrimary() && pane()==="tasks"}>
       <nav class="documents-actionbar task-actionbar">
         {/* The word alone. An icon here would only decorate: unlike an upload, there
             is no second way to read "New task". */}
@@ -310,7 +329,19 @@ const issueKind=(issue:Issue)=>issueFacts()?.find(fact=>fact.issue.id===issue.id
       </nav>
     </Show>
 
-    <div class="task-board">
+    <div class="task-board" classList={{ "task-board-tickets": pane()==="tickets" }}>
+    <Show when={pane()==="tasks"} fallback={
+      <div role="tabpanel" aria-label="Tickets assigned to you">
+        <ContentHead icon="target" title="Tracker work assigned to you" line="These are tickets in Development. Open one to work on it there — they are not edited on this list." />
+        <div class="task-grid" aria-label="Assigned ticket work">
+          <For each={assignedIssues()}>{issue=><a class="task-tile task-ticket-tile" {...linkProps({view:"Issues",entityType:"issue",entityId:issue.id,projectId:issue.project_id})}>
+            <span class="task-tile-check"><Icon name={issueKind(issue)==="Bug"?"alert":"target"} size={15} /></span>
+            <span class="task-tile-body"><span class="task-tile-title">{issue.title}</span><span class="task-work-kind"><Icon name={issueKind(issue)==="Bug"?"alert":"target"} size={13} />{issueKind(issue)}</span><span class="task-tile-meta"><span>{projectName(issue.project_id)}</span><span class="sep">·</span><span>{statusName(issue)}</span><Show when={issue.priority}><span class="sep">·</span><span>{issue.priority!.toLowerCase()}</span></Show><span class="sep">·</span><span>#{issue.number}</span></span></span>
+          </a>}</For>
+        </div>
+      </div>
+    }>
+    <div role="tabpanel" aria-label="Your tasks">
       {/* A NEW TASK IS BORN WHERE IT WILL LIVE. It used to be made in a panel that slid
           in from the right — a different place, a different shape, for the same object
           the list edits in place. The editor opens at the top of the list instead, in
@@ -372,15 +403,6 @@ const issueKind=(issue:Issue)=>issueFacts()?.find(fact=>fact.issue.id===issue.id
         )}
       </For>
 
-      <Show when={assignedIssues()?.length}>
-        <p class="task-group-heading">Assigned work<span class="count">{assignedIssues()!.length}</span></p>
-        <div class="task-grid" aria-label="Assigned ticket work">
-          <For each={assignedIssues()}>{issue=><a class="task-tile task-ticket-tile" {...linkProps({view:"Issues",entityType:"issue",entityId:issue.id,projectId:issue.project_id})}>
-            <span class="task-tile-check"><Icon name={issueKind(issue)==="Bug"?"alert":"target"} size={15} /></span>
-            <span class="task-tile-body"><span class="task-tile-title">{issue.title}</span><span class="task-work-kind"><Icon name={issueKind(issue)==="Bug"?"alert":"target"} size={13} />{issueKind(issue)}</span><span class="task-tile-meta"><span>{projectName(issue.project_id)}</span><span class="sep">·</span><span>{statusName(issue)}</span><Show when={issue.priority}><span class="sep">·</span><span>{issue.priority!.toLowerCase()}</span></Show><span class="sep">·</span><span>#{issue.number}</span></span></span>
-          </a>}</For>
-        </div>
-      </Show>
       {/* Done is folded away by default: it is the part of the list you are finished
           with, and it grows forever. The count stays visible on the toggle. */}
       <Show when={showDone() && doneList().length}>
@@ -389,6 +411,8 @@ const issueKind=(issue:Issue)=>issueFacts()?.find(fact=>fact.issue.id===issue.id
           <For each={doneList()}>{todoRow}</For>
         </div>
       </Show>
+    </div>
+    </Show>
     </div>
 
   </section>;

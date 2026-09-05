@@ -41,11 +41,18 @@ export type ShellView = { name: string; icon: IconName };
 const RAIL: { mode: Exclude<RailMode, "more">; label: string; landing: string; icon: IconName; badge?: "chat" | "mentions" }[] = [
   { mode: "home", label: "Home", landing: "Home", icon: "home" },
   { mode: "chats", label: "Chats", landing: "Chat", icon: "chat", badge: "chat" },
+  // "Tasks" lands on the PRIVATE list (My tasks); Team Tasks — everybody's running
+  // work — is the second entry of that mode's sidebar, the generated ledger the third.
+  { mode: "tasks", label: "Tasks", landing: "To-Do", icon: "check" },
   { mode: "projects", label: "Projects", landing: "Projects", icon: "layers" },
   { mode: "library", label: "Library", landing: "Documents", icon: "book-nav" },
   { mode: "development", label: "Development", landing: "Development", icon: "target" },
 ];
 const mobileRail = () => RAIL.filter((entry) => MOBILE_RAIL_MODES.includes(entry.mode));
+/** The rail entries the NARROW rail has no room for. They are not lost: the More
+ *  panel lists them (hidden on desktop, where each has its own rail button). */
+const railDroppedOnMobile = () =>
+  RAIL.filter((entry) => !MOBILE_RAIL_MODES.includes(entry.mode) && (entry.mode !== "development" || showDevelopment()));
 const desktopRail = () => RAIL.filter((entry) => entry.mode !== "development" || showDevelopment());
 /** A sidebar entry names an OBJECT of the current mode. `filter` marks the entries that
  *  NARROW the current pane instead of moving: Activity's worklist filters, which live in
@@ -73,6 +80,14 @@ const MODE_LINKS: Record<RailMode, SideEntry[]> = {
   // backed by `list_unread_threads`) and therefore in Activity, the rail badge and Home.
   // Do not restore a destination here; add to the worklist rule instead.
   chats: [],
+  // The task mode's objects are the three task LISTS: mine, the team's, and the
+  // generated ledger. Project Tasks is deliberately absent — it is project-scoped and
+  // owns its home under Projects, where its project already stands.
+  tasks: [
+    { label: "My tasks", view: "To-Do", icon: "check", strong: true },
+    { label: "Team tasks", view: "Team Tasks", icon: "users" },
+    { label: "Task ledger", view: "Task Ledger", icon: "columns" },
+  ],
   // Activity's objects are the things waiting for you, so its sidebar lists FILTERS over
   // the one worklist — each one a group of `AttentionKind` (see ACTIVITY_FILTERS in
   // attention.ts). No entry leaves the mode, and no entry exists without kinds behind it.
@@ -102,7 +117,7 @@ const MODE_LINKS: Record<RailMode, SideEntry[]> = {
 };
 
 const MODE_TITLE: Record<RailMode, string> = {
-  home: "Home", chats: "Chats", projects: "Projects", library: "Library", development: "Development", more: "More",
+  home: "Home", chats: "Chats", tasks: "Tasks", projects: "Projects", library: "Library", development: "Development", more: "More",
 };
 
 /** Section order for the Chats/Home conversation list (Pascal, 2026-09-04: "direct
@@ -741,6 +756,28 @@ const [mobileSidebarOpen, setMobileSidebarOpen] = createSignal(false);
         {/* The panel closes on the container's click, not on each item: an item's own
             onClick attribute would SHADOW the spread navigation handler. */}
         <nav class="more-panel" aria-label="All views" onClick={() => setMoreOpen(false)}>
+          {/* WHAT THE NARROW RAIL DROPS, MORE PICKS UP. The mobile rail carries five
+              destinations, so some modes (Library, Development) are not drawn there —
+              and the list below holds only views mapped to "more", which would leave
+              them unreachable on a phone. This section is rendered always and hidden
+              by CSS on desktop, where those modes have their own rail button. */}
+          <Show when={railDroppedOnMobile().length}>
+            <div class="more-mobile-only">
+              <h2>Destinations</h2>
+              <For each={railDroppedOnMobile()}>
+                {(entry) => (
+                  <a
+                    class="more-item"
+                    classList={{ active: mode() === entry.mode }}
+                    {...navLink(() => landingRoute(entry))}
+                  >
+                    <span class="side-icon" aria-hidden="true"><Icon name={entry.icon} size={16} /></span>
+                    {entry.label}
+                  </a>
+                )}
+              </For>
+            </div>
+          </Show>
           <h2>All views</h2>
           <For each={moreViews()}>
             {(view) => (
