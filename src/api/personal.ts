@@ -59,8 +59,8 @@ export const personalApi = {
    *  A refusal comes back as a rejection and must reach the screen — never swallowed. */
   deleteTodo:(id:string,actor_id:string)=>call<void>("delete_todo",{id,actorId:actor_id}),
   postponeTodo:(id:string,days:number)=>call<Todo>("postpone_todo",{id,days}),
-  todoLinks:(todo_id:string)=>call<TodoLink[]>("list_todo_links",{todoId:todo_id}),
-  addTodoLink:(input:{todo_id:string;kind:TodoLink["kind"];url?:string|null;target_id?:string|null;title?:string|null})=>call<TodoLink>("add_todo_link",{todoId:input.todo_id,kind:input.kind,url:input.url??null,targetId:input.target_id??null,title:input.title??null}),
+  todoLinks:(todo_id:string)=>call<TodoLink[]>("list_todo_links",{todo_id}),
+  addTodoLink:(input:{todo_id:string;kind:TodoLink["kind"];url?:string|null;target_id?:string|null;title?:string|null})=>call<TodoLink>("add_todo_link",{input}),
   deleteTodoLink:(id:string)=>call<void>("delete_todo_link",{id}),
   absences:(profile_id?:string)=>call<Absence[]>("list_absences",{profileId:profile_id}), createAbsence:(input:Omit<Absence,"id">&{id?:string})=>call<Absence>("create_absence",{input}), updateAbsence:(absence:Absence)=>call<Absence>("update_absence",{absence}), deleteAbsence:(id:string)=>call<void>("delete_absence",{id}), currentAbsences:(date:string)=>call<Absence[]>("current_absences",{date}),
   notifications:(recipient_id:string,unread_only=false)=>call<Notification[]>("list_notifications",{recipientId:recipient_id,unreadOnly:unread_only}), emitNotification:(input:Omit<Notification,"id"|"created_at"|"read_at">&{id?:string})=>call<Notification|null>("emit_notification",{input}), markRead:(id:string)=>call<void>("mark_notification_read",{id}),
