@@ -162,12 +162,18 @@ pre = dict(line.rsplit(" ", 1) for line in open("/tmp/census-pre.txt").read().sp
 post = dict(line.rsplit(" ", 1) for line in open("/tmp/census-post.txt").read().splitlines())
 assert post["integrity"] == "ok", post["integrity"]
 # Live service: rows may APPEAR between census and deploy (people keep working).
-# Only a LOSS is a migration fault.
-lost = {k: (pre[k], post.get(k)) for k in pre
-        if k not in ("user_version", "integrity") and int(post.get(k, -1)) < int(pre[k])}
+# V143 intentionally renames retired ticket tables; compare those facts with
+# their explicit legacy successors, while every other pre-existing table may
+# only grow.
+renamed = {name: f"{name}_legacy" for name in (
+    "issues", "issue_comments", "issue_activities", "issue_attachments",
+    "issue_tracker_links", "issue_links", "issue_assignees",
+)}
+lost = {k: (pre[k], post.get(renamed.get(k, k))) for k in pre
+        if k not in ("user_version", "integrity") and int(post.get(renamed.get(k, k), -1)) < int(pre[k])}
 assert not lost, f"rows lost: {lost}"
-grew = {k: (pre[k], post[k]) for k in pre
-        if k not in ("user_version", "integrity") and int(post.get(k, 0)) > int(pre[k])}
+grew = {k: (pre[k], post[renamed.get(k, k)]) for k in pre
+        if k not in ("user_version", "integrity") and int(post.get(renamed.get(k, k), 0)) > int(pre[k])}
 print("no rows lost; live growth during deploy:", grew or "none")
 print("new tables:", sorted(set(post) - set(pre)))
 PY
