@@ -41,6 +41,9 @@ export type ShellView = { name: string; icon: IconName };
 const RAIL: { mode: Exclude<RailMode, "more">; label: string; landing: string; icon: IconName; badge?: "chat" | "mentions" }[] = [
   { mode: "home", label: "Home", landing: "Home", icon: "home" },
   { mode: "chats", label: "Chats", landing: "Chat", icon: "chat", badge: "chat" },
+  // "Tasks" lands on the PRIVATE list (My tasks); Team Tasks — everybody's running
+  // work — is the second entry of that mode's sidebar, the generated ledger the third.
+  { mode: "tasks", label: "Tasks", landing: "To-Do", icon: "check" },
   { mode: "projects", label: "Projects", landing: "Projects", icon: "layers" },
   { mode: "library", label: "Library", landing: "Documents", icon: "book-nav" },
   { mode: "development", label: "Development", landing: "Development", icon: "target" },
@@ -73,6 +76,14 @@ const MODE_LINKS: Record<RailMode, SideEntry[]> = {
   // backed by `list_unread_threads`) and therefore in Activity, the rail badge and Home.
   // Do not restore a destination here; add to the worklist rule instead.
   chats: [],
+  // The task mode's objects are the three task LISTS: mine, the team's, and the
+  // generated ledger. Project Tasks is deliberately absent — it is project-scoped and
+  // owns its home under Projects, where its project already stands.
+  tasks: [
+    { label: "My tasks", view: "To-Do", icon: "check", strong: true },
+    { label: "Team tasks", view: "Team Tasks", icon: "users" },
+    { label: "Task ledger", view: "Task Ledger", icon: "columns" },
+  ],
   // Activity's objects are the things waiting for you, so its sidebar lists FILTERS over
   // the one worklist — each one a group of `AttentionKind` (see ACTIVITY_FILTERS in
   // attention.ts). No entry leaves the mode, and no entry exists without kinds behind it.
@@ -102,7 +113,7 @@ const MODE_LINKS: Record<RailMode, SideEntry[]> = {
 };
 
 const MODE_TITLE: Record<RailMode, string> = {
-  home: "Home", chats: "Chats", projects: "Projects", library: "Library", development: "Development", more: "More",
+  home: "Home", chats: "Chats", tasks: "Tasks", projects: "Projects", library: "Library", development: "Development", more: "More",
 };
 
 /** Section order for the Chats/Home conversation list (Pascal, 2026-09-04: "direct
