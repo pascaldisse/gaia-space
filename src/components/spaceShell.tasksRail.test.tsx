@@ -64,6 +64,21 @@ const mountTasks = async () => {
   return host;
 };
 
+describe("nothing the narrow rail drops becomes unreachable", () => {
+  test("More lists every destination the mobile rail has no room for", async () => {
+    const host = await mountTasks();
+    (host.querySelector('.mobile-rail [aria-label="More"]') as HTMLElement).click();
+    await settle();
+    const panel = document.querySelector(".more-panel") as HTMLElement;
+    expect(panel).not.toBeNull();
+    const dropped = panel.querySelector(".more-mobile-only") as HTMLElement;
+    expect(dropped).not.toBeNull();
+    const labels = [...dropped.querySelectorAll(".more-item")].map((n) => n.textContent?.trim());
+    // Library and Development are the two RAIL modes the five-slot mobile rail omits.
+    expect(labels).toContain("Library");
+  });
+});
+
 describe("the task area is reachable from the rail", () => {
   test("Tasks is a rail destination and its sidebar names all three task lists", async () => {
     const host = await mountTasks();

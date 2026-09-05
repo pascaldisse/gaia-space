@@ -49,6 +49,10 @@ const RAIL: { mode: Exclude<RailMode, "more">; label: string; landing: string; i
   { mode: "development", label: "Development", landing: "Development", icon: "target" },
 ];
 const mobileRail = () => RAIL.filter((entry) => MOBILE_RAIL_MODES.includes(entry.mode));
+/** The rail entries the NARROW rail has no room for. They are not lost: the More
+ *  panel lists them (hidden on desktop, where each has its own rail button). */
+const railDroppedOnMobile = () =>
+  RAIL.filter((entry) => !MOBILE_RAIL_MODES.includes(entry.mode) && (entry.mode !== "development" || showDevelopment()));
 const desktopRail = () => RAIL.filter((entry) => entry.mode !== "development" || showDevelopment());
 /** A sidebar entry names an OBJECT of the current mode. `filter` marks the entries that
  *  NARROW the current pane instead of moving: Activity's worklist filters, which live in
@@ -752,6 +756,28 @@ const [mobileSidebarOpen, setMobileSidebarOpen] = createSignal(false);
         {/* The panel closes on the container's click, not on each item: an item's own
             onClick attribute would SHADOW the spread navigation handler. */}
         <nav class="more-panel" aria-label="All views" onClick={() => setMoreOpen(false)}>
+          {/* WHAT THE NARROW RAIL DROPS, MORE PICKS UP. The mobile rail carries five
+              destinations, so some modes (Library, Development) are not drawn there —
+              and the list below holds only views mapped to "more", which would leave
+              them unreachable on a phone. This section is rendered always and hidden
+              by CSS on desktop, where those modes have their own rail button. */}
+          <Show when={railDroppedOnMobile().length}>
+            <div class="more-mobile-only">
+              <h2>Destinations</h2>
+              <For each={railDroppedOnMobile()}>
+                {(entry) => (
+                  <a
+                    class="more-item"
+                    classList={{ active: mode() === entry.mode }}
+                    {...navLink(() => landingRoute(entry))}
+                  >
+                    <span class="side-icon" aria-hidden="true"><Icon name={entry.icon} size={16} /></span>
+                    {entry.label}
+                  </a>
+                )}
+              </For>
+            </div>
+          </Show>
           <h2>All views</h2>
           <For each={moreViews()}>
             {(view) => (
