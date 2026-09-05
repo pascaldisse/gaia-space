@@ -309,10 +309,10 @@ const [showJumpToLatest, setShowJumpToLatest] = createSignal(false);
         limit: PAGE_SIZE,
         actingProfileId: key.p,
       });
-      setPaging((state) => applyPage(state, started.ticket, pageResult));
+      setPaging((state) => applyPage(state, started.seq, pageResult));
       if (paneKey) restoreHistoryPosition(paneKey);
     } catch (e) {
-      setPaging((state) => failLoad(state, started.ticket, e));
+      setPaging((state) => failLoad(state, started.seq, e));
     }
   };
   const unfurlLinks = async (messageId: string) => {
@@ -388,9 +388,9 @@ const [showJumpToLatest, setShowJumpToLatest] = createSignal(false);
     setThreadPaging(started.state);
     try {
       const page = await chatApi.listMessagesPage({ channelId: key.channelId, cursor, limit: PAGE_SIZE, actingProfileId: key.p });
-      setThreadPaging((state) => applyPage(state, started.ticket, page));
+      setThreadPaging((state) => applyPage(state, started.seq, page));
     } catch (e) {
-      setThreadPaging((state) => failLoad(state, started.ticket, e));
+      setThreadPaging((state) => failLoad(state, started.seq, e));
     }
   };
 

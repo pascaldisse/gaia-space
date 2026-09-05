@@ -29,13 +29,13 @@ function stackAdapter(initial: string) {
 
 beforeEach(() => { setRoutePending(false); registerViews(VIEWS); setAvailableViews(VIEWS); initRouter(createMemoryAdapter()); });
 
-describe("legacy ticket links redirect to tasks", () => {
-  // Tickets are tasks now (task unification). The migration that folded issues into
+describe("legacy task links redirect to tasks", () => {
+  // Tasks are tasks now (task unification). The migration that folded issues into
   // tasks kept ids, but there is no single-task URL in this grammar (a task opens
   // inline, in its row) — so an old link lands on a real, useful surface instead of
   // 404ing, and NORMALIZES there (unlike the old Issues context-free route, which
   // stayed on its own untouched address).
-  test("a project-scoped ticket link lands on that project's Tasks tab", () => {
+  test("a project-scoped task link lands on that project's Tasks tab", () => {
     expect(parsePath("projects/p-1/issues/i-1")).toMatchObject({ view: "Project Workspace", projectId: "p-1", tab: "tasks" });
     const env = stackAdapter("projects/p-1/issues/i-1");
     initRouter(env.adapter);
@@ -43,10 +43,10 @@ describe("legacy ticket links redirect to tasks", () => {
     expect(env.url()).toBe("projects/p-1/tasks"); // normalized to the canonical tab address
   });
 
-  test("a context-free ticket link (Goto, bookmark) lands on the reader's own tasks", () => {
+  test("a context-free task link (Goto, bookmark) lands on the reader's own tasks", () => {
     expect(parsePath("issues/i-1")).toMatchObject({ view: "To-Do" });
-    // The bare `/issues` list has no equivalent (there is no ticket list any more);
-    // only a link that named a specific ticket has somewhere honest to land.
+    // The bare `/issues` list has no equivalent (there is no task list any more);
+    // only a link that named a specific task has somewhere honest to land.
     expect(parsePath("issues").view).toBe("Dashboard");
     const env = stackAdapter("issues/i-1");
     initRouter(env.adapter);
@@ -330,7 +330,7 @@ describe("history", () => {
   });
 
   // Project-scoped state round-trips through history the same way — the Project
-  // Workspace tab carries `projectId` where an entity route used to (tickets, before
+  // Workspace tab carries `projectId` where an entity route used to (tasks, before
   // task unification, were the only project-scoped entity; the Dev tab is now).
   test("back/forward restore a project tab without rewriting its URL", () => {
     const env = stackAdapter("dashboard");
@@ -372,10 +372,10 @@ describe("history", () => {
     expect(parsePath("reviews").view).toBe("Code Reviews");
   });
 
-  // A legacy ticket link is a normalizing redirect, so it does NOT survive reload
-  // untouched the way a still-canonical deep URL does — see "legacy ticket links
+  // A legacy task link is a normalizing redirect, so it does NOT survive reload
+  // untouched the way a still-canonical deep URL does — see "legacy task links
   // redirect to tasks" above.
-  test("reload of a legacy ticket URL lands on, and rewrites to, the Tasks tab", () => {
+  test("reload of a legacy task URL lands on, and rewrites to, the Tasks tab", () => {
     const env = stackAdapter("projects/p-7/issues/i-7");
     initRouter(env.adapter);
     expect(route()).toMatchObject({ view: "Project Workspace", projectId: "p-7", tab: "tasks" });

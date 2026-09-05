@@ -71,15 +71,15 @@ describe("the colour law", () => {
 });
 
 describe("the defect this module exists to prevent", () => {
-  it("gives two tickets with the same status the same status colour, whatever their due dates", () => {
+  it("gives two tasks with the same status the same status colour, whatever their due dates", () => {
     const status = { resolved: false };
-    const overdueTicket = { status, due_date: "2030-01-01" };
-    const undatedTicket = { status, due_date: null };
+    const overdueTask = { status, due_date: "2030-01-01" };
+    const undatedTask = { status, due_date: null };
     // The pill that says "No status" must say it in one colour only.
-    expect(statusTone(overdueTicket.status)).toBe(statusTone(undatedTicket.status));
+    expect(statusTone(overdueTask.status)).toBe(statusTone(undatedTask.status));
     // ...while the urgency is still visible, on the date, where it belongs.
-    expect(dueTone(overdueTicket.due_date, TODAY)).toBe("red");
-    expect(dueTone(undatedTicket.due_date, TODAY)).toBe("");
+    expect(dueTone(overdueTask.due_date, TODAY)).toBe("red");
+    expect(dueTone(undatedTask.due_date, TODAY)).toBe("");
   });
 });
 

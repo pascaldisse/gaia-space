@@ -22,7 +22,7 @@ const date=()=>new Date().toISOString().slice(0,10);
 // module was their published home.
 export { DEADLINE_SOON_DAYS, deadlineTone };
 export default function Steering(){
- // Tickets are gone: a project's "current work" is its open TASKS, full stop — a dev
+ // Tasks are gone: a project's "current work" is its open TASKS, full stop — a dev
  // task (category === 'dev') is still a task, just one that also carries a link.
  const project=()=>route().projectId??"";
  const [data]=createResource(()=>[project(),profileId()] as const,async ([id,profile])=>{if(!id||!profile)throw Error("Project context is unavailable.");const todos=await personalApi.projectTodos(id,profile,true);return todos.filter(t=>!t.done).map(t=>({id:t.id,title:t.content,due:t.due_date,unassigned:!t.assignee_ids.length,dev:t.category==="dev"}));});

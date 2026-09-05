@@ -69,11 +69,14 @@ describe("deep links arrive with the right mode", () => {
     expect(modeOfPath("channels/c-1")).toBe("chats");
   });
 
-  it("a ticket URL is Development — unless it is scoped to a project", () => {
-    expect(modeOfPath("issues/i-9")).toBe("development");
-    expect(modeOfPath("boards")).toBe("development");
+  it("a legacy context-free task URL lands on My tasks (Tasks mode); a code review URL is Development; both are overridden once a project scopes them", () => {
+    // Tasks are tasks now (task unification, 2026-09): a bare `/issues/<id>` has no
+    // project to open a Tasks tab on, so it lands on the reader's own task list
+    // (router.ts) — Tasks mode, not Development. The `Boards`/`Issues` views and the
+    // bare `/boards` route are gone with the entity; there is nothing left to resolve.
+    expect(modeOfPath("issues/i-9")).toBe("tasks");
     expect(modeOfPath("reviews/r-2")).toBe("development");
-    // A PROJECT ROUTE IS ALWAYS THE PROJECTS MODE (stage 19). A ticket opened at
+    // A PROJECT ROUTE IS ALWAYS THE PROJECTS MODE (stage 19). A task opened at
     // `/projects/<id>/issues/<id>` renders inside the project workspace, under the
     // project's own tab row, so the sidebar must list projects — not repositories.
     // Deriving the mode from the view name alone put this in the wrong sidebar.

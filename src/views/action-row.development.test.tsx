@@ -74,7 +74,7 @@ describe("the development family: the action row is where an act lives", () => {
 
   test("the section pills are part of the row, not a strip above the content", () => {
     // Development draws its own section pills on the same action row as its project
-    // picker — there is no separate guest view carrying them any more (Tickets/Boards
+    // picker — there is no separate guest view carrying them any more (Tasks/Boards
     // used to be the Issues view, embedded; task unification folded that surface in).
     expect(source("Development.tsx")).toContain("actionbar-sections");
     expect(source("Development.tsx")).toMatch(/actionbar-view-controls[\s\S]{0,400}ProjectPicker/);

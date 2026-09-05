@@ -28,8 +28,8 @@ import "./ProjectTasks.css";
  *  The owner, on this tab: *"It should simply be a LIST OF THE RUNNING TASKS plus
  *  a BUTTON to create a new task."*
  *
- *  WHAT WENT: the two-pane ticket frame (`.issue-layout` + `.issue-detail`), the
- *  ticket row grid (`.issue-row`, whose `#number | title | status` columns pulled a
+ *  WHAT WENT: the two-pane task frame (`.issue-layout` + `.issue-detail`), the
+ *  task row grid (`.issue-row`, whose `#number | title | status` columns pulled a
  *  task's check mark, title and creator apart), the always-visible filter row, and
  *  the project picker in the header — the project workspace names the project in its
  *  header AND its sidebar, so a third answer to the same question is noise.
@@ -41,9 +41,9 @@ import "./ProjectTasks.css";
  *  edited HERE at all. Now the row IS the editor: clicking it opens the task in
  *  place, in the same in-row editor My tasks has always had.
  *
- *  TICKETS ARE GONE (task unification): what used to be a separate tracker item is
+ *  TASKS ARE GONE (task unification): what used to be a separate tracker item is
  *  now a task with `category === 'dev'`, filed and worked on the project's Dev tab.
- *  The "N open tickets →" line that lived below this header is gone with them —
+ *  The "N open tasks →" line that lived below this header is gone with them —
  *  it was redundant with the "open" chip in the header above, which already counts
  *  every open task in this project. */
 export default function ProjectTasks(props: { projectId?: string } = {}) {
@@ -76,7 +76,7 @@ export default function ProjectTasks(props: { projectId?: string } = {}) {
   onMount(() => {
     /* Arriving from the Overview's one primary ("New task" on an empty project):
        open the drawer here, once. See views/workIntent.ts for why this is not a
-       route param. Only the task intent is honoured — tickets are not created on
+       route param. Only the task intent is honoured — tasks are not created on
        a task surface any more. */
     if (takeWorkIntent() === "new-task") setCreating(true);
     const refresh = () => { void reloadTasks(); };

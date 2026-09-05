@@ -158,7 +158,7 @@ export function parsePath(path: string): Route {
   // /projects/<projectId>[/<tab>|/chats/<channelId>|/issues/<issueId>|/steering|/settings]
   if (head === "projects" && rest.length) {
     const projectId = rest[0];
-    // LEGACY: tickets are tasks now (task unification, 2026-09). The migration that
+    // LEGACY: tasks are tasks now (task unification, 2026-09). The migration that
     // folded issues into tasks kept ids, so `<issueId>` IS a task id — but there is
     // no single-task address in this grammar (a task opens inline, in its row), so
     // the old link lands on the project's Tasks tab rather than 404ing.

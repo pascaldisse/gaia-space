@@ -108,7 +108,7 @@ export const viewLabel = (view: string) => VIEW_LABELS[view] ?? view;
 //
 // The rail selects a MODE and the sidebar shows that mode's objects. The mode is
 // never stored: it is DERIVED from the current route, so a deep link into a
-// channel / ticket / document always arrives with the sidebar its target belongs
+// channel / task / document always arrives with the sidebar its target belongs
 // to. Storing it would let the two disagree, which is exactly the defect this
 // mapping exists to prevent.
 // ---------------------------------------------------------------------------

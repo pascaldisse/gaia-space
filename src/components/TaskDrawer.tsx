@@ -11,7 +11,7 @@ import "./TaskDrawer.css";
  * task surfaces created a task in a shape of its own — ProjectTasks in a form inside a
  * detail pane, My tasks in an always-open inline composer, Team tasks not at all.
  *
- * WHY A DRAWER AND NOT A DIALOG: tickets (IssueCreateDrawer), meetings, documents and
+ * WHY A DRAWER AND NOT A DIALOG: tasks (IssueCreateDrawer), meetings, documents and
  * channels already create in this drawer; the shape and its stylesheet
  * (WorkItemDrawer.css) are shipped. A task is not a different kind of act.
  *
@@ -56,7 +56,7 @@ export default function TaskDrawer(props: {
     <aside class="wid-panel" role="dialog" aria-modal="true" aria-labelledby="tdw-heading">
       <header class="wid-head">
         <h2 id="tdw-heading">New task</h2>
-        <p>A running to-do — not a tracked ticket.</p>
+        <p>A running to-do — not a tracked task.</p>
       </header>
       {/* ONE FIELD LIST, RENDERED IN CREATE MODE. `task-drawer-form` stays as the
           address the surfaces' tests submit against; `task-edit-in-drawer` is the only

@@ -14,7 +14,7 @@ import "./controls.css";
  *
  *  The law they encode, read off FINAL_GAIA_SPACE_PROTOTYP.html and off the
  *  parts of the app that already speak it (the rail `+`, the "Search
- *  conversations" field, the `New ticket` pill, the section pills):
+ *  conversations" field, the `New task` pill, the section pills):
  *
  *    - a control at rest is a SOFT SHAPE, not a box. Fill `--wash-2`, no
  *      border. The hairline appears on hover/focus, where it means "you are

@@ -37,10 +37,10 @@ describe("message paging", () => {
     let state = initialPaging();
     const live = [msg("m3", 30)];
     const first = beginLoad(state);
-    state = applyPage(first.state, first.ticket, page([msg("m2", 20), msg("m1", 10)], "cur-1"));
+    state = applyPage(first.state, first.seq, page([msg("m2", 20), msg("m1", 10)], "cur-1"));
     // The live window and the page overlap on m3 — one row, not two.
     const second = beginLoad(state);
-    state = applyPage(second.state, second.ticket, page([msg("m3", 30), msg("m0", 5)], null));
+    state = applyPage(second.state, second.seq, page([msg("m3", 30), msg("m0", 5)], null));
     expect(visibleMessages(state, live).map((m) => m.id)).toEqual(["m0", "m1", "m2", "m3"]);
     expect(state.hasMore).toBe(false);
   });
@@ -49,11 +49,11 @@ describe("message paging", () => {
     let state = initialPaging();
     const slow = beginLoad(state);
     state = slow.state;
-    // Reset (channel switch) invalidates the in-flight ticket.
+    // Reset (channel switch) invalidates the in-flight seq.
     state = resetPaging(state);
-    const after = applyPage(state, slow.ticket, page([msg("ghost", 1)], null));
+    const after = applyPage(state, slow.seq, page([msg("ghost", 1)], null));
     expect(after.older).toEqual([]);
-    expect(failLoad(state, slow.ticket, "boom").error).toBeNull();
+    expect(failLoad(state, slow.seq, "boom").error).toBeNull();
   });
 
   test("a load is never started twice, nor past the beginning of history", () => {
@@ -66,9 +66,9 @@ describe("message paging", () => {
   test("a failure keeps the cursor so retry re-asks the same page", () => {
     let state = initialPaging();
     const first = beginLoad(state);
-    state = applyPage(first.state, first.ticket, page([msg("m1", 10)], "cur-1"));
+    state = applyPage(first.state, first.seq, page([msg("m1", 10)], "cur-1"));
     const second = beginLoad(state);
-    state = failLoad(second.state, second.ticket, new Error("network down"));
+    state = failLoad(second.state, second.seq, new Error("network down"));
     expect(state.error).toBe("network down");
     expect(state.loading).toBe(false);
     expect(state.cursor).toBe("cur-1");

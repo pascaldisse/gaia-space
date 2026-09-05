@@ -39,7 +39,7 @@
  *         you are involved in that absence/issue/document. This is the source
  *         the old badge counted and the old Home card dropped.
  *    4. open tasks assigned to me (dev tasks included — there is no separate
- *       ticket source any more)
+ *       task source any more)
  *    5. unread notifications addressed to me whose event type is NOT
  *       organisation news (mention notifications are deduplicated against 1)
  *  DELIBERATELY EXCLUDED: unread in public/project channels. A busy channel is
@@ -313,7 +313,7 @@ export function buildNeedsYou(sources: AttentionSources): AttentionItem[] {
   }
 
   // 5. Review requests where the turn is mine.
-  // (5 was "open tickets assigned to me" — gone: tickets are tasks now, already
+  // (5 was "open tasks assigned to me" — gone: tasks are tasks now, already
   //  covered by source 4 above, since a dev task follows the same assignee rule.)
   for (const { review } of sources.reviewRequests) {
     items.push({

@@ -19,7 +19,7 @@ import "./Development.css";
  *
  * Three sections over the EXISTING data, no fork and no second data path:
  *  - Dev tasks     -> tasks (`personalApi.projectTodos`) with `category === 'dev'`,
- *                     scoped to a picked project. Tickets/Bugs used to be a separate
+ *                     scoped to a picked project. Tasks/Bugs used to be a separate
  *                     tracker entity (Issue) with its own filters, board and drawer;
  *                     task unification folded that into a plain task, so this section
  *                     is now the SAME list every other task surface reads, filtered.
@@ -52,7 +52,7 @@ export default function Development(): JSX.Element {
 
   // Dev tasks are project-scoped by construction (a task's Dev tab lives under its
   // project), so this section reads the session's current project — the same one the
-  // project picker below writes, and the same one a ticket-from-chat lands on.
+  // project picker below writes, and the same one a task-from-chat lands on.
   const [devTasks] = createResource(
     () => [projectIdSig(), profileId()] as const,
     ([id, profile]) => (id && profile ? personalApi.projectTodos(id, profile, true) : Promise.resolve([] as Todo[])),

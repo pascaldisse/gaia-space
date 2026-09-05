@@ -517,7 +517,7 @@ const callerCallState = () => {
                 <section id="cw-project-status" class="cw-card">
                   <h2>{project()?.name ?? "Project"} · Project status</h2>
                   <div class="cw-stat"><span>Open tasks</span><strong>{dashboard()?.open_todos ?? "—"}</strong></div>
-                  <div class="cw-stat"><span>Tickets</span><strong>{dashboard()?.open_issues ?? "—"}</strong></div>
+                  <div class="cw-stat"><span>Tasks</span><strong>{dashboard()?.open_issues ?? "—"}</strong></div>
                   <div class="cw-stat"><span>Next meeting</span><strong>{nextMeeting() ? hhmm(nextMeeting()!.starts_at) : "—"}</strong></div>
                   <div class="cw-stat"><span>Replies needed</span><strong>{repliesNeeded()}</strong></div>
                 </section>

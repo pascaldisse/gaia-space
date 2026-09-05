@@ -126,11 +126,16 @@ describe("one form, two acts", () => {
     await settle();
     const creating = fieldNames(host);
 
-    expect(creating).toEqual(editing);
+    // LINKS is the one field EDIT has that CREATE does not: a link hangs off a task's
+    // id (`add_todo_link`), and a task being created has none yet. So it is compared
+    // separately — same fields everywhere else, in the same order.
+    expect(creating).toEqual(editing.filter(name => name !== "Link URL" && name !== "Link title"));
+    expect(editing).toEqual(["Title", "Description", "Due date", "Project", "Assignee", "Category", "Link URL", "Link title"]);
     // And the order is the one a person decides in — stated, so a reshuffle fails here.
     expect(creating).toEqual(["Title", "Description", "Due date", "Project", "Assignee", "Category"]);
     // The only differences are what the ACTS differ in: nothing to tick done, nothing
-    // to delete, and the primary says which act it is.
+    // to delete, nothing to link (nothing exists yet to hang a link off), and the
+    // primary says which act it is.
     expect(host.querySelector(".task-create-grid .task-edit-done")).toBeNull();
     expect(host.querySelector(".task-create-grid .task-edit-danger")).toBeNull();
     expect(host.querySelector<HTMLButtonElement>(".task-create-grid .composer-submit")!.textContent).toContain("Create task");

@@ -62,10 +62,10 @@ test("a task created from a message carries the source anchor and the prefilled-
 
 test("a dev task created from a message reports its project to the caller, and carries category 'dev'", async () => {
   const created: [string, string, string | undefined][] = [];
-  const host = await mount(() => <WorkItemDrawer kind="dev" source={source} projectId="p-ticket" prefillTitle="Safari Login hängt" onClose={() => {}} onCreated={(kind, id, projectId) => created.push([kind, id, projectId])} /> as any);
+  const host = await mount(() => <WorkItemDrawer kind="dev" source={source} projectId="p-task" prefillTitle="Safari Login hängt" onClose={() => {}} onCreated={(kind, id, projectId) => created.push([kind, id, projectId])} /> as any);
   host.querySelector<HTMLFormElement>(".wid-form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
   await settle();
-  expect(created).toEqual([["dev", "todo-1", "p-ticket"]]);
+  expect(created).toEqual([["dev", "todo-1", "p-task"]]);
   const write = calls.find(entry => entry.cmd === "create_todo")!;
   expect((write.args.input as Record<string, unknown>).category).toBe("dev");
 });

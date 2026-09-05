@@ -56,7 +56,7 @@ import "./ProjectWorkspace.css";
  * overview and carries `aria-current` there; the five tabs are the five sections.
  *
  * THE FRAME IS ALSO THE FRAME FOR WHAT IS NOT A TAB. Steering, Settings and a single
- * ticket render as `props.children` inside this same header — one tab row on every
+ * task render as `props.children` inside this same header — one tab row on every
  * project address, never a second one, and never a page that forgets where it is.
  */
 
@@ -88,7 +88,7 @@ export default function ProjectWorkspace(props: { children?: JSX.Element }): JSX
     const value = route().tab;
     return projectTabs.includes(value as ProjectTab) ? (value as ProjectTab) : undefined;
   };
-  /** This frame owns a tab only on its OWN view. Steering / Settings / a ticket are
+  /** This frame owns a tab only on its OWN view. Steering / Settings / a task are
    *  guests: the header stays, no tab lights, and the guest renders below it. */
   const ownsBody = () => route().view === "Project Workspace";
   const onOverview = () => ownsBody() && !tab();
@@ -204,7 +204,7 @@ export default function ProjectWorkspace(props: { children?: JSX.Element }): JSX
         body={
           <>
             <strong>{project()?.name ?? "This project"}</strong> is deleted for everyone, with its
-            tasks, tickets, calendar entries and knowledge. This cannot be undone.
+            tasks, tasks, calendar entries and knowledge. This cannot be undone.
           </>
         }
         confirmLabel="Delete project"
@@ -308,7 +308,7 @@ export default function ProjectWorkspace(props: { children?: JSX.Element }): JSX
           }
         >
           <Show when={ownsBody()} fallback={
-            /* Steering, Settings, one ticket. Same frame, same tab row, no second header. */
+            /* Steering, Settings, one task. Same frame, same tab row, no second header. */
             <EmbeddedScopeProvider scope={embeddedScope()}>
               <div class="pw-guest">{props.children}</div>
             </EmbeddedScopeProvider>
@@ -390,7 +390,7 @@ function ProjectOverview(props: {
         <Show when={!props.tasksLoading && !props.tasksError && !props.tasks.length}>
           {/* The offer must answer the sentence above it. "No task is running" is
               answered by starting one — not by leaving for the Dev tab, which was a
-              leftover from the ticket bridge and sent the reader away from the very
+              leftover from the task bridge and sent the reader away from the very
               thing the card is about. */}
           <EmptyState
             title="Nothing is running in this project"
@@ -558,7 +558,7 @@ function ProjectChats(props: {
  *  Dev work is TASKS with `category === 'dev'` — the same entity every other tab
  *  edits, filtered to the kind of work that belongs here (GitHub/external tracker
  *  items are these tasks with a LINK, see TaskMeta's Links row). There is no
- *  separate ticket/board store any more; "New task" here simply opens the shared
+ *  separate task/board store any more; "New task" here simply opens the shared
  *  row editor with the category pre-set — and the honest answer about linking a
  *  repository, below.
  *
@@ -685,7 +685,7 @@ function ProjectDev(props: { projectId: string }): JSX.Element {
             this component's doc comment. The offer that IS real is the git client. */}
         <EmptyState
           title="A git repository cannot be linked to a project yet"
-          hint="Repositories are registered per machine by their filesystem path (repos.json) and carry no project. Binding one would need a stored project↔repository row and a command to write it; until then this tab shows the project's tickets, boards and package repositories, which are real."
+          hint="Repositories are registered per machine by their filesystem path (repos.json) and carry no project. Binding one would need a stored project↔repository row and a command to write it; until then this tab shows the project's tasks, boards and package repositories, which are real."
           actions={<GhostPill {...linkProps({ view: "Repos" })}>Open repositories →</GhostPill>}
         />
       </section>

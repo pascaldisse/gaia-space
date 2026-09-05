@@ -135,7 +135,7 @@ describe("My tasks: the creator deletes, the assignee does not", () => {
     await settle();
     rightClick(rowOf(host, ".task-tile", "Theirs on me"));
     await settle();
-    expect(menuEntries()).toEqual(["Open", "Postpone by a day", "Postpone by a week", "Convert to ticket"]);
+    expect(menuEntries()).toEqual(["Open", "Postpone by a day", "Postpone by a week"]);
     expect(menuEntries()).not.toContain("Delete task…");
   });
 
@@ -209,9 +209,9 @@ describe("Team tasks: other people's work is not yours to delete", () => {
     const host = await mount(() => <TeamTasks /> as any);
     rightClick(rowOf(host, ".task-tile", "Mine alone"));
     await settle();
-    /* The row's acts are WORDS in this menu now, as on My tasks: postponing and
-       converting a task I OWN, and the owner-gated delete this test is about. */
-    expect(menuEntries()).toEqual(["Open", "Postpone by a day", "Postpone by a week", "Convert to ticket", "Delete task…"]);
+    /* The row's acts are WORDS in this menu now, as on My tasks: postponing a task I
+       OWN, and the owner-gated delete this test is about. */
+    expect(menuEntries()).toEqual(["Open", "Postpone by a day", "Postpone by a week", "Delete task…"]);
     menuEntry("Delete task…")!.click();
     await settle();
     expect(deleteCalls()).toHaveLength(0);

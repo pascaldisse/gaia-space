@@ -13,7 +13,7 @@ import "./WorkItemDrawer.css";
 /** The three shapes a message can become. "Pull Request" is in the briefing's field
  * table but has no create path here: linking a PR is a review-side act, not a
  * message-to-work act, so it is deliberately absent rather than a dead button.
- * `"dev"` used to be `"ticket"` (a separate tracker entity, Issue): task unification
+ * `"dev"` used to be `"task"` (a separate tracker entity, Issue): task unification
  * folded it into a plain task with `category: "dev"`, filed on the project's Dev tab —
  * same create act, same drawer, one fewer entity in the product. */
 export type WorkItemKind = "task" | "dev" | "event";

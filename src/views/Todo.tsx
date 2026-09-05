@@ -40,7 +40,7 @@ export default function Todo() {
   /* MY TASKS SHOWS TASKS. Tracker work assigned to you is REAL work, but it is not a
      task on this list: it lives in Development, is edited there, and cannot be ticked
      off, dated or dragged here. Mixing both under one heading made the surface read as
-     a ticket ledger. It becomes a second pane instead — present, counted, one click
+     a task ledger. It becomes a second pane instead — present, counted, one click
      away, and never in front of the list this page is named after. */
   const [todos,{refetch}]=createResource(profileId,id=>id?personalApi.todos(id,true):Promise.resolve([]));
   /* A FAILED READ IS NOT AN EMPTY LIST (mirrors TeamTasks/ProjectTasks, 6de55cc): a

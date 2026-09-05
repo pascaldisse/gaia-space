@@ -90,7 +90,7 @@ const projectSettingsView:View={name:"Project Settings",icon:"settings",componen
    statement that this view has no content OUTSIDE its frame. */
 const projectWorkspaceView:View={name:"Project Workspace",icon:"layers",component:()=>null};
 /* ONE FRAME FOR EVERY PROJECT ADDRESS. Any route carrying a project renders inside
-   ProjectWorkspace: its own five tabs, and Steering / Settings / a single ticket as
+   ProjectWorkspace: its own five tabs, and Steering / Settings / a single task as
    guests under the SAME tab row. That is what removes the double system — there is
    no longer a `ProjectContext` drawing a second, six-entry row above all of them. */
 const projectFramed=()=>!!route().projectId;

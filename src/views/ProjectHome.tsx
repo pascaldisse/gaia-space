@@ -12,7 +12,7 @@ import { MetricGrid, MetricTile } from "../components/blocks";
 /** ── OVERVIEW IS A GLANCE (stage 12d) ───────────────────────────────────────
  *  It summarises and LINKS; it does not create. Overview and Tasks used to offer
  *  the same two composers, so neither could be "the" place to start work — the
- *  owner's words: *"the Overview already lets me create a task or a ticket. Right
+ *  owner's words: *"the Overview already lets me create a task or a task. Right
  *  next to it there's Tasks, where the same possibility exists again."*
  *
  *  THE ONE EXCEPTION: a project with no tasks at all. A glance over

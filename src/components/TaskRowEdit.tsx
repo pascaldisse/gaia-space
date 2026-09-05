@@ -1,7 +1,7 @@
 import { Show, createResource, createSignal, onMount } from "solid-js";
 import type { JSX } from "solid-js";
 import { TODO_CATEGORIES, personalApi, type Todo, type TodoContentKind } from "../api/personal";
-import { AssigneeControl, CategoryControl, DueDateControl, ProjectControl } from "./TaskMeta";
+import { AssigneeControl, CategoryControl, DueDateControl, LinksControl, ProjectControl } from "./TaskMeta";
 import { Icon } from "./Icon";
 import { humanError, profiles, projects } from "../session";
 /* The editor's control language IS My tasks' composer language — the same
@@ -254,6 +254,9 @@ export default function TaskRowEdit(props: {
           onChange={value => patch({ category: value })} />
       </div>
       <Show when={membersFailed()}>{reason => <p class="personal-error" role="alert">The project's members could not be loaded: {reason()}</p>}</Show>
+      {/* LINKS: only once the task itself has an id. A task being created has no
+          `todo_id` to hang a link off yet, so this mounts in edit mode only. */}
+      <Show when={!creating()}><LinksControl todoId={props.task.id} canEdit={props.canEdit} /></Show>
       {/* THE CHIP ROW IS GONE. It listed exactly what the Assignee control above it
           already summarises — one fact stated twice, in two different widths, and
           (while the name lookup was broken) with two different answers. Removing an

@@ -5,7 +5,7 @@ export type TodoContentKind = "text"|"markdown";
  *  task is; it is a CLOSED short list, not free text, because a free field produces five
  *  spellings of the same word and then nothing can be grouped. Mirror of
  *  `personal::TODO_CATEGORIES` in src-tauri — the server refuses anything else. */
-export const TODO_CATEGORIES = [{id:"create",label:"Create"},{id:"improve",label:"Improve"},{id:"review",label:"Review"},{id:"decide",label:"Decide"},{id:"admin",label:"Admin"}] as const;
+export const TODO_CATEGORIES = [{id:"create",label:"Create"},{id:"improve",label:"Improve"},{id:"review",label:"Review"},{id:"decide",label:"Decide"},{id:"admin",label:"Admin"},{id:"dev",label:"Dev"}] as const;
 export type TodoCategory = typeof TODO_CATEGORIES[number]["id"];
 /** `category` is OPTIONAL: absent or null means uncategorised, which is the normal case. */
 // `links` is optional on the CLIENT TYPE only (not on the wire, where the server always

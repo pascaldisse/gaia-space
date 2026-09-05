@@ -1,10 +1,12 @@
-import { For, Show, createMemo, createSignal, createUniqueId, onCleanup, onMount } from "solid-js";
+import { For, Show, createMemo, createResource, createSignal, createUniqueId, onCleanup, onMount } from "solid-js";
 import type { JSX } from "solid-js";
 import { Avatar } from "./Avatar";
 import { Icon, type IconName } from "./Icon";
 import DateField from "./DateField";
 import "./TaskMeta.css";
 import { UI_LOCALE } from "../calendar";
+import { personalApi, type TodoLink } from "../api/personal";
+import { humanError } from "../session";
 
 /**
  * One shell for every piece of metadata a task carries. The three composer
@@ -232,4 +234,77 @@ export function AssigneeControl(props: {
       )}
     </MetaControl>
   );
+}
+/**
+ * Links row — a task's own cross-references (`Todo.links`, `TodoLink[]`): a bare
+ * external URL (a GitHub issue/PR, a doc, …) or another task by id. Only meaningful
+ * once the task itself has an id (`update_todo` mode) — a task being created has
+ * nothing yet to hang a link off, so the caller does not mount this before then.
+ *
+ * One kind is offered here: EXTERNAL. Linking one task to another (`kind: "TASK"`) is
+ * the server's shape already (`add_todo_link`), but no surface yet hands this control
+ * a task PICKER, so it is not offered from here — adding it later is additive, not a
+ * rename of what is here now.
+ */
+export function LinksControl(props: { todoId: string; canEdit: boolean }) {
+const [links, { refetch }] = createResource(
+() => props.todoId,
+async (id: string): Promise<{ items?: TodoLink[]; failed?: string }> => {
+if (!id) return { items: [] };
+try { return { items: await personalApi.todoLinks(id) }; }
+catch (reason) { return { failed: humanError(reason) }; }
+},
+);
+const items = () => links()?.items ?? [];
+const failed = () => links()?.failed ?? "";
+const [url, setUrl] = createSignal("");
+const [title, setTitle] = createSignal("");
+const [busy, setBusy] = createSignal(false);
+const [error, setError] = createSignal("");
+const add = async (event: SubmitEvent) => {
+event.preventDefault();
+const trimmedUrl = url().trim();
+if (!trimmedUrl || busy()) return;
+setBusy(true); setError("");
+try {
+await personalApi.addTodoLink({ todo_id: props.todoId, kind: "EXTERNAL", url: trimmedUrl, title: title().trim() || null });
+setUrl(""); setTitle("");
+await refetch();
+} catch (reason) { setError(humanError(reason)); }
+finally { setBusy(false); }
+};
+const remove = async (id: string) => {
+setBusy(true); setError("");
+try { await personalApi.deleteTodoLink(id); await refetch(); }
+catch (reason) { setError(humanError(reason)); }
+finally { setBusy(false); }
+};
+return (
+<div class="tm-links">
+<span class="field-label">Links</span>
+<Show when={failed()}>{reason => <p class="personal-error" role="alert">Links could not be loaded: {reason()}</p>}</Show>
+<ul class="tm-links-list">
+<For each={items()}>{link =>
+<li class="tm-link-row">
+<a href={link.url ?? undefined} target="_blank" rel="noopener noreferrer">{link.title || link.url || link.target_id}</a>
+<Show when={props.canEdit}>
+<button type="button" class="ghost small tm-link-remove" aria-label={`Remove link ${link.title || link.url || link.id}`}
+disabled={busy()} onClick={() => void remove(link.id)}>×</button>
+</Show>
+</li>}
+</For>
+<Show when={!items().length && !failed()}><li class="tm-note">No links yet.</li></Show>
+</ul>
+<Show when={props.canEdit}>
+<form class="tm-link-add" onSubmit={event => void add(event)}>
+<input class="grow" type="url" aria-label="Link URL" placeholder="GitHub issue / PR URL…"
+value={url()} onInput={event => setUrl(event.currentTarget.value)} />
+<input aria-label="Link title" placeholder="Title (optional)"
+value={title()} onInput={event => setTitle(event.currentTarget.value)} />
+<button type="submit" class="ghost small" disabled={busy() || !url().trim()}>Add</button>
+</form>
+</Show>
+<Show when={error()}><p class="personal-error" role="alert">{error()}</p></Show>
+</div>
+);
 }
