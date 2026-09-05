@@ -15,7 +15,7 @@ export type Route = {
   view: string;
   entityType?: string;
   entityId?: string;
-  projectId?: string;      // issue context: /projects/<projectId>/issues/<id>
+  projectId?: string;      // task context, e.g. project-scoped surfaces
   containerType?: string;  // document context: /documents/<containerType>/<containerId>/<id>
   containerId?: string;
   tab?: string;            // channel workspace tab: /channel/<channelId>/<tab>
@@ -66,7 +66,6 @@ export type ViewSpec = { name: string; slug?: string; aliases?: string[] };
 /** Entity URL grammar. `parent` marks entities that carry a project container. */
 const entityRoutes: Record<string, { view: string; segment: string; parent?: "project"; container?: boolean }> = {
   project:  { view: "Projects",     segment: "projects" },
-  issue:    { view: "Issues",       segment: "issues", parent: "project" },
   channel:  { view: "Chat",         segment: "channels" },
   document: { view: "Documents",    segment: "documents", container: true },
   blog:     { view: "Blogs",        segment: "blogs" },
@@ -159,10 +158,12 @@ export function parsePath(path: string): Route {
   // /projects/<projectId>[/<tab>|/chats/<channelId>|/issues/<issueId>|/steering|/settings]
   if (head === "projects" && rest.length) {
     const projectId = rest[0];
-    // A ticket is a child of the Dev tab, so its URL keeps its own shape but the
-    // workspace frame around it lights `dev` — see App.tsx.
+    // LEGACY: tickets are tasks now (task unification, 2026-09). The migration that
+    // folded issues into tasks kept ids, so `<issueId>` IS a task id — but there is
+    // no single-task address in this grammar (a task opens inline, in its row), so
+    // the old link lands on the project's Tasks tab rather than 404ing.
     if (rest[1] === "issues" && rest[2])
-      return norm({ view: "Issues", entityType: "issue", entityId: rest.slice(2).join("/"), projectId });
+      return norm({ view: "Project Workspace", projectId, tab: "tasks" });
     // A channel SELECTED INSIDE the Chats tab. The channel is an object of the tab,
     // never a tab of its own, so it is a segment BELOW `chats`.
     if (rest.length === 3 && rest[1] === "chats")
@@ -203,8 +204,13 @@ export function parsePath(path: string): Route {
     return norm({ view: "Documents", containerType, containerId, ...(entityId ? { entityType: "document", entityId } : {}) });
   }
 
-  // /<entity-segment>/<id> — incl. context-free entity links (e.g. /issues/<id> from Goto, where
-  // the project is not known yet); the view resolves the owner and canonicalizes the URL after.
+  // LEGACY: a bare `/issues/<id>` (no project context, e.g. Goto's own history or a
+  // bookmark) — there is no project to open the Tasks tab on, so it lands on the
+  // reader's own task list rather than 404ing.
+  if (head === "issues" && rest.length) return norm({ view: "To-Do" });
+
+  // /<entity-segment>/<id> — incl. context-free entity links (e.g. /reviews/<id> from Goto,
+  // where the project is not known yet); the view resolves the owner and canonicalizes after.
   const desc = Object.entries(entityRoutes).find(([, d]) => d.segment === head && !d.container);
   if (desc && rest.length) return norm({ view: desc[1].view, entityType: desc[0], entityId: rest.join("/") });
 
@@ -234,10 +240,6 @@ export function buildPath(r: Route): string {
   if (r.view === "Project Tasks" && r.projectId) return `projects/${enc(r.projectId)}/tasks`;
   if (r.view === "Calendar" && r.projectId) return `projects/${enc(r.projectId)}/calendar`;
   if (r.view === "Documents" && r.projectId && !r.containerType) return `projects/${enc(r.projectId)}/knowledge`;
-  if (r.view === "Boards" && r.projectId) return `projects/${enc(r.projectId)}/dev`;
-  // A project's TICKET LIST is the Dev tab. Only the list: a single ticket keeps its
-  // own `/projects/<id>/issues/<issueId>` address, handled by the entity grammar below.
-  if (r.view === "Issues" && r.projectId && !r.entityId) return `projects/${enc(r.projectId)}/dev`;
   if (view === "Inbox" && isActivityFilter(r.tab ?? "")) return `${slug}/${r.tab}`;
   if (r.entityType === "channel" && r.entityId && isChannelTab(r.tab ?? ""))
     return `channel/${enc(r.entityId)}/${r.tab}`;

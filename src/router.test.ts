@@ -1,10 +1,10 @@
 import { describe, expect, test, beforeEach, afterAll } from "bun:test";
 import {
   buildPath, parsePath, registerViews, setAvailableViews, navigate, route,
-  createMemoryAdapter, initRouter, hrefFor, entityView, setRoutePending, linkContainer, linkEntity, channelTabs, projectTabs, type RouterAdapter,
+  createMemoryAdapter, initRouter, hrefFor, entityView, setRoutePending, linkContainer, channelTabs, projectTabs, type RouterAdapter,
 } from "./router";
 
-const VIEWS = ["Dashboard", "To-Do", "Team Tasks", "Projects", "Project Workspace", "Project Overview", "Project Tasks", "Project Steering", "Project Settings", "Calendar", "Boards", "Code Reviews", "Issues", "Chat", "Documents", "Meetings", "Members", "Users"];
+const VIEWS = ["Dashboard", "To-Do", "Team Tasks", "Projects", "Project Workspace", "Project Overview", "Project Tasks", "Project Steering", "Project Settings", "Calendar", "Code Reviews", "Chat", "Documents", "Meetings", "Members", "Users"];
 
 /** Adapter with an explicit history stack, so back/forward/reload are testable without a DOM. */
 function stackAdapter(initial: string) {
@@ -29,31 +29,29 @@ function stackAdapter(initial: string) {
 
 beforeEach(() => { setRoutePending(false); registerViews(VIEWS); setAvailableViews(VIEWS); initRouter(createMemoryAdapter()); });
 
-describe("context-free entity links", () => {
-  test("an issue link without project context is a real route, not a bare view", () => {
-    expect(buildPath({ view: "Issues", entityType: "issue", entityId: "i-1" })).toBe("issues/i-1");
-    expect(parsePath("issues/i-1")).toMatchObject({ view: "Issues", entityType: "issue", entityId: "i-1" });
-    expect(parsePath("issues/i-1").projectId).toBeUndefined();
-    expect(parsePath("issues").entityId).toBeUndefined(); // the plain view URL stays a view URL
+describe("legacy ticket links redirect to tasks", () => {
+  // Tickets are tasks now (task unification). The migration that folded issues into
+  // tasks kept ids, but there is no single-task URL in this grammar (a task opens
+  // inline, in its row) — so an old link lands on a real, useful surface instead of
+  // 404ing, and NORMALIZES there (unlike the old Issues context-free route, which
+  // stayed on its own untouched address).
+  test("a project-scoped ticket link lands on that project's Tasks tab", () => {
+    expect(parsePath("projects/p-1/issues/i-1")).toMatchObject({ view: "Project Workspace", projectId: "p-1", tab: "tasks" });
+    const env = stackAdapter("projects/p-1/issues/i-1");
+    initRouter(env.adapter);
+    expect(route()).toMatchObject({ view: "Project Workspace", projectId: "p-1", tab: "tasks" });
+    expect(env.url()).toBe("projects/p-1/tasks"); // normalized to the canonical tab address
   });
 
-  test("Goto's context-free URL survives new tab / reload", () => {
-    const env = stackAdapter("issues/i-1"); // pasted or opened in a new tab
+  test("a context-free ticket link (Goto, bookmark) lands on the reader's own tasks", () => {
+    expect(parsePath("issues/i-1")).toMatchObject({ view: "To-Do" });
+    // The bare `/issues` list has no equivalent (there is no ticket list any more);
+    // only a link that named a specific ticket has somewhere honest to land.
+    expect(parsePath("issues").view).toBe("Dashboard");
+    const env = stackAdapter("issues/i-1");
     initRouter(env.adapter);
-    expect(route()).toMatchObject({ view: "Issues", entityType: "issue", entityId: "i-1" });
-    expect(env.url()).toBe("issues/i-1"); // not normalized away
-    env.reload();
-    expect(route()).toMatchObject({ entityType: "issue", entityId: "i-1" });
-  });
-
-  test("resolving the owner canonicalizes in place, leaving no history trap", () => {
-    const env = stackAdapter("dashboard");
-    initRouter(env.adapter);
-    navigate({ view: "Issues", entityType: "issue", entityId: "i-1" }); // Goto: project unknown
-    linkEntity("issue", "i-1", { projectId: "p-1" }, true);             // view resolved the project
-    expect(env.url()).toBe("projects/p-1/issues/i-1");
-    env.back();
-    expect(route().view).toBe("Dashboard"); // back skips the pre-canonical twin
+    expect(route().view).toBe("To-Do");
+    expect(env.url()).toBe("to-do");
   });
 });
 
@@ -93,7 +91,7 @@ describe("grammar", () => {
     expect(buildPath({ view: "Code Reviews" })).toBe("code-reviews");
     expect(buildPath({ view: "To-Do" })).toBe("to-do");
     expect(parsePath("code-reviews").view).toBe("Code Reviews");
-    expect(buildPath({ view: "Issues" })).not.toContain("#");
+    expect(buildPath({ view: "Code Reviews" })).not.toContain("#");
   });
 
   /* THE OBVIOUS SPELLING OF THE TASK AREA IS THE TASK AREA. `todo`/`tasks` are
@@ -113,12 +111,6 @@ describe("grammar", () => {
     expect(buildPath({ view: "To-Do" })).toBe("to-do");
     expect(buildPath({ view: "Task Ledger" })).toBe("task-ledger");
     registerViews(VIEWS);
-  });
-
-  test("issue routes carry project context", () => {
-    const path = buildPath({ view: "Issues", entityType: "issue", entityId: "i-1", projectId: "p-1" });
-    expect(path).toBe("projects/p-1/issues/i-1");
-    expect(parsePath(path)).toMatchObject({ view: "Issues", entityType: "issue", entityId: "i-1", projectId: "p-1" });
   });
 
   // ── THE PROJECT WORKSPACE ────────────────────────────────────────────
@@ -170,19 +162,10 @@ describe("grammar", () => {
     };
     landsOn({ view: "Project Tasks", projectId: "p-1" }, "projects/p-1/tasks", "tasks");
     landsOn({ view: "Calendar", projectId: "p-1" }, "projects/p-1/calendar", "calendar");
-    landsOn({ view: "Boards", projectId: "p-1" }, "projects/p-1/dev", "dev");
-    landsOn({ view: "Issues", projectId: "p-1" }, "projects/p-1/dev", "dev");
     // The old Project Overview page: its content IS the landing now.
     landsOn({ view: "Project Overview", projectId: "p-1" }, "projects/p-1");
     // ...and the legacy `/overview` spelling still resolves rather than 404-ing.
     expect(parsePath("projects/p-1/overview")).toMatchObject({ view: "Project Workspace", projectId: "p-1" });
-  });
-
-  test("a single ticket keeps its own address even though the list is the Dev tab", () => {
-    expect(buildPath({ view: "Issues", entityType: "issue", entityId: "i-1", projectId: "p-1" }))
-      .toBe("projects/p-1/issues/i-1");
-    expect(parsePath("projects/p-1/issues/i-1"))
-      .toMatchObject({ view: "Issues", entityType: "issue", entityId: "i-1", projectId: "p-1" });
   });
 
   test("document routes carry a valid container type + id, incl. the null container", () => {
@@ -265,8 +248,8 @@ describe("grammar", () => {
   });
 
   test("query strings are outside route grammar", () => {
-    expect(parsePath("projects/p-1/issues/i-1?tab=activity")).toMatchObject({
-      view: "Issues", projectId: "p-1", entityId: "i-1",
+    expect(parsePath("projects/p-1/tasks?tab=activity")).toMatchObject({
+      view: "Project Workspace", projectId: "p-1", tab: "tasks",
     });
     expect(parsePath("documents/kb/book-1/d-1?preview=1")).toMatchObject({
       view: "Documents", containerType: "kb", containerId: "book-1", entityId: "d-1",
@@ -293,7 +276,7 @@ describe("normalization", () => {
   test("navigate to an unavailable view falls back instead of writing a dead URL", () => {
     const env = stackAdapter("dashboard");
     initRouter(env.adapter);
-    setAvailableViews(["Dashboard", "Issues"]);
+    setAvailableViews(["Dashboard", "To-Do"]);
     navigate({ view: "Code Reviews" });
     expect(route().view).toBe("Dashboard");
     expect(env.url()).toBe("dashboard");
@@ -317,7 +300,7 @@ describe("history", () => {
     for (const historicalPath of ["not-a-view", "documents/not-a-container/id"]) {
       const env = stackAdapter("dashboard");
       initRouter(env.adapter);
-      navigate({ view: "Issues", entityType: "issue", entityId: "i-1", projectId: "p-1" });
+      navigate({ view: "Code Reviews", entityType: "review", entityId: "i-1" });
       env.replace(historicalPath);
       navigate({ view: "Chat", entityType: "channel", entityId: "c-9" });
 
@@ -330,48 +313,73 @@ describe("history", () => {
   test("back/forward restore valid prior routes without rewriting their URLs (popstate)", () => {
     const env = stackAdapter("dashboard");
     initRouter(env.adapter);
-    navigate({ view: "Issues", entityType: "issue", entityId: "i-1", projectId: "p-1" });
+    navigate({ view: "Code Reviews", entityType: "review", entityId: "r-1" });
     navigate({ view: "Chat", entityType: "channel", entityId: "c-9" });
     expect(env.url()).toBe("channels/c-9");
 
     env.back();
-    expect(route()).toMatchObject({ view: "Issues", entityId: "i-1", projectId: "p-1" });
-    expect(env.url()).toBe("projects/p-1/issues/i-1");
+    expect(route()).toMatchObject({ view: "Code Reviews", entityId: "r-1" });
+    expect(env.url()).toBe("reviews/r-1");
     env.back();
     expect(route().view).toBe("Dashboard");
     expect(route().entityId).toBeUndefined();
     expect(env.url()).toBe("dashboard");
     env.forward();
-    expect(route()).toMatchObject({ view: "Issues", entityId: "i-1" });
-    expect(env.url()).toBe("projects/p-1/issues/i-1");
+    expect(route()).toMatchObject({ view: "Code Reviews", entityId: "r-1" });
+    expect(env.url()).toBe("reviews/r-1");
+  });
+
+  // Project-scoped state round-trips through history the same way — the Project
+  // Workspace tab carries `projectId` where an entity route used to (tickets, before
+  // task unification, were the only project-scoped entity; the Dev tab is now).
+  test("back/forward restore a project tab without rewriting its URL", () => {
+    const env = stackAdapter("dashboard");
+    initRouter(env.adapter);
+    navigate({ view: "Project Workspace", projectId: "p-1", tab: "dev" });
+    navigate({ view: "Chat", entityType: "channel", entityId: "c-9" });
+    expect(env.url()).toBe("channels/c-9");
+
+    env.back();
+    expect(route()).toMatchObject({ view: "Project Workspace", projectId: "p-1", tab: "dev" });
+    expect(env.url()).toBe("projects/p-1/dev");
   });
 
   test("back from an entity URL to the view URL clears the entity", () => {
-    const env = stackAdapter("issues");
+    const env = stackAdapter("reviews");
     initRouter(env.adapter);
-    navigate({ view: "Issues", entityType: "issue", entityId: "i-1", projectId: "p-1" });
+    navigate({ view: "Code Reviews", entityType: "review", entityId: "r-1" });
     env.back();
     expect(route().entityId).toBeUndefined();
-    expect(route().view).toBe("Issues");
+    expect(route().view).toBe("Code Reviews");
   });
 
   test("reload of a deep URL rebuilds the same route (authenticated boot)", () => {
-    const env = stackAdapter("projects/p-7/issues/i-7");
+    const env = stackAdapter("projects/p-7/dev");
     initRouter(env.adapter);
     const before = route();
     env.reload();
     expect(route()).toMatchObject(before);
-    expect(env.url()).toBe("projects/p-7/issues/i-7"); // survives boot untouched
+    expect(env.url()).toBe("projects/p-7/dev"); // survives boot untouched
   });
 
   test("boot before the view registry is known still normalizes once registered", () => {
     registerViews([]);
-    const env = stackAdapter("issues");
+    const env = stackAdapter("reviews");
     initRouter(env.adapter);
     expect(route().view).toBe("Dashboard");
     registerViews(VIEWS);
     setAvailableViews(VIEWS);
-    expect(parsePath("issues").view).toBe("Issues");
+    expect(parsePath("reviews").view).toBe("Code Reviews");
+  });
+
+  // A legacy ticket link is a normalizing redirect, so it does NOT survive reload
+  // untouched the way a still-canonical deep URL does — see "legacy ticket links
+  // redirect to tasks" above.
+  test("reload of a legacy ticket URL lands on, and rewrites to, the Tasks tab", () => {
+    const env = stackAdapter("projects/p-7/issues/i-7");
+    initRouter(env.adapter);
+    expect(route()).toMatchObject({ view: "Project Workspace", projectId: "p-7", tab: "tasks" });
+    expect(env.url()).toBe("projects/p-7/tasks");
   });
 });
 
@@ -379,8 +387,8 @@ describe("links", () => {
   test("hrefFor produces a real base-prefixed URL with no hash", () => {
     const env = stackAdapter("dashboard");
     initRouter(env.adapter);
-    const href = hrefFor({ view: "Issues", entityType: "issue", entityId: "i-1", projectId: "p-1" });
-    expect(href).toBe("/space/projects/p-1/issues/i-1");
+    const href = hrefFor({ view: "Code Reviews", entityType: "review", entityId: "r-1" });
+    expect(href).toBe("/space/reviews/r-1");
     expect(href).not.toContain("#");
   });
 });
