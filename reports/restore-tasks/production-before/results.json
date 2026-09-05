@@ -1,0 +1,40 @@
+{
+  "before": true,
+  "anonymousAuthStatus": 401,
+  "results": [
+    {
+      "path": "todo",
+      "url": "https://paloptic.com/space/todo",
+      "title": "Task Ledger",
+      "width": 1440,
+      "tasks": 0,
+      "ledgerRows": 329,
+      "geometry": {
+        "viewport": 1440,
+        "scroll": 1440
+      }
+    },
+    {
+      "path": "to-do",
+      "url": "https://paloptic.com/space/to-do",
+      "title": "My tasks",
+      "width": 1440,
+      "tasks": 0,
+      "ledgerRows": 0,
+      "geometry": {
+        "viewport": 1440,
+        "scroll": 1440
+      }
+    }
+  ],
+  "errors": [
+    "database is locked",
+    "database is locked",
+    "database is locked",
+    "database is locked",
+    "database is locked",
+    "database is locked",
+    "database is locked"
+  ],
+  "writes": "none"
+}
