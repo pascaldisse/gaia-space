@@ -96,6 +96,25 @@ describe("grammar", () => {
     expect(buildPath({ view: "Issues" })).not.toContain("#");
   });
 
+  /* THE OBVIOUS SPELLING OF THE TASK AREA IS THE TASK AREA. `todo`/`tasks` are
+     aliases of the working surface; the generated read-only ledger owns its own
+     slug and can never take the address people type. */
+  test("todo and tasks are the task area, not the ledger", () => {
+    registerViews([
+      { name: "To-Do", aliases: ["todo", "tasks"] },
+      { name: "Task Ledger", slug: "task-ledger" },
+      "Dashboard",
+    ]);
+    setAvailableViews(null);
+    expect(parsePath("todo").view).toBe("To-Do");
+    expect(parsePath("tasks").view).toBe("To-Do");
+    expect(parsePath("to-do").view).toBe("To-Do");
+    expect(parsePath("task-ledger").view).toBe("Task Ledger");
+    expect(buildPath({ view: "To-Do" })).toBe("to-do");
+    expect(buildPath({ view: "Task Ledger" })).toBe("task-ledger");
+    registerViews(VIEWS);
+  });
+
   test("issue routes carry project context", () => {
     const path = buildPath({ view: "Issues", entityType: "issue", entityId: "i-1", projectId: "p-1" });
     expect(path).toBe("projects/p-1/issues/i-1");

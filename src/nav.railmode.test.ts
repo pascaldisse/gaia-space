@@ -14,7 +14,7 @@ const ALL_VIEWS = [
   "Project Settings", "Project Workspace", "Settings",
 ];
 
-registerViews(ALL_VIEWS);
+registerViews([...ALL_VIEWS.filter(v => v !== "To-Do"), { name: "To-Do", aliases: ["todo", "tasks"] }, { name: "Task Ledger", slug: "task-ledger" }]);
 setAvailableViews(null);
 
 const modeOfPath = (path: string): RailMode => railModeOfRoute(parsePath(path));
@@ -24,20 +24,24 @@ describe("rail mode derived from the view", () => {
     expect(railModeOfView("Home")).toBe("home");
     expect(railModeOfView("Chat")).toBe("chats");
     expect(railModeOfView("Inbox")).toBe("home");
-    expect(railModeOfView("To-Do")).toBe("home");
+    expect(railModeOfView("To-Do")).toBe("tasks");
+    expect(railModeOfView("Team Tasks")).toBe("tasks");
+    expect(railModeOfView("Task Ledger")).toBe("tasks");
     expect(railModeOfView("Calendar")).toBe("home");
     expect(railModeOfView("Documents")).toBe("library");
     expect(railModeOfView("Development")).toBe("development");
   });
 
   it("puts every view in EXACTLY ONE mode", () => {
-    const modes: RailMode[] = ["home", "chats", "projects", "library", "development", "more"];
+    const modes: RailMode[] = ["home", "chats", "tasks", "projects", "library", "development", "more"];
     const seen = new Map<string, RailMode>();
     for (const mode of modes)
       for (const view of viewsInMode(mode)) {
         expect(seen.has(view)).toBe(false);
         seen.set(view, mode);
       }
+    for (const taskView of ["To-Do", "Team Tasks", "Task Ledger"])
+      expect(seen.get(taskView)).toBe("tasks");
   });
 
   it("sends unmapped/registry views to More, so nothing becomes unreachable", () => {
@@ -101,8 +105,10 @@ describe("deep links arrive with the right mode", () => {
     // A project-scoped task surface belongs to the project, not to the personal
     // task list: it is reached from inside a project and must not switch the mode.
     expect(modeOfPath("projects/p-1/tasks")).toBe("projects");
-    expect(modeOfPath("team-tasks")).toBe("home");
-    expect(modeOfPath("to-do")).toBe("home");
+    expect(modeOfPath("team-tasks")).toBe("tasks");
+    expect(modeOfPath("to-do")).toBe("tasks");
+    expect(modeOfPath("todo")).toBe("tasks");
+    expect(modeOfPath("task-ledger")).toBe("tasks");
     // The project's calendar is the project's Calendar TAB, so it stays in the
     // projects mode: leaving for the calendar sidebar would lose the project.
     expect(modeOfPath("projects/p-1/calendar")).toBe("projects");
@@ -122,5 +128,5 @@ describe("deep links arrive with the right mode", () => {
 describe("responsive rail preferences", () => {
   it("defaults desktop placement to left", () => { expect(navPlacement()).toBe("left"); setNavPlacement("right"); expect(navPlacement()).toBe("right"); setNavPlacement("left"); });
   it("folds development into More when hidden", () => { setShowDevelopment(false); expect(railModeOfView("Issues")).toBe("more"); setShowDevelopment(true); expect(railModeOfView("Issues")).toBe("development"); });
-  it("limits mobile rail to five destinations", () => { expect(MOBILE_RAIL_MODES).toEqual(["home", "chats", "projects", "library", "more"]); expect(MOBILE_RAIL_MODES.length).toBeLessThanOrEqual(5); });
+  it("limits mobile rail to five destinations", () => { expect(MOBILE_RAIL_MODES).toEqual(["home", "chats", "tasks", "projects", "more"]); expect(MOBILE_RAIL_MODES.length).toBeLessThanOrEqual(5); });
 });
