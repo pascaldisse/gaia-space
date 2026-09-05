@@ -1,6 +1,5 @@
 import { createMemo, createResource, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import { chatApi, type SourceRef } from "../api/chat";
-import { planningApi } from "../api/issues";
 import { meetingsApi } from "../api/meetings";
 import { personalApi } from "../api/personal";
 import { humanError, isWeb, profileId, profiles } from "../session";
@@ -13,8 +12,11 @@ import "./WorkItemDrawer.css";
 
 /** The three shapes a message can become. "Pull Request" is in the briefing's field
  * table but has no create path here: linking a PR is a review-side act, not a
- * message-to-work act, so it is deliberately absent rather than a dead button. */
-export type WorkItemKind = "task" | "ticket" | "event";
+ * message-to-work act, so it is deliberately absent rather than a dead button.
+ * `"dev"` used to be `"ticket"` (a separate tracker entity, Issue): task unification
+ * folded it into a plain task with `category: "dev"`, filed on the project's Dev tab —
+ * same create act, same drawer, one fewer entity in the product. */
+export type WorkItemKind = "task" | "dev" | "event";
 /** The anchor that will be written onto the created work, plus whatever the opener
  * already knows about it. `channel_id`/`excerpt` are an optimistic preview only —
  * `resolve_source_ref` is the truth and overwrites them once it answers. */
@@ -22,10 +24,9 @@ export type WorkItemSource = { entity_type: string; entity_id: string; channel_i
 
 const COPY: Record<WorkItemKind, { heading: string; intro: string; submit: string; busy: string }> = {
   task: { heading: "Create task", intro: "This task stays linked to the message and the channel.", submit: "Create task", busy: "Creating…" },
-  ticket: { heading: "Create ticket", intro: "For bugs, features or improvements in the Development area.", submit: "Create ticket", busy: "Creating…" },
+  dev: { heading: "Create dev task", intro: "For bugs, features or improvements — filed on the project's Dev tab.", submit: "Create task", busy: "Creating…" },
   event: { heading: "Create date", intro: "This date appears in the global calendar and in the channel.", submit: "Create date", busy: "Creating…" },
 };
-const PRIORITIES = [["", "None"], ["LOW", "Low"], ["MEDIUM", "Medium"], ["HIGH", "High"], ["URGENT", "Urgent"]] as const;
 /** `datetime-local` value for "the next full hour", so Time is never empty-but-required. */
 const nextHour = () => {
   const when = new Date(Date.now() + 3_600_000);
@@ -53,8 +54,6 @@ export default function WorkItemDrawer(props: {
   const [dueDate, setDueDate] = createSignal("");
   const [startsAt, setStartsAt] = createSignal(nextHour());
   const [minutes, setMinutes] = createSignal(60);
-  const [priority, setPriority] = createSignal("");
-  const [typeTagId, setTypeTagId] = createSignal("");
   const [error, setError] = createSignal("");
   const [busy, setBusy] = createSignal(false);
   let panel!: HTMLElement;
@@ -67,7 +66,6 @@ export default function WorkItemDrawer(props: {
     ([entity_type, entity_id]) => chatApi.resolveSourceRef(entity_type, entity_id).catch(() => null as SourceRef | null),
   );
   const [memberIds] = createResource(() => props.projectId, id => id ? personalApi.projectMemberIds(id) : Promise.resolve<string[]>([]));
-  const [tags] = createResource(() => props.kind === "ticket" ? props.projectId : undefined, id => id ? planningApi.tags(id) : Promise.resolve([]));
   // Assignment is restricted to the project: a channel guest is not silently made
   // responsible for project work.
   const people = createMemo(() => (profiles() ?? []).filter(person => !person.archived && (memberIds() ?? []).includes(person.id)));
@@ -101,25 +99,16 @@ export default function WorkItemDrawer(props: {
     if (!heading) { setError("Please enter a title."); return; }
     setError(""); setBusy(true);
     try {
-      if (props.kind === "task") {
+      if (props.kind === "task" || props.kind === "dev") {
         if (!profileId()) throw new Error("Your profile is still loading.");
+        if (props.kind === "dev" && !props.projectId) throw new Error("A dev task needs a project.");
         const todo = await personalApi.createTodo({
           profile_id: profileId(), content: heading, notes: body().trim() || null,
           due_date: dueDate() || null, project_id: props.projectId ?? null, done: false,
+          category: props.kind === "dev" ? "dev" : null,
           ...anchor(), assignee_ids: everyone(), content_kind: "text",
         });
-        props.onCreated?.("task", todo.id, props.projectId);
-      } else if (props.kind === "ticket") {
-        if (!props.projectId) throw new Error("A ticket needs a project.");
-        const issue = await planningApi.createIssue({
-          project_id: props.projectId, title: heading, description: body().trim() || null,
-          status_id: null, assignee_id: ownerId() || null, assignee_ids: everyone(),
-          created_by: profileId() || null, due_date: null, priority: priority() || null,
-          archived: false, ...anchor(),
-        });
-        // "Type" is a planning tag, not a column (see the deviation note on `tags`).
-        if (typeTagId()) await planningApi.setTags(issue.id, [typeTagId()]);
-        props.onCreated?.("ticket", issue.id, props.projectId);
+        props.onCreated?.(props.kind, todo.id, props.projectId);
       } else {
         const starts = Math.floor(new Date(startsAt()).getTime() / 1000);
         if (!Number.isFinite(starts)) throw new Error("Please pick a valid time.");
@@ -163,18 +152,6 @@ export default function WorkItemDrawer(props: {
         <p>{COPY[props.kind].intro}</p>
       </header>
       <form class="wid-form" onSubmit={submit}>
-        <Show when={props.kind === "ticket"}>
-          {/* A project's ticket types are a handful of its own words — short,
-             closed, ours — so this opens OUR menu, not the system popup. */}
-          <div class="wid-field"><span>Type</span>
-            <Show when={(tags() ?? []).length}
-              fallback={<PillMenu label="Ticket type" value="" disabled onChange={() => {}}
-                options={[{ value: "", label: "No ticket types in this project" }]} />}>
-              <PillMenu label="Ticket type" value={typeTagId()} onChange={setTypeTagId}
-                options={[{ value: "", label: "No type" }, ...(tags() ?? []).map(tag => ({ value: tag.id, label: tag.name }))]} />
-            </Show>
-          </div>
-        </Show>
         <label class="wid-field"><span>Title</span>
           {/* Prefilled from the message, always editable: work is created deliberately. */}
           <input class="wid-input" ref={firstField} value={title()} onInput={event => setTitle(event.currentTarget.value)} placeholder="What is this about?" />
@@ -201,27 +178,19 @@ export default function WorkItemDrawer(props: {
             </select>
           </label>
         </Show>
-        <Show when={props.kind !== "ticket"}>
-          <fieldset class="wid-field wid-people"><legend>{props.kind === "event" ? "Participants" : "Contributors"}</legend>
-            <Show when={people().length} fallback={<p class="wid-hint">This project has no members yet.</p>}>
-              <For each={people()}>{person => <label class="wid-person">
-                <input type="checkbox" checked={helperIds().includes(person.id)} onChange={() => toggleHelper(person.id)} />
-                <span>{person.display_name || person.username}</span>
-              </label>}</For>
-            </Show>
-          </fieldset>
-        </Show>
-        <Show when={props.kind === "task"}>
+        <fieldset class="wid-field wid-people"><legend>{props.kind === "event" ? "Participants" : "Contributors"}</legend>
+          <Show when={people().length} fallback={<p class="wid-hint">This project has no members yet.</p>}>
+            <For each={people()}>{person => <label class="wid-person">
+              <input type="checkbox" checked={helperIds().includes(person.id)} onChange={() => toggleHelper(person.id)} />
+              <span>{person.display_name || person.username}</span>
+            </label>}</For>
+          </Show>
+        </fieldset>
+        <Show when={props.kind === "task" || props.kind === "dev"}>
           {/* A caption plus a BUTTON: a <label> may not wrap a control that opens a
               popover, so the field is a div and the control carries its own name. */}
           <div class="wid-field"><span>Due</span>
             <DateField label="Due" value={dueDate()} onChange={setDueDate} placeholder="No due date" />
-          </div>
-        </Show>
-        <Show when={props.kind === "ticket"}>
-          <div class="wid-field"><span>Priority</span>
-            <PillMenu label="Priority" value={priority()} onChange={setPriority}
-              options={PRIORITIES.map(([value, label]) => ({ value, label }))} />
           </div>
         </Show>
         <Show when={props.kind === "event"}>

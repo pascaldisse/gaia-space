@@ -19,8 +19,8 @@ export const NAV_GROUPS: NavGroup[] = [
   // replacement for the task area: it joins the group AFTER the three working
   // surfaces so nobody meets it first and mistakes it for "Tasks".
   { id: "tasks", label: "Tasks", icon: "check", views: ["To-Do", "Team Tasks", "Project Tasks", "Task Ledger"] },
-  // Projects is ONE destination: open a project → its boards → their issues.
-  // Issues/Boards/Packages stay routable (deep links, Go to) but are not tabs.
+  // Projects is ONE destination: open a project → its Dev tab → its dev tasks.
+  // Packages stay routable (deep links, Go to) but is not a tab.
   { id: "projects", label: "Projects", icon: "layers", views: ["Projects", "Development", "Repos", "Code Reviews", "Pipelines", "Dev Environments"] },
   { id: "calendar", label: "Calendar", icon: "calendar-nav", views: ["Calendar", "Meetings"] },
   { id: "knowledge", label: "Knowledge", icon: "book-nav", views: ["Documents", "Blogs"] },
@@ -100,7 +100,7 @@ export const groupOfView = (groups: NavGroup[], view: string) => groups.find(gro
 /** View names are ROUTING KEYS (router.ts, buildPath, deep links) and must not move.
  *  When the product's word differs from the key, it is mapped here — the nav shows the
  *  product's word, the URL keeps the app's own name. */
-const VIEW_LABELS: Record<string, string> = { Issues: "Tickets", Documents: "Knowledge" };
+const VIEW_LABELS: Record<string, string> = { Documents: "Knowledge" };
 export const viewLabel = (view: string) => VIEW_LABELS[view] ?? view;
 
 // ---------------------------------------------------------------------------
@@ -153,8 +153,6 @@ const MODE_OF_VIEW: Record<string, RailMode> = {
   Blogs: "library",
   Members: "home",
   Development: "development",
-  Issues: "development",
-  Boards: "development",
   Repos: "development",
   "Code Reviews": "development",
   Pipelines: "development",
@@ -174,9 +172,8 @@ export const railModeOfRoute = (route: { view: string; entityType?: string; proj
   // A PROJECT ROUTE IS ALWAYS THE PROJECTS MODE. This wins over the entity type and
   // over the view name, because both lie about a project-scoped address: a channel
   // opened inside the workspace (`/projects/<id>/chats/<cid>`) renders the Chat view
-  // and carries `entityType: "channel"`, yet you are standing in the project — and a
-  // ticket at `/projects/<id>/issues/<iid>` renders Issues, whose own home is
-  // Development. Deriving the mode from the view alone put both in the wrong sidebar.
+  // and carries `entityType: "channel"`, yet you are standing in the project. Deriving
+  // the mode from the view alone put that in the wrong sidebar.
   if (route.projectId) return "projects";
   return route.entityType === "channel" ? "chats" : railModeOfView(route.view);
 };

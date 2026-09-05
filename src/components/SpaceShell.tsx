@@ -100,8 +100,6 @@ const MODE_LINKS: Record<RailMode, SideEntry[]> = {
   library: [],
   development: [
     { label: "Overview", view: "Development", icon: "target", strong: true },
-    { label: "Tickets", view: "Issues", icon: "target" },
-    { label: "Boards", view: "Boards", icon: "columns" },
     { label: "Pull requests", view: "Code Reviews", icon: "review" },
     { label: "Repositories", view: "Repos", icon: "repo" },
     { label: "Pipelines", view: "Pipelines", icon: "pipeline" },
@@ -973,7 +971,7 @@ const [mobileSidebarOpen, setMobileSidebarOpen] = createSignal(false);
         <header class="commandbar">
           <button class="command-search" onClick={props.onOpenSearch}>
             <Icon name="search" size={16} />
-            Search messages, tasks, dates and tickets
+            Search messages, tasks and dates
           </button>
           {/* ── THE GLOBAL-ACTION RULE ────────────────────────────────────────
               The GLOBAL bar carries SEARCH plus AT MOST ONE global action, and that

@@ -157,7 +157,7 @@ export default function Chat(props: { embedded?: boolean } = {}) {
    *  `WorkItemDrawer`, a `resolve_source_ref` command on both backends, and the
    *  `source_entity_type/_id` anchor on issues, meetings and documents — imported by
    *  its own test and by nothing else. A channel card even ADVERTISED the mapping
-   *  (Task / Ticket / Date) without offering it.
+   *  (Task / Dev task / Date) without offering it.
    *
    *  The trigger belongs on the MESSAGE, because that is where the person is when
    *  they realise the message is work — not on a side card, and not in a page header.
@@ -175,7 +175,7 @@ export default function Chat(props: { embedded?: boolean } = {}) {
       y: event.clientY,
       items: [
         { label: "Task", onSelect: start("task") },
-        { label: "Ticket", onSelect: start("ticket") },
+        { label: "Dev task", onSelect: start("dev") },
         { label: "Date", onSelect: start("event") },
       ],
     });
@@ -1672,10 +1672,10 @@ const deleteActiveChannel = async () => {
             prefillTitle={draft().excerpt}
             onClose={() => setWorkDraft(null)}
             onCreated={(kind, _id, createdProjectId) => {
-              // A ticket made from a project channel belongs to that channel's project.
-              // Keep Development's shared project filter there, so the next ticket list
+              // A dev task made from a project channel belongs to that channel's project.
+              // Keep Development's shared project filter there, so the next dev task list
               // shows the work just created instead of an unrelated empty project.
-              if (kind === "ticket" && createdProjectId) setProjectId(createdProjectId);
+              if (kind === "dev" && createdProjectId) setProjectId(createdProjectId);
               setWorkDraft(null);
             }}
           />

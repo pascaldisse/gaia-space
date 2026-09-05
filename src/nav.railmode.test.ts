@@ -8,7 +8,7 @@ import { parsePath, registerViews, setAvailableViews } from "./router";
 
 const ALL_VIEWS = [
   "Home", "Dashboard", "To-Do", "Absences", "Projects", "Repos", "Code Reviews", "Pipelines",
-  "Issues", "Boards", "Chat", "Inbox", "Documents", "Blogs", "Calendar", "Meetings",
+  "Chat", "Inbox", "Documents", "Blogs", "Calendar", "Meetings",
   "Dev Environments", "Packages", "Members", "Locations", "Admin", "Applications", "Users",
   "Development", "Team Tasks", "Project Tasks", "Project Overview", "Project Steering",
   "Project Settings", "Project Workspace", "Settings",
@@ -127,6 +127,6 @@ describe("deep links arrive with the right mode", () => {
 
 describe("responsive rail preferences", () => {
   it("defaults desktop placement to left", () => { expect(navPlacement()).toBe("left"); setNavPlacement("right"); expect(navPlacement()).toBe("right"); setNavPlacement("left"); });
-  it("folds development into More when hidden", () => { setShowDevelopment(false); expect(railModeOfView("Issues")).toBe("more"); setShowDevelopment(true); expect(railModeOfView("Issues")).toBe("development"); });
+  it("folds development into More when hidden", () => { setShowDevelopment(false); expect(railModeOfView("Code Reviews")).toBe("more"); setShowDevelopment(true); expect(railModeOfView("Code Reviews")).toBe("development"); });
   it("limits mobile rail to five destinations", () => { expect(MOBILE_RAIL_MODES).toEqual(["home", "chats", "tasks", "projects", "more"]); expect(MOBILE_RAIL_MODES.length).toBeLessThanOrEqual(5); });
 });

@@ -20,7 +20,6 @@ const reply = (cmd: string) => {
   if (cmd === "list_project_member_ids") return ["me", "other"];
   if (cmd === "list_profiles") return [{ id: "me", username: "me", display_name: "Me", email: null, archived: false }, { id: "other", username: "other", display_name: "Other Person", email: null, archived: false }];
   if (cmd === "create_todo") return { id: "todo-1" };
-  if (cmd === "create_issue") return { id: "issue-1" };
   return [];
 };
 const settle = () => new Promise(resolve => setTimeout(resolve, 40));
@@ -61,17 +60,19 @@ test("a task created from a message carries the source anchor and the prefilled-
   expect(created).toEqual([["task", "todo-1"]]);
 });
 
-test("a ticket created from a message reports its project to the caller", async () => {
+test("a dev task created from a message reports its project to the caller, and carries category 'dev'", async () => {
   const created: [string, string, string | undefined][] = [];
-  const host = await mount(() => <WorkItemDrawer kind="ticket" source={source} projectId="p-ticket" prefillTitle="Safari Login hängt" onClose={() => {}} onCreated={(kind, id, projectId) => created.push([kind, id, projectId])} /> as any);
+  const host = await mount(() => <WorkItemDrawer kind="dev" source={source} projectId="p-ticket" prefillTitle="Safari Login hängt" onClose={() => {}} onCreated={(kind, id, projectId) => created.push([kind, id, projectId])} /> as any);
   host.querySelector<HTMLFormElement>(".wid-form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
   await settle();
-  expect(created).toEqual([["ticket", "issue-1", "p-ticket"]]);
+  expect(created).toEqual([["dev", "todo-1", "p-ticket"]]);
+  const write = calls.find(entry => entry.cmd === "create_todo")!;
+  expect((write.args.input as Record<string, unknown>).category).toBe("dev");
 });
 
 test("the drawer never creates anything without an explicit submit", async () => {
-  const host = await mount(() => <WorkItemDrawer kind="ticket" source={source} projectId="p1" prefillTitle="Safari Login hängt" onClose={() => {}} /> as any);
-  // Typing, choosing people, changing priority: all local until the person submits.
+  const host = await mount(() => <WorkItemDrawer kind="dev" source={source} projectId="p1" prefillTitle="Safari Login hängt" onClose={() => {}} /> as any);
+  // Typing, choosing people, changing owner: all local until the person submits.
   const title = host.querySelector<HTMLInputElement>(".wid-field input.wid-input")!;
   title.value = "Safari Login hängt beim zweiten Versuch"; title.dispatchEvent(new Event("input", { bubbles: true }));
   const owner = host.querySelector<HTMLSelectElement>("select.wid-input")!;
