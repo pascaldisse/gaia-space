@@ -82,6 +82,16 @@ describe("nothing the narrow rail drops becomes unreachable", () => {
     const css = readFileSync(new URL("./SpaceShell.css", import.meta.url), "utf8");
     expect(css).toContain(".more-mobile-only { display: none; }");
     expect(css).toContain("@media (max-width: 720px) { .space-chat-shell .more-mobile-only { display: contents; } }");
+
+    dispose?.(); host.remove();
+    setShowDevelopment(false);
+    const hiddenHost = await mountTasks();
+    (hiddenHost.querySelector('.mobile-rail [aria-label="More"]') as HTMLElement).click();
+    await settle();
+    const hiddenDropped = document.querySelector(".more-panel .more-mobile-only") as HTMLElement;
+    const hiddenLabels = [...hiddenDropped.querySelectorAll(".more-item")].map((n) => n.textContent?.trim());
+    expect(hiddenLabels).toContain("Library");
+    expect(hiddenLabels).not.toContain("Development");
   });
 });
 

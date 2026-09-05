@@ -45,8 +45,6 @@ export default function Todo() {
      a ticket ledger. It becomes a second pane instead — present, counted, one click
      away, and never in front of the list this page is named after. */
   const [pane,setPane]=createSignal<"tasks"|"tickets">("tasks");
-const hasAssignedIssues=()=>!!assignedIssues()?.length;
-createEffect(()=>{ if(!hasAssignedIssues()&&pane()==="tickets") setPane("tasks"); });
   const [todos,{refetch}]=createResource(profileId,id=>id?personalApi.todos(id,true):Promise.resolve([]));
   /* A FAILED READ IS NOT AN EMPTY LIST (mirrors TeamTasks/ProjectTasks, 6de55cc): a
      rejected `list_todos` is carried as `todos.error` and shown as one alert below,
@@ -59,6 +57,8 @@ createEffect(()=>{ if(!hasAssignedIssues()&&pane()==="tickets") setPane("tasks")
   const stableTodos=stableTasks(()=>(todos.error?[]:todos()));
 const scopedTodos=()=>myTasks(stableTodos(),profileId());
 const [assignedIssues]=createResource(profileId,id=>id?planningApi.issues({assignee_id:id}):Promise.resolve([]));
+const hasAssignedIssues=()=>!!assignedIssues()?.length;
+createEffect(()=>{ if(!hasAssignedIssues()&&pane()==="tickets") setPane("tasks"); });
 const [issueFacts]=createResource(()=>assignedIssues()?.map(issue=>issue.id).join(",")??"",async()=>Promise.all((assignedIssues()??[]).map(async issue=>({issue,detail:await planningApi.issue(issue.id)}))));
 const [issueStatuses]=createResource(()=>[...new Set((assignedIssues()??[]).map(issue=>issue.project_id))].sort().join(","),async()=>Promise.all([...new Set((assignedIssues()??[]).map(issue=>issue.project_id))].map(id=>planningApi.statuses(id))).then(groups=>groups.flat()));
 const statusName=(issue:Issue)=>issueStatuses()?.find((status:Status)=>status.id===issue.status_id)?.name??"No status";

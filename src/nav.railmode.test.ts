@@ -33,13 +33,15 @@ describe("rail mode derived from the view", () => {
   });
 
   it("puts every view in EXACTLY ONE mode", () => {
-    const modes: RailMode[] = ["home", "chats", "projects", "library", "development", "more"];
+    const modes: RailMode[] = ["home", "chats", "tasks", "projects", "library", "development", "more"];
     const seen = new Map<string, RailMode>();
     for (const mode of modes)
       for (const view of viewsInMode(mode)) {
         expect(seen.has(view)).toBe(false);
         seen.set(view, mode);
       }
+    for (const taskView of ["To-Do", "Team Tasks", "Task Ledger"])
+      expect(seen.get(taskView)).toBe("tasks");
   });
 
   it("sends unmapped/registry views to More, so nothing becomes unreachable", () => {
