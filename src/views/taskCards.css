@@ -116,9 +116,6 @@
 .task-tile-cat { font-weight: 620; }
 
 /* Assigned tracker work is surfaced, not copied: its target keeps the ticket in Development. */
-.task-ticket-tile { text-decoration:none; color:inherit; }
-.task-work-kind { display:inline-flex; align-items:center; gap:3px; margin-top:4px; font-size:11px; color:var(--text-muted); }
-.task-ticket-tile .task-tile-body { cursor:pointer; }
 
 .task-ticket-tile { text-decoration:none; color:inherit; }
 .task-work-kind { display:inline-flex; align-items:center; gap:3px; margin-top:4px; font-size:11px; color:var(--text-muted); }

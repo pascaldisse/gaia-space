@@ -5,6 +5,8 @@ import { render } from "solid-js/web";
 import SpaceShell from "./SpaceShell";
 import { setProfileId, reloadProjects, reloadProfiles } from "../session";
 import { navigate, registerViews, setAvailableViews } from "../router";
+import { setShowDevelopment } from "../nav";
+import { readFileSync } from "node:fs";
 
 // THE TASK AREA MUST BE NAMED BY A MENU, not only by a URL.
 //
@@ -21,6 +23,7 @@ afterEach(() => {
   document.body.innerHTML = "";
   globalThis.fetch = realFetch;
   setProfileId("");
+  setShowDevelopment(true);
   window.history.replaceState({}, "", "/");
 });
 
@@ -75,7 +78,10 @@ describe("nothing the narrow rail drops becomes unreachable", () => {
     expect(dropped).not.toBeNull();
     const labels = [...dropped.querySelectorAll(".more-item")].map((n) => n.textContent?.trim());
     // Library and Development are the two RAIL modes the five-slot mobile rail omits.
-    expect(labels).toContain("Library");
+    expect(labels).toEqual(expect.arrayContaining(["Library", "Development"]));
+    const css = readFileSync(new URL("./SpaceShell.css", import.meta.url), "utf8");
+    expect(css).toContain(".more-mobile-only { display: none; }");
+    expect(css).toContain("@media (max-width: 720px) { .space-chat-shell .more-mobile-only { display: contents; } }");
   });
 });
 

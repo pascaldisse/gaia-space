@@ -1,4 +1,4 @@
-import { createResource, createSignal, For, Show, onMount } from "solid-js";
+import { createEffect, createResource, createSignal, For, Show, onMount } from "solid-js";
 import { TODO_CATEGORIES, personalApi, type Todo as TodoItem } from "../api/personal";
 import "../components/paper.css";
 import "./Todo.css";
@@ -45,6 +45,8 @@ export default function Todo() {
      a ticket ledger. It becomes a second pane instead — present, counted, one click
      away, and never in front of the list this page is named after. */
   const [pane,setPane]=createSignal<"tasks"|"tickets">("tasks");
+const hasAssignedIssues=()=>!!assignedIssues()?.length;
+createEffect(()=>{ if(!hasAssignedIssues()&&pane()==="tickets") setPane("tasks"); });
   const [todos,{refetch}]=createResource(profileId,id=>id?personalApi.todos(id,true):Promise.resolve([]));
   /* A FAILED READ IS NOT AN EMPTY LIST (mirrors TeamTasks/ProjectTasks, 6de55cc): a
      rejected `list_todos` is carried as `todos.error` and shown as one alert below,
@@ -307,12 +309,17 @@ const issueKind=(issue:Issue)=>issueFacts()?.find(fact=>fact.issue.id===issue.id
 
     {/* The tab row exists only when there IS tracker work: a tab reading "Tickets 0"
         would advertise an empty room. */}
-    <Show when={assignedIssues()?.length}>
-      <div class="task-panes" role="tablist" aria-label="My work">
-        <button type="button" role="tab" aria-selected={pane()==="tasks"} classList={{active:pane()==="tasks"}} onClick={()=>setPane("tasks")}>
+    <Show when={hasAssignedIssues()}>
+      <div class="task-panes" role="tablist" aria-label="My work" onKeyDown={event=>{
+        const tabs=[...event.currentTarget.querySelectorAll<HTMLElement>('[role="tab"]')];
+        const index=tabs.indexOf(event.target as HTMLElement);
+        const next=event.key==="Home"?0:event.key==="End"?tabs.length-1:event.key==="ArrowRight"?(index+1)%tabs.length:event.key==="ArrowLeft"?(index-1+tabs.length)%tabs.length:-1;
+        if(next>=0) { event.preventDefault(); tabs[next].focus(); setPane(next===0?"tasks":"tickets"); }
+      }}>
+        <button id="tasks-tab" type="button" role="tab" aria-selected={pane()==="tasks"} aria-controls="tasks-panel" tabindex={pane()==="tasks"?0:-1} classList={{active:pane()==="tasks"}} onClick={()=>setPane("tasks")}>
           Tasks<span class="count">{openCount()}</span>
         </button>
-        <button type="button" role="tab" aria-selected={pane()==="tickets"} classList={{active:pane()==="tickets"}} onClick={()=>setPane("tickets")}>
+        <button id="tickets-tab" type="button" role="tab" aria-selected={pane()==="tickets"} aria-controls="tickets-panel" tabindex={pane()==="tickets"?0:-1} classList={{active:pane()==="tickets"}} onClick={()=>setPane("tickets")}>
           Tickets<span class="count">{assignedIssues()!.length}</span>
         </button>
       </div>
@@ -331,7 +338,7 @@ const issueKind=(issue:Issue)=>issueFacts()?.find(fact=>fact.issue.id===issue.id
 
     <div class="task-board" classList={{ "task-board-tickets": pane()==="tickets" }}>
     <Show when={pane()==="tasks"} fallback={
-      <div role="tabpanel" aria-label="Tickets assigned to you">
+      <div id="tickets-panel" role="tabpanel" aria-labelledby="tickets-tab">
         <ContentHead icon="target" title="Tracker work assigned to you" line="These are tickets in Development. Open one to work on it there — they are not edited on this list." />
         <div class="task-grid" aria-label="Assigned ticket work">
           <For each={assignedIssues()}>{issue=><a class="task-tile task-ticket-tile" {...linkProps({view:"Issues",entityType:"issue",entityId:issue.id,projectId:issue.project_id})}>
@@ -341,7 +348,7 @@ const issueKind=(issue:Issue)=>issueFacts()?.find(fact=>fact.issue.id===issue.id
         </div>
       </div>
     }>
-    <div role="tabpanel" aria-label="Your tasks">
+    <div id="tasks-panel" role="tabpanel" aria-label="Your tasks" aria-labelledby={hasAssignedIssues()?"tasks-tab":undefined}>
       {/* A NEW TASK IS BORN WHERE IT WILL LIVE. It used to be made in a panel that slid
           in from the right — a different place, a different shape, for the same object
           the list edits in place. The editor opens at the top of the list instead, in
