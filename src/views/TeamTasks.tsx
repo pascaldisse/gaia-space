@@ -120,13 +120,6 @@ export default function TeamTasks() {
     try { await personalApi.postponeTodo(task.id, days); void reloadTasks(); }
     catch (reason) { setRowError(humanError(reason)); }
   };
-  const convert = async (task: Todo) => {
-    try {
-      if (!task.project_id) throw new Error("Give the task a project before converting it into a ticket.");
-      await personalApi.convertTodoToIssue(task.id, task.project_id);
-      void reloadTasks();
-    } catch (reason) { setRowError(humanError(reason)); }
-  };
   /* ── DELETING A TASK, ON A SURFACE MADE OF OTHER PEOPLE'S WORK ──────────────
      Same rule as My tasks, and it bites hardest here: every row on this page is
      PROJECT work, i.e. shared by definition. Only the CREATOR may delete it — being
@@ -145,9 +138,6 @@ export default function TeamTasks() {
       { label: "Postpone by a day", onSelect: () => void postpone(task, 1) },
       { label: "Postpone by a week", onSelect: () => void postpone(task, 7) },
     ] : []),
-    ...(owns(task) && !task.done && task.project_id && task.source_entity_type !== "issue"
-      ? [{ label: "Convert to ticket", onSelect: () => void convert(task) }]
-      : []),
     ...(owns(task) ? [{ label: "Delete task…", danger: true, onSelect: () => setPendingDelete(task) }] : []),
   ];
   const openTaskMenu = (event: MouseEvent, task: Todo) => {

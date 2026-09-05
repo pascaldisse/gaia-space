@@ -3,7 +3,7 @@ import { chatApi } from "../api/chat";
 import { linkProps } from "../router";
 import "./SourceLink.css";
 
-/** The other half of the message-to-work loop: a task/ticket/date that was born in a
+/** The other half of the message-to-work loop: a task/task/date that was born in a
  * channel must lead back to the message that raised it. Given one stored anchor it
  * resolves the channel and renders a real link into it — and when the source is gone
  * it says so instead of pretending the work has no origin. */

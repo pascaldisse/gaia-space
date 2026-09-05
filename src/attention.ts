@@ -38,9 +38,9 @@
  *       — an entity channel is narrow by construction: you are in it because
  *         you are involved in that absence/issue/document. This is the source
  *         the old badge counted and the old Home card dropped.
- *    4. open todos assigned to me
- *    5. open issues assigned to me
- *    6. unread notifications addressed to me whose event type is NOT
+ *    4. open tasks assigned to me (dev tasks included — there is no separate
+ *       task source any more)
+ *    5. unread notifications addressed to me whose event type is NOT
  *       organisation news (mention notifications are deduplicated against 1)
  *  DELIBERATELY EXCLUDED: unread in public/project channels. A busy channel is
  *  not a claim on a person, and counting it is what made the badge meaningless.
@@ -63,7 +63,7 @@ import type { Tone } from "./statusTone";
 
 /** Which worklist source produced a row. Used for icons and grouping only —
  *  never to re-derive the count, which is `needsYou().length` and nothing else. */
-export type AttentionKind = "mention" | "dm" | "channel" | "thread" | "todo" | "issue" | "review" | "notification";
+export type AttentionKind = "mention" | "dm" | "channel" | "thread" | "todo" | "review" | "notification";
 
 /** ── THE ACTIVITY FILTERS ───────────────────────────────────────────────────
  *  Activity's sidebar entries are FILTERS over this one worklist, never links to
@@ -93,7 +93,7 @@ export const ACTIVITY_FILTERS: { id: ActivityFilter; label: string; kinds: Atten
   { id: "all", label: "All", kinds: [] }, // empty = no narrowing, not "no kinds"
   { id: "mentions", label: "Mentions", kinds: ["mention", "thread"] },
   { id: "messages", label: "Messages", kinds: ["dm", "channel"] },
-  { id: "assigned", label: "Assigned", kinds: ["todo", "issue"] },
+  { id: "assigned", label: "Assigned", kinds: ["todo"] },
   { id: "reviews", label: "Reviews", kinds: ["review"] },
   { id: "updates", label: "Updates", kinds: ["notification"] },
 ];
@@ -312,21 +312,9 @@ export function buildNeedsYou(sources: AttentionSources): AttentionItem[] {
     });
   }
 
-  // 5. Tickets assigned to me.
-  for (const issue of sources.dashboard?.assigned_issues ?? []) {
-    items.push({
-      id: `issue:${issue.id}`,
-      kind: "issue",
-      title: trimTitle(issue.title, "Ticket"),
-      detail: issue.due_date ? `Due ${issue.due_date}` : undefined,
-      at: 0,
-      action: "Open",
-      tone: "",
-      route: { view: "Issues", entityType: "issue", entityId: issue.id, projectId: issue.project_id },
-    });
-  }
-
-  // 6. Review requests where the turn is mine.
+  // 5. Review requests where the turn is mine.
+  // (5 was "open tasks assigned to me" — gone: tasks are tasks now, already
+  //  covered by source 4 above, since a dev task follows the same assignee rule.)
   for (const { review } of sources.reviewRequests) {
     items.push({
       id: `review:${review.id}`,
@@ -405,7 +393,9 @@ export const unreadChannelTotal = (channels: ChannelSummary[]): number =>
 
 const ROUTE_BY_ENTITY: Record<string, string> = {
   project: "Projects",
-  issue: "Issues",
+  // Historical notifications may still carry entityType "issue": the migration that
+  // folded issues into tasks kept ids, so the same id is now a task's.
+  issue: "To-Do",
   channel: "Chat",
   document: "Documents",
   blog: "Blogs",
@@ -429,9 +419,9 @@ export function routeForAnchor(entityType: string | null, entityId: string | nul
 /** ── STREAM 2: ORGANISATION ─────────────────────────────────────────────────
  *  Pure. Never counted, never cleared, newest first. */
 const ACTIVITY_VERBS: Record<string, { verb: string; object: (n: Notification) => string }> = {
-  "issue.created": { verb: "opened a ticket", object: (n) => n.title },
-  "issue.updated": { verb: "updated a ticket", object: (n) => n.title },
-  "issue.archived": { verb: "closed a ticket", object: (n) => n.title },
+  "issue.created": { verb: "opened a dev task", object: (n) => n.title },
+  "issue.updated": { verb: "updated a dev task", object: (n) => n.title },
+  "issue.archived": { verb: "archived a dev task", object: (n) => n.title },
   "review.created": { verb: "opened a review", object: (n) => n.title },
   "review.updated": { verb: "updated a review", object: (n) => n.title },
   "review.merged": { verb: "merged a review", object: (n) => n.title },

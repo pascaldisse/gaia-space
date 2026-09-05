@@ -8,7 +8,7 @@ import { parsePath, registerViews, setAvailableViews } from "./router";
 
 const ALL_VIEWS = [
   "Home", "Dashboard", "To-Do", "Absences", "Projects", "Repos", "Code Reviews", "Pipelines",
-  "Issues", "Boards", "Chat", "Inbox", "Documents", "Blogs", "Calendar", "Meetings",
+  "Chat", "Inbox", "Documents", "Blogs", "Calendar", "Meetings",
   "Dev Environments", "Packages", "Members", "Locations", "Admin", "Applications", "Users",
   "Development", "Team Tasks", "Project Tasks", "Project Overview", "Project Steering",
   "Project Settings", "Project Workspace", "Settings",
@@ -69,11 +69,14 @@ describe("deep links arrive with the right mode", () => {
     expect(modeOfPath("channels/c-1")).toBe("chats");
   });
 
-  it("a ticket URL is Development — unless it is scoped to a project", () => {
-    expect(modeOfPath("issues/i-9")).toBe("development");
-    expect(modeOfPath("boards")).toBe("development");
+  it("a legacy context-free task URL lands on My tasks (Tasks mode); a code review URL is Development; both are overridden once a project scopes them", () => {
+    // Tasks are tasks now (task unification, 2026-09): a bare `/issues/<id>` has no
+    // project to open a Tasks tab on, so it lands on the reader's own task list
+    // (router.ts) — Tasks mode, not Development. The `Boards`/`Issues` views and the
+    // bare `/boards` route are gone with the entity; there is nothing left to resolve.
+    expect(modeOfPath("issues/i-9")).toBe("tasks");
     expect(modeOfPath("reviews/r-2")).toBe("development");
-    // A PROJECT ROUTE IS ALWAYS THE PROJECTS MODE (stage 19). A ticket opened at
+    // A PROJECT ROUTE IS ALWAYS THE PROJECTS MODE (stage 19). A task opened at
     // `/projects/<id>/issues/<id>` renders inside the project workspace, under the
     // project's own tab row, so the sidebar must list projects — not repositories.
     // Deriving the mode from the view name alone put this in the wrong sidebar.
@@ -127,6 +130,6 @@ describe("deep links arrive with the right mode", () => {
 
 describe("responsive rail preferences", () => {
   it("defaults desktop placement to left", () => { expect(navPlacement()).toBe("left"); setNavPlacement("right"); expect(navPlacement()).toBe("right"); setNavPlacement("left"); });
-  it("folds development into More when hidden", () => { setShowDevelopment(false); expect(railModeOfView("Issues")).toBe("more"); setShowDevelopment(true); expect(railModeOfView("Issues")).toBe("development"); });
+  it("folds development into More when hidden", () => { setShowDevelopment(false); expect(railModeOfView("Code Reviews")).toBe("more"); setShowDevelopment(true); expect(railModeOfView("Code Reviews")).toBe("development"); });
   it("limits mobile rail to five destinations", () => { expect(MOBILE_RAIL_MODES).toEqual(["home", "chats", "tasks", "projects", "more"]); expect(MOBILE_RAIL_MODES.length).toBeLessThanOrEqual(5); });
 });

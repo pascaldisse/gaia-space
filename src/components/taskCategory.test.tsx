@@ -78,7 +78,7 @@ describe("a task's category", () => {
     // The Rust side validates against its own copy of these ids; if the two lists
     // ever drift, a category saved here is refused there. Same strings, both sides.
     const ids: string[] = TODO_CATEGORIES.map(option => option.id);
-    expect(ids).toEqual(["create", "improve", "review", "decide", "admin"]);
+    expect(ids).toEqual(["create", "improve", "review", "decide", "admin", "dev"]);
     expect(new Set(ids).size).toBe(ids.length);
     for (const option of TODO_CATEGORIES) {
       expect(String(option.id)).toBe(String(option.id).toLowerCase());

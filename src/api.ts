@@ -86,8 +86,6 @@ export const api = {
     invoke<string>("hosted_repo_clone_url", { baseUrl, project, name }),
   listProjects: () => invoke<Project[]>("list_projects"),
   listProfiles: () => invoke<Profile[]>("list_profiles"),
-  listIssues: () => invoke<Issue[]>("list_issues"),
-  listBoards: () => invoke<Board[]>("list_boards"),
   listChannels: () => invoke<Channel[]>("list_channels"),
   listDocuments: () => invoke<Document[]>("list_documents"),
   listMeetings: () => invoke<Meeting[]>("list_meetings"),
@@ -99,8 +97,6 @@ export const api = {
 
 export type Profile = { id: string; username: string; display_name: string; email: string | null; avatar_url: string | null; archived: boolean };
 export type Project = { id: string; name: string; key: string; description: string | null; created_by: string | null; archived: boolean };
-export type Issue = { id: string; project_id: string; number: number; title: string; description: string | null; status_id: string | null; assignee_id: string | null; created_by: string | null; due_date: string | null; archived: boolean };
-export type Board = { id: string; project_id: string; name: string; backlog_type: string; archived: boolean };
 export type Channel = { id: string; content_type: string; name: string | null; description: string | null; project_id: string | null; archived: boolean };
 export type Document = { id: string; container_type: string; container_id: string | null; folder_id: string | null; doc_type: string; title: string; body: string | null; version: number; archived: boolean; created_by: string | null };
 export type Meeting = { id: string; title: string; description: string | null; starts_at: number; ends_at: number; rrule: string | null; location: string | null; organizer_id: string | null; channel_id: string | null; archived: boolean };

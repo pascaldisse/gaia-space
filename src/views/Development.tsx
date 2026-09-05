@@ -1,11 +1,12 @@
 import { For, Show, createMemo, createResource, createSignal, type JSX } from "solid-js";
-import Issues from "./Issues";
 import { reviewApi, type Review } from "../api/review";
-import { projectId as sessionProject } from "../session";
+import { personalApi, type Todo } from "../api/personal";
+import { profileId, projectId as sessionProject, projects, setProjectId } from "../session";
 import { isViewAvailable, linkProps } from "../router";
 import PageHeader from "../components/PageHeader";
 import ContentHead from "../components/ContentHead";
 import { GhostPill } from "../components/controls";
+import { ProjectPicker } from "../components/Pickers";
 import EmptyState from "../components/EmptyState";
 import { projectName } from "../orgScope";
 import "../components/paper.css";
@@ -13,20 +14,22 @@ import "./Issues.css";
 import "./Development.css";
 
 /**
- * Development (`/development`) — the briefing's dev surface: Tickets, Bugs,
- * Pull Requests, Releases (JANIS_BRIEFING.md, dev section).
+ * Development (`/development`) — the briefing's dev surface: Dev tasks, Pull
+ * Requests, Releases (JANIS_BRIEFING.md, dev section).
  *
- * Four sections over the EXISTING data, no fork and no second data path:
- *  - Tickets       -> the Issues view, whole (filters, CSV, board, drawer, detail).
- *  - Bugs          -> the same view pinned to the project's "bug" planning tag.
+ * Three sections over the EXISTING data, no fork and no second data path:
+ *  - Dev tasks     -> tasks (`personalApi.projectTodos`) with `category === 'dev'`,
+ *                     scoped to a picked project. Tasks/Bugs used to be a separate
+ *                     tracker entity (Issue) with its own filters, board and drawer;
+ *                     task unification folded that into a plain task, so this section
+ *                     is now the SAME list every other task surface reads, filtered.
  *  - Pull Requests -> `list_reviews`, scoped to the current project.
  *  - Releases      -> nothing backs it in the data model, so it says so. A fake list
- *                     would be a lie, and a hidden tab would make the briefing's fourth
+ *                     would be a lie, and a hidden tab would make the briefing's third
  *                     area unreachable.
  */
 const SECTIONS = [
-  { key: "tickets", label: "Tickets" },
-  { key: "bugs", label: "Bugs" },
+  { key: "dev-tasks", label: "Dev tasks" },
   /* Sentence case, and the same word the rail uses for the surface these live
      on: "Pull Requests" was the only title-cased label on the screen. */
   { key: "pull-requests", label: "Pull requests" },
@@ -39,22 +42,23 @@ type SectionKey = (typeof SECTIONS)[number]["key"];
 const reviewTone = (state: string) => (/merged|closed/i.test(state) ? "done" : "teal");
 
 export default function Development(): JSX.Element {
-  const [section, setSection] = createSignal<SectionKey>("tickets");
-  const projectId = sessionProject;
+  const [section, setSection] = createSignal<SectionKey>("dev-tasks");
+  const projectIdSig = sessionProject;
 
   const [reviews] = createResource(() => reviewApi.list().catch(() => [] as Review[]));
   const projectReviews = createMemo(() =>
-    (reviews() ?? []).filter((review) => !projectId() || review.project_id === projectId()),
+    (reviews() ?? []).filter((review) => !projectIdSig() || review.project_id === projectIdSig()),
   );
 
-  /* ORDERING (stage 9a): the pills used to render ABOVE the page header, so the
-     page began with a switch and only then said what it was. The reading order is
-     header (kicker · title · chips) → action row → content. The two ticket sections
-     mount Issues, which owns the header AND the row, so the pills are handed DOWN
-     into its `sections` slot instead of being printed before it.
-     WHICH SECTION YOU ARE IN IS A VIEW CONTROL, so the pills live at the right end of
-     that one row — identical on both paths, and never a second strip of their own.
-     A <span role=group> and not a <nav>: it renders INSIDE the row's <nav>. */
+  // Dev tasks are project-scoped by construction (a task's Dev tab lives under its
+  // project), so this section reads the session's current project — the same one the
+  // project picker below writes, and the same one a task-from-chat lands on.
+  const [devTasks] = createResource(
+    () => [projectIdSig(), profileId()] as const,
+    ([id, profile]) => (id && profile ? personalApi.projectTodos(id, profile, true) : Promise.resolve([] as Todo[])),
+  );
+  const openDevTasks = createMemo(() => (devTasks() ?? []).filter((task) => task.category === "dev" && !task.done));
+
   const tabs = () => (
     <span class="dev-tabs actionbar-sections" role="group" aria-label="Development sections">
       <For each={SECTIONS}>
@@ -75,34 +79,63 @@ export default function Development(): JSX.Element {
 
   return (
     <section class="dev-view">
-      {/* The guest keeps its whole self but not its name: this page is
-          Development (the rail entry that opens it is Development's Overview),
-          and the pills say which section. */}
-      <Show when={section() === "tickets"}><Issues title="Development" sections={tabs()} /></Show>
-      <Show when={section() === "bugs"}><Issues title="Development" filterTagName="bug" sections={tabs()} /></Show>
+      <PageHeader kicker={projectName(projectIdSig())} icon="target" title="Development"
+        subline="Dev tasks, pull requests and pipelines — the work that carries a status" />
+      <nav class="page-actionbar" aria-label="Development sections">
+        <span class="actionbar-view-controls">
+          <ProjectPicker label="Project" value={projectIdSig()} onChange={setProjectId} allowAll />
+        </span>
+        <span class="actionbar-view-controls">{tabs()}</span>
+      </nav>
 
-      <Show when={section() === "pull-requests" || section() === "releases"}>
-        {/* These two have no view of their own to bring a header, so this lane
-            supplies one — same shape, same order. */}
-        <PageHeader kicker={projectName(projectId())} icon="target" title="Development"
-          subline="Tickets, boards, pull requests and pipelines — the work that carries a status" />
-        {/* Neither section MAKES anything from this page (a pull request is opened in a
-            repository, and nothing here records a release), so the row's left is empty
-            and it carries the section switch alone — the same row Issues draws on the
-            other two sections, so the line never moves as you switch. */}
-        <nav class="page-actionbar" aria-label="Development sections">
-          <span class="actionbar-view-controls">{tabs()}</span>
-        </nav>
-        {/* Which of the four sections you are in, and what it is for. */}
-        <ContentHead
-          icon={section() === "pull-requests" ? "review" : "package"}
-          title={section() === "pull-requests" ? "Pull requests" : "Releases"}
-          line={section() === "pull-requests"
-            ? "Merge requests on this project's repositories, newest first."
-            : "A release is a published version — nothing in this workspace records one yet."} />
+      <Show when={section() === "dev-tasks"}>
+        <div class="dev-section">
+          <Show when={!projectIdSig()}>
+            <EmptyState
+              title="Pick a project to see its dev tasks"
+              hint="Dev tasks are filed on one project's Dev tab — pick one above to see it."
+              actions={<For each={(projects() ?? []).filter((p) => !p.archived).slice(0, 6)}>
+                {(project) => <GhostPill onClick={() => setProjectId(project.id)}>{project.name}</GhostPill>}
+              </For>}
+            />
+          </Show>
+          <Show when={projectIdSig()}>
+            <ContentHead icon="target" title="Dev tasks" line="Tasks filed under this project's Dev tab — bugs, features and improvements." />
+            <Show when={devTasks.loading}><p class="hint">Loading dev tasks…</p></Show>
+            <Show when={devTasks.error}><p class="error" role="alert">Could not load dev tasks: {String(devTasks.error)}</p></Show>
+            <Show when={!devTasks.loading && !openDevTasks().length}>
+              <EmptyState
+                title="No open dev tasks in this project"
+                hint="A dev task is a task with category 'dev' — add one from the project's Dev tab, or link a GitHub issue/PR to an existing task's Links row."
+                actions={<GhostPill {...linkProps({ view: "Project Workspace", projectId: projectIdSig(), tab: "dev" })}>Open Dev tab →</GhostPill>}
+              />
+            </Show>
+            <Show when={openDevTasks().length}>
+              <ul class="issue-list paper-list">
+                <For each={openDevTasks()}>
+                  {(task) => (
+                    <li>
+                      <a class="issue-row" {...linkProps({ view: "Project Workspace", projectId: projectIdSig(), tab: "dev" })}>
+                        <span class="row-main">
+                          <strong>{task.content}</strong>
+                          <Show when={task.notes}>{(notes) => <span class="row-meta"><small>{notes()}</small></span>}</Show>
+                        </span>
+                        <Show when={(task.links ?? []).length}>
+                          <span class="status-name">{(task.links ?? []).length} link{(task.links ?? []).length === 1 ? "" : "s"}</span>
+                        </Show>
+                      </a>
+                    </li>
+                  )}
+                </For>
+              </ul>
+            </Show>
+          </Show>
+        </div>
       </Show>
 
       <Show when={section() === "pull-requests"}>
+        {/* Which of the sections you are in, and what it is for. */}
+        <ContentHead icon="review" title="Pull requests" line="Merge requests on this project's repositories, newest first." />
         <div class="dev-section">
           <Show when={reviews.loading}><p class="hint">Loading pull requests…</p></Show>
           {/* NOTHING YET, and there is no "create a pull request" command in this
@@ -119,7 +152,7 @@ export default function Development(): JSX.Element {
                 <Show when={isViewAvailable("Repos")}>
                   <GhostPill {...linkProps({ view: "Repos" })}>Open repositories</GhostPill>
                 </Show>
-                <GhostPill onClick={() => setSection("tickets")}>Back to tickets</GhostPill>
+                <GhostPill onClick={() => setSection("dev-tasks")}>Back to dev tasks</GhostPill>
               </>}
             />
           </Show>
@@ -147,13 +180,9 @@ export default function Development(): JSX.Element {
       </Show>
 
       <Show when={section() === "releases"}>
+        <ContentHead icon="package" title="Releases" line="A release is a published version — nothing in this workspace records one yet." />
         <div class="dev-section">
           {/* HONEST EMPTY STATE: there is no release store behind this app. */}
-          {/* The PageHeader above already says "Releases"; saying it twice was the
-              old two-title idiom. */}
-          {/* Nothing RECORDS a release, so there is nothing to create and no
-              primary is drawn. The one honest action is the surface that does
-              build the artefacts people come here looking for. */}
           <EmptyState
             title="Nothing in the workspace records releases yet"
             hint="Pipelines run the builds; a release is not one of their outputs today."

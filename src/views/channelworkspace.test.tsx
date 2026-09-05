@@ -168,7 +168,7 @@ describe("channel workspace", () => {
     const stats = Array.from(card.querySelectorAll(".cw-stat")).map(row => row.textContent);
     expect(stats[0]).toContain("Open tasks");
     expect(stats[0]).toContain("5");
-    expect(stats[1]).toContain("Tickets");
+    expect(stats[1]).toContain("Tasks");
     expect(stats[1]).toContain("2");
 
     team?.click();
