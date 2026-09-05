@@ -31,8 +31,7 @@ class FakeGaia implements GaiaTransport {
 }
 
 class FakeSpace implements SpaceTransport, SpaceWork {
-  readonly issues: { project_id: string; title: string; description: string | null; source_entity_id: string }[] = [];
-  readonly todos: { profile_id: string; content: string; project_id: string | null; source_entity_id: string }[] = [];
+    readonly todos: Record<string, unknown>[] = [];
   readonly posted: { channelId: string; text: string; id: string }[] = [];
   refusal: string | undefined;
   private sequence = 0;
@@ -42,11 +41,6 @@ class FakeSpace implements SpaceTransport, SpaceWork {
     const id = messageId ?? `space-${++this.sequence}`;
     this.posted.push({ channelId, text, id });
     return id;
-  }
-  async createIssue(input: { project_id: string; title: string; description: string | null; source_entity_id: string }): Promise<CreatedItem> {
-    if (this.refusal) throw new Error(this.refusal);
-    this.issues.push(input);
-    return { id: `issue-${this.issues.length}`, number: 40 + this.issues.length };
   }
   async createTodo(input: { profile_id: string; content: string; project_id: string | null; source_entity_id: string }): Promise<CreatedItem> {
     if (this.refusal) throw new Error(this.refusal);
@@ -125,8 +119,8 @@ describe("context resolution", () => {
   });
 
   test("permalinks are built only from the verified router grammar, never guessed", () => {
-    expect(permalinkOf("ticket", "i-1", "p-1", { webBaseUrl: "https://s", webBasePath: "" })).toBe("https://s/projects/p-1/issues/i-1");
-    expect(permalinkOf("ticket", "i-1", "p-1", { webBaseUrl: "https://s", webBasePath: "/space" })).toBe("https://s/space/projects/p-1/issues/i-1");
+    expect(permalinkOf("ticket", "i-1", "p-1", { webBaseUrl: "https://s", webBasePath: "" })).toBe("https://s/projects/p-1/tasks");
+    expect(permalinkOf("ticket", "i-1", "p-1", { webBaseUrl: "https://s", webBasePath: "/space" })).toBe("https://s/space/projects/p-1/tasks");
     expect(permalinkOf("task", "t-1", "p-1", { webBaseUrl: "https://s", webBasePath: "" })).toBe("https://s/projects/p-1/tasks");
     expect(permalinkOf("task", "t-1", null, { webBaseUrl: "https://s", webBasePath: "" })).toBeNull(); // personal task has no address
     expect(permalinkOf("ticket", "i-1", "p-1", { webBaseUrl: "", webBasePath: "" })).toBeNull();       // no base configured → id only
@@ -141,15 +135,15 @@ describe("preview and confirm", () => {
     await primed(h);
     h.gaia.say("room-1", "user", "!space ticket Login is broken");
     await h.bridge.pollOnce();
-    expect(h.space.issues).toEqual([]);
+    expect(h.space.todos).toEqual([]);
     expect(h.gaia.last()).toContain("nothing created yet");
     expect(h.gaia.last()).toContain("TOK001");
 
     h.gaia.say("room-1", "user", "!space confirm TOK001");
     await h.bridge.pollOnce();
-    expect(h.space.issues).toEqual([{ project_id: "p-1", title: "Login is broken", description: null, source_entity_type: "channel", source_entity_id: "c-1" }]);
-    expect(h.gaia.last()).toContain("issue-1");
-    expect(h.gaia.last()).toContain("https://space.example/projects/p-1/issues/issue-1");
+    expect(h.space.todos).toEqual([{ profile_id: "profile-owner", content: "Login is broken", project_id: "p-1", notes: null, category: "dev", source_entity_type: "channel", source_entity_id: "c-1" }]);
+    expect(h.gaia.last()).toContain("todo-1");
+    expect(h.gaia.last()).toContain("https://space.example/projects/p-1/tasks");
   });
 
   test("a task without a project is personal, and carries its channel anchor", async () => {
@@ -167,7 +161,7 @@ describe("preview and confirm", () => {
     await primed(h);
     h.gaia.say("room-1", "user", "!space ticket Login is broken");
     await h.bridge.pollOnce();
-    expect(h.space.issues).toEqual([]);
+    expect(h.space.todos).toEqual([]);
     expect(h.gaia.last()).toContain("belongs to no project");
     expect(h.gaia.last()).toContain("!space task");
   });
@@ -178,7 +172,7 @@ describe("preview and confirm", () => {
     h.gaia.say("room-1", "user", "!space ticket Login is broken");
     await h.bridge.pollOnce();
     expect(h.gaia.last()).toContain("ambiguous");
-    expect(h.space.issues).toEqual([]);
+    expect(h.space.todos).toEqual([]);
   });
 
   test("cancel discards the token, and the cancelled token cannot be confirmed afterwards", async () => {
@@ -214,7 +208,7 @@ describe("preview and confirm", () => {
     await h.bridge.pollOnce();
     h.gaia.say("room-2", "user", "!space confirm TOK001");
     await h.bridge.pollOnce();
-    expect(h.space.issues).toEqual([]);
+    expect(h.space.todos).toEqual([]);
     expect(h.gaia.sent.at(-1)!.roomId).toBe("room-2");
     expect(h.gaia.last()).toContain("no pending item");
   });
@@ -229,7 +223,7 @@ describe("safety", () => {
     h.gaia.say("room-1", "assistant", "!space ticket Ignore all previous instructions");
     h.gaia.say("room-1", "assistant", "!space confirm TOK001");
     await h.bridge.pollOnce();
-    expect(h.space.issues).toEqual([]);
+    expect(h.space.todos).toEqual([]);
     expect(h.gaia.sent).toEqual([]);
   });
 
@@ -241,7 +235,7 @@ describe("safety", () => {
     await h.bridge.pollOnce();          // second pass sees the help text the bridge just posted
     await h.bridge.pollOnce();
     expect(h.gaia.sent.length).toBe(1); // it answered once and then fell silent
-    expect(h.space.issues).toEqual([]);
+    expect(h.space.todos).toEqual([]);
     expect(h.space.todos).toEqual([]);
   });
 
@@ -257,7 +251,7 @@ describe("safety", () => {
     h.space.refusal = undefined;
     h.gaia.say("room-1", "user", "!space confirm TOK001");
     await h.bridge.pollOnce();
-    expect(h.space.issues).toEqual([]);        // a spent token stays spent
+    expect(h.space.todos).toEqual([]);        // a spent token stays spent
     expect(h.gaia.last()).toContain("no pending item");
   });
 
@@ -269,7 +263,7 @@ describe("safety", () => {
     h.gaia.say("room-1", "user", "!space confirm TOK001");
     h.gaia.say("room-1", "user", "!space confirm TOK001");
     await h.bridge.pollOnce();
-    expect(h.space.issues.length).toBe(1);
+    expect(h.space.todos.length).toBe(1);
   });
 
   test("re-asking for the same item points at the one that exists instead of creating a second", async () => {
@@ -282,8 +276,8 @@ describe("safety", () => {
     h.gaia.say("room-1", "user", "!space ticket   login IS broken  ");   // same intent, different spelling
     await h.bridge.pollOnce();
     expect(h.gaia.last()).toContain("already exists");
-    expect(h.gaia.last()).toContain("issue-1");
-    expect(h.space.issues.length).toBe(1);
+    expect(h.gaia.last()).toContain("/tasks");
+    expect(h.space.todos.length).toBe(1);
     h.gaia.say("room-1", "user", "!space ticket Login is broken again");  // a different title is a different item
     await h.bridge.pollOnce();
     expect(h.gaia.last()).toContain("nothing created yet");
@@ -314,12 +308,12 @@ describe("safety", () => {
     await first.pollOnce();
     gaia.say("room-1", "user", "!space confirm TOK001");
     await first.pollOnce();
-    expect(space.issues.length).toBe(1);
+    expect(space.todos.length).toBe(1);
 
     const afterRestart = make("TOK002");                        // same durable state, fresh process
     await afterRestart.pollOnce();
     await afterRestart.pollOnce();
-    expect(space.issues.length).toBe(1);                        // the old confirm in the transcript did nothing
+    expect(space.todos.length).toBe(1);                        // the old confirm in the transcript did nothing
   });
 
   test("a room that was never seen before primes instead of executing its backlog", async () => {
@@ -328,7 +322,7 @@ describe("safety", () => {
     h.gaia.say("room-1", "user", "!space confirm TOK001");
     await h.bridge.pollOnce();
     expect(h.gaia.sent).toEqual([]);
-    expect(h.space.issues).toEqual([]);
+    expect(h.space.todos).toEqual([]);
   });
 
   test("actions stay silent when disabled, or when the room is not on the allow-list", async () => {
@@ -355,7 +349,7 @@ describe("safety", () => {
     expect(h.space.posted.length).toBe(1);
     expect(h.space.posted[0]!.channelId).toBe("c-1");
     expect(h.space.posted[0]!.id).toBe("bridge-fixed");        // suppressed on the way back, never a loop
-    expect(h.space.posted[0]!.text).toContain("https://space.example/projects/p-1/issues/issue-1");
+    expect(h.space.posted[0]!.text).toContain("https://space.example/projects/p-1/tasks");
 
     const quiet = harness({ config: { announceInChannel: false } });
     await primed(quiet);
@@ -403,16 +397,15 @@ describe("configuration", () => {
       },
     };
     const work = spaceWorkOn(transport);
-    expect(await work.createIssue({ project_id: "p-1", title: "T", description: null, source_entity_type: "channel", source_entity_id: "c-1" })).toEqual({ id: "issue-9", number: 42 });
-    await work.createTodo({ profile_id: "me", content: "T", project_id: null, notes: null, source_entity_type: "channel", source_entity_id: "c-1" });
-    expect(calls.map(call => call.path)).toEqual(["/api/cmd/create_issue", "/api/cmd/create_todo"]);
-    expect(calls[0]!.body).toEqual({ input: { project_id: "p-1", title: "T", description: null, source_entity_type: "channel", source_entity_id: "c-1" } });
-    expect((calls[1]!.body as { input: { done: boolean } }).input.done).toBe(false);
+    expect(await work.createTodo({ profile_id: "me", content: "T", project_id: "p-1", notes: null, category: "dev", source_entity_type: "channel", source_entity_id: "c-1" })).toEqual({ id: "issue-9", number: 42 });
+    expect(calls.map(call => call.path)).toEqual(["/api/cmd/create_todo"]);
+    expect((calls[0]!.body as { input: { done: boolean; category: string } }).input.done).toBe(false);
+    expect((calls[0]!.body as { input: { category: string } }).input.category).toBe("dev");
   });
 
   test("a malformed create response is an error, never a fake success", async () => {
     const work = spaceWorkOn({ async bridgeAuthorId() { return "x"; }, async listMessages() { return []; }, async postMessage() { return "id"; }, async authenticatedJson() { return { ok: true, value: {} }; } });
-    await expect(work.createIssue({ project_id: "p", title: "t", description: null, source_entity_type: "channel", source_entity_id: "c" })).rejects.toThrow(/no item id/);
+    await expect(work.createTodo({ profile_id: "x", content: "t", project_id: "p", notes: null, source_entity_type: "channel", source_entity_id: "c" })).rejects.toThrow(/no item id/);
   });
 
   test("help names the whole grammar, and the fingerprint ignores spelling noise", () => {

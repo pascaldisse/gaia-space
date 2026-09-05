@@ -23,6 +23,15 @@ fn err<T>(result: rusqlite::Result<T>) -> Result<T> {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct TodoLink {
+    pub id: String,
+    pub todo_id: String,
+    pub kind: String,
+    pub url: Option<String>,
+    pub target_id: Option<String>,
+    pub title: Option<String>,
+}
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Todo {
     pub id: String,
     pub profile_id: String,
@@ -44,6 +53,8 @@ pub struct Todo {
     /// which is the NORMAL case: most tasks are just tasks.
     #[serde(default)]
     pub category: Option<String>,
+    #[serde(default)]
+    pub links: Vec<TodoLink>,
 }
 #[derive(Debug, Deserialize)]
 pub struct TodoInput {
@@ -65,6 +76,8 @@ pub struct TodoInput {
     /// See [`Todo::category`]. Absent in a payload = uncategorised.
     #[serde(default)]
     pub category: Option<String>,
+    #[serde(default)]
+    pub links: Vec<TodoLink>,
 }
 fn default_content_kind() -> String {
     "text".into()
@@ -74,7 +87,7 @@ fn default_content_kind() -> String {
 /// free field immediately yields five spellings of the same word ("Review", "review",
 /// "reviewing", …) and then nothing can be grouped or counted. The frontend mirror lives
 /// in `src/api/personal.ts` (`TODO_CATEGORIES`) and must stay identical.
-pub const TODO_CATEGORIES: [&str; 5] = ["create", "improve", "review", "decide", "admin"];
+pub const TODO_CATEGORIES: [&str; 6] = ["create", "improve", "review", "decide", "admin", "dev"];
 /// Blank category normalizes to NULL — no empty-string variant ever reaches storage — and
 /// anything outside [`TODO_CATEGORIES`] is REFUSED instead of silently dropped: a client
 /// sending a category the server does not know is a bug that must be visible.
@@ -113,6 +126,7 @@ fn read_todo(row: &rusqlite::Row<'_>) -> rusqlite::Result<Todo> {
         assignee_ids: Vec::new(),
         content_kind: row.get(9)?,
         category: row.get(10)?,
+        links: Vec::new(),
     })
 }
 /// Blank notes normalize to NULL: no empty-string variant ever reaches storage.
@@ -148,6 +162,31 @@ fn assignees_on(c: &Connection, todo_id: &str) -> Result<Vec<String>> {
         .collect::<std::result::Result<Vec<_>, _>>()
         .map_err(|error| error.to_string())?;
     Ok(ids)
+}
+fn links_on(c: &Connection, todo_id: &str) -> Result<Vec<TodoLink>> {
+    let mut statement = err(c.prepare("SELECT id,todo_id,kind,url,target_id,title FROM todo_links WHERE todo_id=?1 ORDER BY created_at,id"))?;
+    let rows = err(statement.query_map([todo_id], |row| Ok(TodoLink {
+        id: row.get(0)?, todo_id: row.get(1)?, kind: row.get(2)?, url: row.get(3)?, target_id: row.get(4)?, title: row.get(5)?,
+    })))?;
+    rows.collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())
+}
+fn replace_links(c: &Connection, todo_id: &str, links: &[TodoLink]) -> Result<()> {
+    err(c.execute("DELETE FROM todo_links WHERE todo_id=?1", [todo_id]))?;
+    for link in links {
+        let kind = link.kind.trim().to_ascii_uppercase();
+        let id = if link.id.trim().is_empty() { new_id("todo-link") } else { link.id.clone() };
+        err(c.execute("INSERT INTO todo_links(id,todo_id,kind,url,target_id,title) VALUES(?1,?2,?3,?4,?5,?6)", params![id, todo_id, kind, link.url, link.target_id, link.title]))?;
+    }
+    Ok(())
+}
+#[derive(Debug, Deserialize)]
+pub struct TodoLinkInput {
+    pub todo_id: String,
+    pub kind: String,
+    pub url: Option<String>,
+    pub target_id: Option<String>,
+    pub title: Option<String>,
 }
 /// An assignee must be a live profile; if that profile is backed by login accounts,
 /// at least one of them must still be active. Deactivated people cannot be assigned.
@@ -238,7 +277,13 @@ pub fn todo_readable_by(id: &str, profile_id: &str) -> Result<bool> {
 }
 pub fn todo_assigned_by(id: &str, profile_id: &str) -> Result<bool> {
     let c = db::conn()?;
+    todo_assigned_by_on(&c, id, profile_id)
+}
+fn todo_assigned_by_on(c: &Connection, id: &str, profile_id: &str) -> Result<bool> {
     err(c.query_row("SELECT EXISTS(SELECT 1 FROM todos t JOIN todo_assignees a ON a.todo_id=t.id WHERE t.id=?1 AND t.project_id IS NOT NULL AND a.profile_id=?2)", params![id, profile_id], |row| row.get(0)))
+}
+fn todo_owned_by(id: &str, profile_id: &str) -> Result<bool> {
+    err(db::conn()?.query_row("SELECT EXISTS(SELECT 1 FROM todos WHERE id=?1 AND profile_id=?2)", params![id, profile_id], |row| row.get(0)))
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_project_member_ids(project_id: String) -> Result<Vec<String>> {
@@ -302,6 +347,7 @@ fn todo_on(c: &Connection, id: &str) -> Result<Option<Todo>> {
     match todo {
         Some(mut todo) => {
             todo.assignee_ids = assignees_on(c, id)?;
+            todo.links = links_on(c, id)?;
             Ok(Some(todo))
         }
         None => Ok(None),
@@ -320,8 +366,42 @@ pub fn list_todos(profile_id: String, include_done: Option<bool>) -> Result<Vec<
     drop(statement);
     for todo in todos.iter_mut() {
         todo.assignee_ids = assignees_on(&c, &todo.id)?;
+        todo.links = links_on(&c, &todo.id)?;
     }
     Ok(todos)
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_todo_links(todo_id: String) -> Result<Vec<TodoLink>> {
+    links_on(&db::conn()?, &todo_id)
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn add_todo_link(input: TodoLinkInput) -> Result<TodoLink> {
+    let c = db::conn()?;
+    if todo_on(&c, &input.todo_id)?.is_none() {
+        return Err("Todo not found".into());
+    }
+    let link = TodoLink {
+        id: new_id("todo-link"),
+        todo_id: input.todo_id,
+        kind: input.kind.trim().to_ascii_uppercase(),
+        url: input.url,
+        target_id: input.target_id,
+        title: input.title,
+    };
+    err(c.execute("INSERT INTO todo_links(id,todo_id,kind,url,target_id,title) VALUES(?1,?2,?3,?4,?5,?6)", params![link.id, link.todo_id, link.kind, link.url, link.target_id, link.title]))?;
+    Ok(link)
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn delete_todo_link(id: String, actor_id: String) -> Result<()> {
+    let c = db::conn()?;
+    let todo_id: String = err(c.query_row("SELECT todo_id FROM todo_links WHERE id=?1", [&id], |row| row.get(0)).optional())?
+        .ok_or_else(|| "Todo link not found".to_string())?;
+    let permitted = todo_owned_by(&todo_id, &actor_id)?
+        || todo_assigned_by(&todo_id, &actor_id)?
+        || crate::platform::is_admin_on(&c, &actor_id)?;
+    if !permitted { return Err("todo link write access denied".into()); }
+    err(c.execute("DELETE FROM todo_links WHERE id=?1", [&id]))?;
+    Ok(())
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn create_todo(input: TodoInput) -> Result<Todo> {
@@ -342,6 +422,7 @@ fn create_todo_on(c: &mut Connection, input: TodoInput) -> Result<Todo> {
     let category = normalized_category(input.category)?;
     err(tx.execute("INSERT INTO todos(id,profile_id,content,due_date,project_id,done,source_entity_type,source_entity_id,notes,content_kind,category) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)", params![id, input.profile_id, input.content.trim(), input.due_date, project_id, input.done, input.source_entity_type, input.source_entity_id, normalized_notes(input.notes), content_kind, category]))?;
     replace_assignees(&tx, &id, project_id.as_deref(), &input.assignee_ids)?;
+    replace_links(&tx, &id, &input.links)?;
     err(tx.commit())?;
     let todo = todo_on(c, &id)?.ok_or_else(|| "Created todo was not found".to_string())?;
     // After the row is durable, never inside the transaction: a feed problem must
@@ -430,6 +511,7 @@ fn update_todo_on(c: &mut Connection, todo: Todo) -> Result<Todo> {
         return Err("Todo not found".into());
     }
     replace_assignees(&tx, &todo.id, project_id.as_deref(), &todo.assignee_ids)?;
+    replace_links(&tx, &todo.id, &todo.links)?;
     err(tx.commit())?;
     todo_on(c, &todo.id)?.ok_or_else(|| "Todo not found".into())
 }
@@ -499,6 +581,7 @@ pub(crate) fn list_project_todos_on(
     drop(statement);
     for todo in &mut todos {
         todo.assignee_ids = assignees_on(c, &todo.id)?;
+        todo.links = links_on(c, &todo.id)?;
     }
     Ok(todos)
 }
@@ -541,6 +624,7 @@ pub(crate) fn list_team_todos_on(
     // Same per-row assignee fill as `list_project_todos`: consistency over cleverness.
     for todo in &mut todos {
         todo.assignee_ids = assignees_on(c, &todo.id)?;
+        todo.links = links_on(c, &todo.id)?;
     }
     Ok(todos)
 }
@@ -646,48 +730,6 @@ fn postponed_due(current: Option<&str>, today: chrono::NaiveDate, days: i64) -> 
         .filter(|date| *date > today)
         .unwrap_or(today);
     (base + Duration::days(days)).format("%Y-%m-%d").to_string()
-}
-/// Promote a personal to-do into a tracked issue. The to-do survives as a closed row
-/// anchored to the issue it became, so the bookmark trail stays intact; the issue owns
-/// the work from here on.
-#[cfg_attr(feature = "desktop", tauri::command)]
-pub fn convert_todo_to_issue(
-    id: String,
-    project_id: String,
-    status_id: Option<String>,
-) -> Result<crate::issues::Issue> {
-    if project_id.trim().is_empty() {
-        return Err("Converting a to-do needs a target project".into());
-    }
-    let c = db::conn()?;
-    let todo = todo_on(&c, &id)?.ok_or_else(|| "Todo not found".to_string())?;
-    if todo.source_entity_type.as_deref() == Some("issue") {
-        return Err("This to-do was already converted into an issue".into());
-    }
-    drop(c);
-    let issue = crate::issues::create_issue(crate::issues::IssueInput {
-        id: None,
-        project_id: project_id.trim().to_string(),
-        title: todo.content.clone(),
-        description: todo.notes.clone(),
-        status_id,
-        assignee_id: None,
-        assignee_ids: todo.assignee_ids.clone(),
-        created_by: Some(todo.profile_id.clone()),
-        due_date: todo.due_date.clone(),
-        priority: None,
-        archived: Some(false),
-        // The conversion inherits the to-do's origin: a task raised in a channel that
-        // becomes a ticket was still raised by that message.
-        source_entity_type: todo.source_entity_type.clone(),
-        source_entity_id: todo.source_entity_id.clone(),
-    })?;
-    let c = db::conn()?;
-    err(c.execute(
-        "UPDATE todos SET done=1,source_entity_type='issue',source_entity_id=?2,updated_at=unixepoch() WHERE id=?1",
-        params![id, issue.id],
-    ))?;
-    Ok(issue)
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -1625,7 +1667,7 @@ pub struct ProjectDashboard {
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn project_dashboard_aggregate(project_id: String) -> Result<ProjectDashboard> {
     let c = db::conn()?;
-    let open_issues:i64=err(c.query_row("SELECT count(*) FROM issues i LEFT JOIN issue_statuses s ON s.id=i.status_id WHERE i.project_id=?1 AND i.archived=0 AND coalesce(s.resolved,0)=0",[&project_id],|r|r.get(0)))?;
+    let open_issues:i64=err(c.query_row("SELECT count(*) FROM todos WHERE project_id=?1 AND done=0",[&project_id],|r|r.get(0)))?;
     let open_todos: i64 = err(c.query_row(
         "SELECT count(*) FROM todos WHERE project_id=?1 AND done=0",
         [&project_id],
@@ -2159,6 +2201,7 @@ mod tests {
             assignee_ids: assignees.iter().map(|x| x.to_string()).collect(),
             content_kind: default_content_kind(),
             category: None,
+        links: Vec::new(),
         }
     }
     /// Project work is a SHARED surface, and naming a lead changes nothing about it.
@@ -2518,6 +2561,7 @@ mod tests {
                 assignee_ids: vec!["q".into()],
                 content_kind: "text".into(),
                 category: None,
+            links: Vec::new(),
             },
         )
         .unwrap();
@@ -2576,6 +2620,7 @@ mod tests {
                 assignee_ids: vec![],
                 content_kind: "text".into(),
                 category: None,
+            links: Vec::new(),
             },
         )
         .unwrap();

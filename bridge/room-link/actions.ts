@@ -235,10 +235,8 @@ export const newToken = (): string => {
 
 export type CreatedItem = { id: string; number?: number | null };
 export interface SpaceWork {
-  /** `POST /api/cmd/create_issue { input }` — policy ProjectMemberWrite + Right::CreateIssue. */
-  createIssue(input: { project_id: string; title: string; description: string | null; source_entity_type: string; source_entity_id: string }): Promise<CreatedItem>;
   /** `POST /api/cmd/create_todo { input }` — policy TodoCreate; `profile_id` is rebound server-side. */
-  createTodo(input: { profile_id: string; content: string; project_id: string | null; notes: string | null; source_entity_type: string; source_entity_id: string }): Promise<CreatedItem>;
+  createTodo(input: { profile_id: string; content: string; project_id: string | null; notes: string | null; category?: string; source_entity_type: string; source_entity_id: string }): Promise<CreatedItem>;
 }
 
 type JsonCaller = SpaceTransport & { authenticatedJson(path: string, body: unknown): Promise<unknown> };
@@ -249,11 +247,10 @@ const createdItem = (payload: unknown, command: string): CreatedItem => {
   return { id: value.id, number: typeof value.number === "number" ? value.number : null };
 };
 
-/** Adds the two write commands to the existing authenticated transport — same session, same
+/** Adds the task write command to the existing authenticated transport — same session, same
  *  credential, no second login and no privilege of its own. */
 export function spaceWorkOn<T extends JsonCaller>(transport: T): T & SpaceWork {
   const work = transport as T & SpaceWork;
-  work.createIssue = async input => createdItem(await transport.authenticatedJson("/api/cmd/create_issue", { input }), "create_issue");
   work.createTodo = async input => createdItem(await transport.authenticatedJson("/api/cmd/create_todo", { input: { ...input, done: false } }), "create_todo");
   return work;
 }
@@ -266,8 +263,7 @@ export function spaceWorkOn<T extends JsonCaller>(transport: T): T & SpaceWork {
 export function permalinkOf(kind: ItemKind, itemId: string, projectId: string | null, config: Pick<ActionsConfig, "webBaseUrl" | "webBasePath">): string | null {
   if (!config.webBaseUrl) return null;
   const base = `${config.webBaseUrl}${config.webBasePath}`;
-  if (kind === "ticket") return projectId ? `${base}/projects/${projectId}/issues/${itemId}` : null;
-  return projectId ? `${base}/projects/${projectId}/tasks` : null;
+    return projectId ? `${base}/projects/${projectId}/tasks` : null;
 }
 
 export const previewText = (pending: Pending, config: Pick<ActionsConfig, "commandPrefix" | "confirmTtlMs">) =>
@@ -405,9 +401,11 @@ export class ActionBridge {
     await this.deps.store.save(spent);
     let item: CreatedItem;
     try {
-      item = pending.kind === "ticket"
-        ? await this.deps.space.createIssue({ project_id: pending.projectId!, title: pending.title, description: pending.description, source_entity_type: "channel", source_entity_id: pending.channelId })
-        : await this.deps.space.createTodo({ profile_id: await this.deps.space.bridgeAuthorId(), content: pending.title, project_id: pending.projectId, notes: pending.description, source_entity_type: "channel", source_entity_id: pending.channelId });
+      item = await this.deps.space.createTodo({
+profile_id: await this.deps.space.bridgeAuthorId(), content: pending.title, project_id: pending.projectId,
+notes: pending.description, category: pending.kind === "ticket" ? "dev" : undefined,
+source_entity_type: "channel", source_entity_id: pending.channelId,
+});
     } catch (error) {
       // Space refused (permission, validation, outage). Report it verbatim; never retry silently.
       return { state: spent, answer: `Space refused to create the ${pending.kind}: ${error instanceof Error ? error.message : String(error)}` };
