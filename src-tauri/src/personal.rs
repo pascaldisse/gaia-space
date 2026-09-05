@@ -1725,7 +1725,7 @@ fn goto_search_on(c: &Connection, query: &str, limit: i64) -> Result<Vec<GotoRes
     let mut statement = err(c.prepare("SELECT id,entity_type,title,details,score FROM (
       SELECT id,'profile' entity_type,display_name title,username details,CASE WHEN lower(display_name)=?2 THEN 100 ELSE 50 END score FROM profiles WHERE lower(display_name) LIKE ?1 OR lower(username) LIKE ?1
       UNION ALL SELECT id,'project',name,key,CASE WHEN lower(name)=?2 OR lower(key)=?2 THEN 100 ELSE 50 END FROM projects WHERE archived=0 AND (lower(name) LIKE ?1 OR lower(key) LIKE ?1 OR lower(coalesce(description,'')) LIKE ?1)
-      UNION ALL SELECT id,'issue',title,project_id || ' #' || number,CASE WHEN lower(title)=?2 THEN 100 ELSE 45 END FROM issues WHERE archived=0 AND (lower(title) LIKE ?1 OR lower(coalesce(description,'')) LIKE ?1)
+      UNION ALL SELECT id,'todo',content,coalesce(project_id,'personal'),CASE WHEN lower(content)=?2 THEN 100 ELSE 45 END FROM todos WHERE done=0 AND (lower(content) LIKE ?1 OR lower(coalesce(notes,'')) LIKE ?1)
       UNION ALL SELECT id,'channel',coalesce(name,''),description,CASE WHEN lower(coalesce(name,''))=?2 THEN 100 ELSE 40 END FROM channels WHERE archived=0 AND (lower(coalesce(name,'')) LIKE ?1 OR lower(coalesce(description,'')) LIKE ?1)
       UNION ALL SELECT id,'document',title,container_type,CASE WHEN lower(title)=?2 THEN 100 ELSE 45 END FROM documents WHERE archived=0 AND (lower(title) LIKE ?1 OR lower(coalesce(body,'')) LIKE ?1)
       UNION ALL SELECT id,'blog',title,'Blog',CASE WHEN lower(title)=?2 THEN 100 ELSE 45 END FROM blog_posts WHERE archived=0 AND (lower(title) LIKE ?1 OR lower(body) LIKE ?1)
@@ -1767,7 +1767,7 @@ pub fn goto_search_scoped(
     let mut s=err(c.prepare("SELECT id,entity_type,title,details,score FROM (
 SELECT id,'profile' entity_type,display_name title,username details,CASE WHEN lower(display_name)=?2 THEN 100 ELSE 50 END score FROM profiles WHERE lower(display_name) LIKE ?1 OR lower(username) LIKE ?1
 UNION ALL SELECT id,'project',name,key,CASE WHEN lower(name)=?2 OR lower(key)=?2 THEN 100 ELSE 50 END FROM projects WHERE archived=0 AND (lower(name) LIKE ?1 OR lower(key) LIKE ?1 OR lower(coalesce(description,'')) LIKE ?1) AND (?4 OR created_by=?3 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=projects.id AND pm.profile_id=?3))
-UNION ALL SELECT i.id,'issue',i.title,i.project_id || ' #' || i.number,CASE WHEN lower(i.title)=?2 THEN 100 ELSE 45 END FROM issues i WHERE i.archived=0 AND (lower(i.title) LIKE ?1 OR lower(coalesce(i.description,'')) LIKE ?1) AND EXISTS(SELECT 1 FROM projects p WHERE p.id=i.project_id AND (?4 OR p.created_by=?3 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?3)))
+UNION ALL SELECT t.id,'todo',t.content,coalesce(t.project_id,'personal'),CASE WHEN lower(t.content)=?2 THEN 100 ELSE 45 END FROM todos t WHERE t.done=0 AND (lower(t.content) LIKE ?1 OR lower(coalesce(t.notes,'')) LIKE ?1) AND (t.profile_id=?3 OR EXISTS(SELECT 1 FROM todo_assignees ta WHERE ta.todo_id=t.id AND ta.profile_id=?3) OR (t.project_id IS NOT NULL AND EXISTS(SELECT 1 FROM projects p WHERE p.id=t.project_id AND (?4 OR p.created_by=?3 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?3)))))
 UNION ALL SELECT ch.id,'channel',coalesce(ch.name,''),ch.description,CASE WHEN lower(coalesce(ch.name,''))=?2 THEN 100 ELSE 40 END FROM channels ch WHERE ch.archived=0 AND (lower(coalesce(ch.name,'')) LIKE ?1 OR lower(coalesce(ch.description,'')) LIKE ?1) AND (ch.id NOT LIKE 'entity:meeting:%' OR EXISTS(SELECT 1 FROM meetings m WHERE m.id=substr(ch.id,16) AND m.visibility='public') OR EXISTS(SELECT 1 FROM meetings m WHERE m.id=substr(ch.id,16) AND m.organizer_id=?3) OR EXISTS(SELECT 1 FROM meetings m JOIN meeting_participants mp ON mp.meeting_id=m.id WHERE m.id=substr(ch.id,16) AND m.visibility='participants' AND mp.profile_id=?3))
 UNION ALL SELECT d.id,'document',d.title,d.container_type,CASE WHEN lower(d.title)=?2 THEN 100 ELSE 45 END FROM documents d WHERE d.archived=0 AND (lower(d.title) LIKE ?1 OR lower(coalesce(d.body,'')) LIKE ?1) AND (d.created_by=?3 OR (d.container_type='project' AND EXISTS(SELECT 1 FROM projects p WHERE p.id=d.container_id AND (?4 OR p.created_by=?3 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?3)))))
 UNION ALL SELECT id,'blog',title,'Blog',CASE WHEN lower(title)=?2 THEN 100 ELSE 45 END FROM blog_posts WHERE archived=0 AND (lower(title) LIKE ?1 OR lower(body) LIKE ?1)
@@ -2069,18 +2069,7 @@ pub fn dashboard_aggregate(profile_id: String) -> Result<Dashboard> {
         return Err("Dashboard profile is required".into());
     }
     let c = db::conn()?;
-    let mut statement = err(c.prepare("SELECT i.id,i.project_id,i.number,i.title,i.due_date FROM issues i LEFT JOIN issue_statuses s ON s.id=i.status_id WHERE i.assignee_id=?1 AND i.archived=0 AND coalesce(s.resolved,0)=0 ORDER BY i.due_date IS NULL,i.due_date,i.number"))?;
-    let assigned_issues = err(statement.query_map([&profile_id], |row| {
-        Ok(AssignedIssue {
-            id: row.get(0)?,
-            project_id: row.get(1)?,
-            number: row.get(2)?,
-            title: row.get(3)?,
-            due_date: row.get(4)?,
-        })
-    }))?
-    .collect::<std::result::Result<Vec<_>, _>>()
-    .map_err(|error| error.to_string())?;
+    let assigned_issues = Vec::new();
     let now = Utc::now();
     let today = now.date_naive().to_string();
     let end = now + Duration::days(7);
@@ -2820,11 +2809,11 @@ mod tests {
     fn goto_search_hits_three_entity_types() {
         let c = conn();
         c.execute("INSERT INTO projects(id,name,key,created_at) VALUES('search-project','Search alpha','SEA',1)", []).unwrap();
-        c.execute("INSERT INTO issues(id,project_id,number,title,archived) VALUES('issue','search-project',1,'Search issue',0)", []).unwrap();
+        c.execute("INSERT INTO todos(id,profile_id,project_id,content,done) VALUES('todo','p','search-project','Search task',0)", []).unwrap();
         c.execute("INSERT INTO channels(id,content_type,name,archived) VALUES('channel','public','Search channel',0)", []).unwrap();
         let results = goto_search_on(&c, "search", 20).unwrap();
         assert!(results.iter().any(|result| result.entity_type == "project"));
-        assert!(results.iter().any(|result| result.entity_type == "issue"));
+        assert!(results.iter().any(|result| result.entity_type == "todo"));
         assert!(results.iter().any(|result| result.entity_type == "channel"));
     }
     #[test]
@@ -3233,7 +3222,7 @@ fn full_text_search_on(
         return Ok(Vec::new());
     }
     let profile = profile_id.unwrap_or("");
-    let sql = "SELECT CASE WHEN si.entity_type='message' THEN (SELECT channel_id FROM messages WHERE id=si.entity_id) ELSE si.entity_id END,CASE WHEN si.entity_type='message' THEN 'channel' ELSE si.entity_type END,si.title,snippet(search_index,3,'<mark>','</mark>','…',14),si.breadcrumb,bm25(search_index,0.0,0.0,8.0,0.0,0.0) FROM search_index si WHERE search_index MATCH ?1 AND (si.entity_type='issue' AND EXISTS(SELECT 1 FROM issues i JOIN projects p ON p.id=i.project_id WHERE i.id=si.entity_id AND (?2 OR p.created_by=?3 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?3))) OR si.entity_type='document' AND EXISTS(SELECT 1 FROM documents d WHERE d.id=si.entity_id AND (d.created_by=?3 OR (d.container_type='project' AND EXISTS(SELECT 1 FROM projects p WHERE p.id=d.container_id AND (?2 OR p.created_by=?3 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?3)))))) OR si.entity_type='message' AND EXISTS(SELECT 1 FROM messages m JOIN channel_members cm ON cm.channel_id=m.channel_id WHERE m.id=si.entity_id AND cm.profile_id=?3) OR si.entity_type='blog' AND EXISTS(SELECT 1 FROM blog_posts b WHERE b.id=si.entity_id AND (b.project_id IS NULL OR ?2 OR EXISTS(SELECT 1 FROM projects p WHERE p.id=b.project_id AND (p.created_by=?3 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?3)))))) ORDER BY bm25(search_index,0.0,0.0,8.0,0.0,0.0) LIMIT ?4";
+    let sql = "SELECT CASE WHEN si.entity_type='message' THEN (SELECT channel_id FROM messages WHERE id=si.entity_id) ELSE si.entity_id END,CASE WHEN si.entity_type='message' THEN 'channel' ELSE si.entity_type END,si.title,snippet(search_index,3,'<mark>','</mark>','…',14),si.breadcrumb,bm25(search_index,0.0,0.0,8.0,0.0,0.0) FROM search_index si WHERE search_index MATCH ?1 AND (si.entity_type='todo' AND EXISTS(SELECT 1 FROM todos t WHERE t.id=si.entity_id AND (t.profile_id=?3 OR EXISTS(SELECT 1 FROM todo_assignees ta WHERE ta.todo_id=t.id AND ta.profile_id=?3) OR (t.project_id IS NOT NULL AND EXISTS(SELECT 1 FROM projects p WHERE p.id=t.project_id AND (?2 OR p.created_by=?3 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?3)))))) OR si.entity_type='document' AND EXISTS(SELECT 1 FROM documents d WHERE d.id=si.entity_id AND (d.created_by=?3 OR (d.container_type='project' AND EXISTS(SELECT 1 FROM projects p WHERE p.id=d.container_id AND (?2 OR p.created_by=?3 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?3)))))) OR si.entity_type='message' AND EXISTS(SELECT 1 FROM messages m JOIN channel_members cm ON cm.channel_id=m.channel_id WHERE m.id=si.entity_id AND cm.profile_id=?3) OR si.entity_type='blog' AND EXISTS(SELECT 1 FROM blog_posts b WHERE b.id=si.entity_id AND (b.project_id IS NULL OR ?2 OR EXISTS(SELECT 1 FROM projects p WHERE p.id=b.project_id AND (p.created_by=?3 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?3)))))) ORDER BY bm25(search_index,0.0,0.0,8.0,0.0,0.0) LIMIT ?4";
     let mut statement = err(c.prepare(sql))?;
     let results = err(statement.query_map(
         params![terms, allow_all, profile, limit.clamp(1, 100)],
@@ -3275,13 +3264,13 @@ pub fn full_text_search_scoped(
 mod full_text_tests {
     use super::*;
     #[test]
-    fn fts_indexes_issue_document_message_and_blog_with_live_triggers() {
+    fn fts_indexes_todo_document_message_and_blog() {
         let c = db::open_in_memory().unwrap();
         db::migrate(&c).unwrap();
-        c.execute_batch("INSERT INTO profiles(id,username,display_name,created_at) VALUES('p','person','Person',1); INSERT INTO projects(id,name,key,created_by,created_at) VALUES('project','Project','PROJ','p',1); INSERT INTO issue_statuses(id,project_id,name,color) VALUES('open','project','Open','#000'); INSERT INTO issues(id,project_id,number,title,description,status_id,created_by) VALUES('i','project',1,'Issue alpha','needle issue body','open','p'); INSERT INTO documents(id,container_type,container_id,doc_type,title,body,created_by) VALUES('d','my-docs','p','text','Document alpha','needle document body','p'); INSERT INTO channels(id,content_type,name) VALUES('c','public','General'); INSERT INTO channel_members(channel_id,profile_id) VALUES('c','p'); INSERT INTO messages(id,channel_id,author_id,text) VALUES('m','c','p','needle chat body'); INSERT INTO blog_posts(id,title,body,author_id) VALUES('b','Blog alpha','needle blog body','p');").unwrap();
+        c.execute_batch("INSERT INTO profiles(id,username,display_name,created_at) VALUES('p','person','Person',1); INSERT INTO projects(id,name,key,created_by,created_at) VALUES('project','Project','PROJ','p',1); INSERT INTO todos(id,profile_id,project_id,content,notes,done) VALUES('i','p','project','Task alpha','needle task body',0); INSERT INTO documents(id,container_type,container_id,doc_type,title,body,created_by) VALUES('d','my-docs','p','text','Document alpha','needle document body','p'); INSERT INTO channels(id,content_type,name) VALUES('c','public','General'); INSERT INTO channel_members(channel_id,profile_id) VALUES('c','p'); INSERT INTO messages(id,channel_id,author_id,text) VALUES('m','c','p','needle chat body'); INSERT INTO blog_posts(id,title,body,author_id) VALUES('b','Blog alpha','needle blog body','p');").unwrap();
         let hits = full_text_search_on(&c, "needle", 20, Some("p"), true).unwrap();
         let kinds: Vec<_> = hits.iter().map(|hit| hit.entity_type.as_str()).collect();
-        assert!(kinds.contains(&"issue"));
+        assert!(kinds.contains(&"todo"));
         assert!(kinds.contains(&"document"));
         assert!(
             kinds.contains(&"channel"),

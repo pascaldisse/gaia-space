@@ -72,6 +72,7 @@ const entityRoutes: Record<string, { view: string; segment: string; parent?: "pr
   meeting:  { view: "Meetings",     segment: "meetings" },
   profile:  { view: "Members",      segment: "profiles" },
   review:   { view: "Code Reviews", segment: "reviews" },
+  todo:     { view: "To-Do",        segment: "todos" },
 };
 export const entityView = (entityType: string) => entityRoutes[entityType]?.view;
 

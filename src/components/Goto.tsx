@@ -4,7 +4,7 @@ import { entityView, hrefFor, isViewAvailable } from "../router";
 import "./Goto.css";
 type Props = { open:boolean; fullText?:boolean; onClose:()=>void; onNavigate:(entityType:string,entityId:string)=>void };
 type Mode="goto"|"fulltext";
-const labels:Record<string,string>={profile:"People",project:"Projects",issue:"Tasks",channel:"Channels",document:"Documents",review:"Code reviews",meeting:"Meetings",blog:"Blogs"};
+const labels:Record<string,string>={profile:"People",project:"Projects",issue:"Tasks",todo:"Tasks",channel:"Channels",document:"Documents",review:"Code reviews",meeting:"Meetings",blog:"Blogs"};
 export default function Goto(props:Props) {
  const [query,setQuery]=createSignal(""); const [mode,setMode]=createSignal<Mode>(props.fullText?"fulltext":"goto"); let input!:HTMLInputElement;
  createEffect(()=>{if(props.open){setMode(props.fullText?"fulltext":"goto");requestAnimationFrame(()=>input?.focus())}});

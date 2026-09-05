@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 143;
+pub const SCHEMA_VERSION: i64 = 144;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -887,6 +887,11 @@ pub fn migrate(conn: &Connection) -> Result<()> {
         tx.execute_batch(SCHEMA_V143_TODO_LINKS)?;
         if v143_ready(&tx)? { tx.execute_batch(SCHEMA_V143)?; }
     }
+    // V144: task unification owns the live work search corpus. V143 renamed issue
+    // tables; remove stale index rows/triggers without touching *_legacy evidence.
+    if version < 144 && table_exists(&tx, "todos")? {
+        tx.execute_batch(SCHEMA_V144_TODO_SEARCH)?;
+    }
     // V141: durable hosted Git repository metadata; bare objects live under data_dir/git/.
     if version < 141 && table_exists(&tx, "projects")? {
         tx.execute_batch(SCHEMA_V141)?;
@@ -1252,6 +1257,25 @@ CREATE TABLE IF NOT EXISTS todo_links (
  UNIQUE(todo_id,url)
 );
 CREATE INDEX IF NOT EXISTS todo_links_todo ON todo_links(todo_id);
+"#;
+/// V144: rebuild live work search from todos after V143 retired issues.
+pub(crate) const SCHEMA_V144_TODO_SEARCH: &str = r#"
+DROP TRIGGER IF EXISTS search_issues_ai;
+DROP TRIGGER IF EXISTS search_issues_au;
+DROP TRIGGER IF EXISTS search_issues_ad;
+DELETE FROM search_index WHERE entity_type='issue';
+INSERT INTO search_index(entity_type,entity_id,title,body,breadcrumb)
+SELECT 'todo',id,content,coalesce(notes,''),'Task · ' || coalesce(project_id,'personal') FROM todos WHERE done=0;
+CREATE TRIGGER IF NOT EXISTS search_todos_ai AFTER INSERT ON todos WHEN new.done=0 BEGIN
+  INSERT INTO search_index(entity_type,entity_id,title,body,breadcrumb) VALUES('todo',new.id,new.content,coalesce(new.notes,''),'Task · ' || coalesce(new.project_id,'personal'));
+END;
+CREATE TRIGGER IF NOT EXISTS search_todos_au AFTER UPDATE ON todos BEGIN
+  DELETE FROM search_index WHERE entity_type='todo' AND entity_id=old.id;
+  INSERT INTO search_index(entity_type,entity_id,title,body,breadcrumb) SELECT 'todo',new.id,new.content,coalesce(new.notes,''),'Task · ' || coalesce(new.project_id,'personal') WHERE new.done=0;
+END;
+CREATE TRIGGER IF NOT EXISTS search_todos_ad AFTER DELETE ON todos BEGIN
+  DELETE FROM search_index WHERE entity_type='todo' AND entity_id=old.id;
+END;
 "#;
 /// V143: one work entity = todo. Copy before renaming so every legacy fact survives.
 pub(crate) const SCHEMA_V143: &str = r#"

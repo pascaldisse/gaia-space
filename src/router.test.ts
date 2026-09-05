@@ -219,6 +219,8 @@ describe("grammar", () => {
     expect(parsePath("projects/p-1")).toMatchObject({ view: "Project Workspace", projectId: "p-1" });
     expect(parsePath("reviews/r-1")).toMatchObject({ view: "Code Reviews", entityType: "review", entityId: "r-1" });
     expect(entityView("channel")).toBe("Chat");
+expect(entityView("todo")).toBe("To-Do");
+expect(parsePath("todos/t-1")).toMatchObject({ view: "To-Do", entityType: "todo", entityId: "t-1" });
   });
 
   test("the channel workspace tab round-trips and opens the Chat view", () => {
