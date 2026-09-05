@@ -15,7 +15,10 @@ export const NAV_GROUPS: NavGroup[] = [
   // "Tasks", not "My tasks": this group holds the SHARED work surfaces (Team Tasks =
   // everybody's running project work, Project Tasks = one project's), so a possessive
   // label made people skip the only cross-team view there is.
-  { id: "tasks", label: "Tasks", icon: "check", views: ["To-Do", "Team Tasks", "Project Tasks"] },
+  // The Task Ledger is an EXTRA reading surface (generated, read-only), not a
+  // replacement for the task area: it joins the group AFTER the three working
+  // surfaces so nobody meets it first and mistakes it for "Tasks".
+  { id: "tasks", label: "Tasks", icon: "check", views: ["To-Do", "Team Tasks", "Project Tasks", "Task Ledger"] },
   // Projects is ONE destination: open a project → its boards → their issues.
   // Issues/Boards/Packages stay routable (deep links, Go to) but are not tabs.
   { id: "projects", label: "Projects", icon: "layers", views: ["Projects", "Development", "Repos", "Code Reviews", "Pipelines", "Dev Environments"] },
@@ -123,6 +126,7 @@ const MODE_OF_VIEW: Record<string, RailMode> = {
   Chat: "chats",
   Inbox: "home",
   "To-Do": "home",
+  "Task Ledger": "home",
   "Team Tasks": "home",
   // Every project-scoped surface belongs to the PROJECTS mode, not to Tasks and not
   // to More. They were unmapped, so all four fell into More and piled up there as
