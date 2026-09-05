@@ -512,13 +512,11 @@ fn write_assignees(c: &Connection, issue_id: &str, profile_ids: &[String]) -> Re
     Ok(())
 }
 /// One issue's people, replacing whoever was on it.
-#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn set_issue_assignees(issue_id: String, profile_ids: Vec<String>) -> Result<Vec<String>> {
     let c = db::conn()?;
     write_assignees(&c, &issue_id, &profile_ids)?;
     assignees_on(&c, &issue_id)
 }
-#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_issue_assignees(issue_id: String) -> Result<Vec<String>> {
     assignees_on(&db::conn()?, &issue_id)
 }
@@ -562,7 +560,6 @@ fn list_issues_on(
 // tauri `#[command]`: the signature IS the IPC contract consumed by the front-end.
 // Collapsing the filters into one argument object would break every caller.
 #[allow(clippy::too_many_arguments)]
-#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_issues(
     project_id: Option<String>,
     text: Option<String>,
@@ -596,7 +593,6 @@ fn record_activity(
     err(c.execute("INSERT INTO issue_activities(id,issue_id,activity_type,actor_id,detail) VALUES(?1,?2,?3,?4,?5)", params![new_id("issue-activity"), issue_id, activity_type, actor_id, detail]))?;
     Ok(())
 }
-#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_issue_comments(issue_id: String) -> Result<Vec<IssueComment>> {
     let c = db::conn()?;
     let mut s = err(c.prepare("SELECT id,issue_id,author_id,body,created_at,edited_at FROM issue_comments WHERE issue_id=?1 ORDER BY created_at,id"))?;
@@ -614,7 +610,6 @@ pub fn list_issue_comments(issue_id: String) -> Result<Vec<IssueComment>> {
     .map_err(|e| e.to_string())?;
     Ok(rows)
 }
-#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn create_issue_comment(input: IssueCommentInput) -> Result<IssueComment> {
     let body = input.body.trim().to_string();
     if body.is_empty() {
@@ -662,7 +657,6 @@ pub fn create_issue_comment(input: IssueCommentInput) -> Result<IssueComment> {
     // return the database timestamp rather than a client clock.
     Ok(saved)
 }
-#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_issue_activities(issue_id: String) -> Result<Vec<IssueActivity>> {
     let c = db::conn()?;
     let mut s = err(c.prepare("SELECT id,issue_id,activity_type,actor_id,detail,created_at FROM issue_activities WHERE issue_id=?1 ORDER BY created_at,id"))?;
@@ -680,7 +674,6 @@ pub fn list_issue_activities(issue_id: String) -> Result<Vec<IssueActivity>> {
     .map_err(|e| e.to_string())?;
     Ok(rows)
 }
-#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn get_issue(id: String) -> Result<Option<Issue>> {
     let c = db::conn()?;
     let issue = err(c.query_row("SELECT id,project_id,number,title,description,status_id,assignee_id,created_by,due_date,priority,archived,source_entity_type,source_entity_id FROM issues WHERE id=?1",[&id],read_issue).optional())?;
@@ -692,7 +685,6 @@ pub fn get_issue(id: String) -> Result<Option<Issue>> {
         None => Ok(None),
     }
 }
-#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn create_issue(input: IssueInput) -> Result<Issue> {
     valid_anchor(&input.source_entity_type, &input.source_entity_id)?;
     let c = db::conn()?;
@@ -723,7 +715,6 @@ pub fn create_issue(input: IssueInput) -> Result<Issue> {
 }
 /// Clone an issue into another project, mapping its status by name (or the first
 /// target status) and copying tags, checklists/items, and attachments.
-#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn clone_issue(input: IssueTransferInput) -> Result<Issue> {
     let c = db::conn()?;
     let source = err(c.query_row("SELECT id,project_id,number,title,description,status_id,assignee_id,created_by,due_date,priority,archived,source_entity_type,source_entity_id FROM issues WHERE id=?1", [&input.issue_id], read_issue).optional())?
@@ -823,7 +814,6 @@ pub fn clone_issue(input: IssueTransferInput) -> Result<Issue> {
     Ok(issue)
 }
 /// Move an issue to another project, keeping its content and mapping status/tags.
-#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn move_issue_to_project(input: IssueTransferInput) -> Result<Issue> {
     let c = db::conn()?;
     let source = err(c.query_row("SELECT id,project_id,number,title,description,status_id,assignee_id,created_by,due_date,priority,archived,source_entity_type,source_entity_id FROM issues WHERE id=?1", [&input.issue_id], read_issue).optional())?.ok_or_else(|| "Issue not found".to_string())?;
@@ -876,7 +866,6 @@ pub fn move_issue_to_project(input: IssueTransferInput) -> Result<Issue> {
     issue_event(crate::events::ISSUE_UPDATED, &issue);
     Ok(issue)
 }
-#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn update_issue(issue: Issue) -> Result<Issue> {
     valid_anchor(&issue.source_entity_type, &issue.source_entity_id)?;
     let c = db::conn()?;
@@ -900,7 +889,6 @@ pub fn update_issue(issue: Issue) -> Result<Issue> {
     issue_event(crate::events::ISSUE_UPDATED, &saved);
     Ok(saved)
 }
-#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn archive_issue(id: String, archived: bool) -> Result<()> {
     let c = db::conn()?;
     err(c.execute(
@@ -938,11 +926,9 @@ fn list_statuses_on(c: &Connection, project: Option<&str>) -> Result<Vec<IssueSt
     .map_err(|e| e.to_string())?;
     Ok(rows)
 }
-#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_issue_statuses(project_id: Option<String>) -> Result<Vec<IssueStatus>> {
     list_statuses_on(&db::conn()?, project_id.as_deref())
 }
-#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn create_issue_status(input: StatusInput) -> Result<IssueStatus> {
     let c = db::conn()?;
     let id = input.id.unwrap_or_else(|| new_id("status"));
@@ -961,7 +947,6 @@ pub fn create_issue_status(input: StatusInput) -> Result<IssueStatus> {
         ordering,
     })
 }
-#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn update_issue_status(status: IssueStatus) -> Result<()> {
     let c = db::conn()?;
     err(c.execute(
@@ -976,7 +961,6 @@ pub fn update_issue_status(status: IssueStatus) -> Result<()> {
     ))?;
     Ok(())
 }
-#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn delete_issue_status(id: String) -> Result<()> {
     let c = db::conn()?;
     let n: i64 = err(c.query_row(
@@ -1001,7 +985,6 @@ fn read_board(r: &rusqlite::Row<'_>) -> rusqlite::Result<Board> {
         archived: r.get(4)?,
     })
 }
-#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_boards(project_id: Option<String>) -> Result<Vec<Board>> {
     let c = db::conn()?;
     let mut s=err(c.prepare("SELECT id,project_id,name,backlog_type,archived FROM boards WHERE (?1 IS NULL OR project_id=?1) AND archived=0 ORDER BY name"))?;
@@ -1010,7 +993,6 @@ pub fn list_boards(project_id: Option<String>) -> Result<Vec<Board>> {
         .map_err(|e| e.to_string())?;
     Ok(rows)
 }
-#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn create_board(input: BoardInput) -> Result<Board> {
     let c = db::conn()?;
     let id = input.id.unwrap_or_else(|| new_id("board"));
@@ -1037,7 +1019,6 @@ pub fn create_board(input: BoardInput) -> Result<Board> {
     ))?;
     Ok(board)
 }
-#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn update_board(board: Board) -> Result<()> {
     let c = db::conn()?;
     err(c.execute(
@@ -1046,7 +1027,6 @@ pub fn update_board(board: Board) -> Result<()> {
     ))?;
     Ok(())
 }
-#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn delete_board(id: String) -> Result<()> {
     let c = db::conn()?;
     err(c.execute("DELETE FROM issue_board_positions WHERE board_id=?1", [&id]))?;
@@ -1087,11 +1067,9 @@ fn columns_on(c: &Connection, board_id: &str) -> Result<Vec<BoardColumn>> {
         })
         .collect()
 }
-#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_board_columns(board_id: String) -> Result<Vec<BoardColumn>> {
     columns_on(&db::conn()?, &board_id)
 }
-#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn save_board_column(input: ColumnInput) -> Result<BoardColumn> {
     let c = db::conn()?;
     let id = input.id.unwrap_or_else(|| new_id("column"));
@@ -1131,7 +1109,6 @@ pub fn save_board_column(input: ColumnInput) -> Result<BoardColumn> {
         status_ids: input.status_ids,
     })
 }
-#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn delete_board_column(id: String) -> Result<()> {
     let c = db::conn()?;
     err(c.execute("DELETE FROM column_statuses WHERE column_id=?1", [&id]))?;
@@ -1176,7 +1153,6 @@ fn move_on(
     err(tx.commit())?;
     Ok(())
 }
-#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn move_issue_on_board(
     board_id: String,
     issue_id: String,
@@ -1195,7 +1171,6 @@ pub fn move_issue_on_board(
         position,
     )
 }
-#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_board_issues(board_id: String, sprint_id: Option<String>) -> Result<Vec<Issue>> {
     let c = db::conn()?;
     let mut s=err(c.prepare("SELECT i.id,i.project_id,i.number,i.title,i.description,i.status_id,i.assignee_id,i.created_by,i.due_date,i.priority,i.archived,i.source_entity_type,i.source_entity_id FROM issue_board_positions p JOIN issues i ON i.id=p.issue_id WHERE p.board_id=?1 AND (?2 IS NULL OR p.sprint_id=?2) ORDER BY p.position"))?;
@@ -1205,7 +1180,6 @@ pub fn list_board_issues(board_id: String, sprint_id: Option<String>) -> Result<
     fill_assignees(&c, &mut rows)?;
     Ok(rows)
 }
-#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_backlog_issues(board_id: String) -> Result<Vec<Issue>> {
     let c = db::conn()?;
     let project: String = err(c.query_row(
@@ -1257,7 +1231,6 @@ fn checked_issue_project(c: &Connection, issue_ids: &[String], project_id: &str)
 
 /// Space's bulk `addIssuesToBacklogs` equivalent: selected project issues enter one
 /// board column together, retaining a deterministic contiguous order.
-#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn bulk_move_issues_on_board(input: BulkBoardMoveInput) -> Result<()> {
     nonempty_unique_ids(&input.issue_ids)?;
     let c = db::conn()?;
@@ -1291,7 +1264,6 @@ pub fn bulk_move_issues_on_board(input: BulkBoardMoveInput) -> Result<()> {
 }
 
 /// Space's bulk `removeIssuesFromBacklogs` equivalent: atomically remove board membership.
-#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn bulk_remove_issues_from_board(input: BulkBoardRemoveInput) -> Result<()> {
     nonempty_unique_ids(&input.issue_ids)?;
     let c = db::conn()?;
@@ -1319,7 +1291,6 @@ pub fn bulk_remove_issues_from_board(input: BulkBoardRemoveInput) -> Result<()> 
 }
 
 /// Space's `bulkUpdateIssuesSprints`: preserve board membership/status while changing sprint.
-#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn bulk_update_issues_sprints(input: BulkSprintUpdateInput) -> Result<()> {
     nonempty_unique_ids(&input.issue_ids)?;
     let c = db::conn()?;
@@ -1356,7 +1327,6 @@ pub fn bulk_update_issues_sprints(input: BulkSprintUpdateInput) -> Result<()> {
     err(tx.commit())
 }
 
-#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn remove_issue_from_board(board_id: String, issue_id: String) -> Result<()> {
     let c = db::conn()?;
     err(c.execute(
@@ -1378,7 +1348,6 @@ fn read_sprint(r: &rusqlite::Row<'_>) -> rusqlite::Result<Sprint> {
         archived: r.get(7)?,
     })
 }
-#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_sprints(board_id: Option<String>) -> Result<Vec<Sprint>> {
     let c = db::conn()?;
     let mut s=err(c.prepare("SELECT id,board_id,name,state,starts_on,ends_on,description,archived FROM sprints WHERE (?1 IS NULL OR board_id=?1) AND archived=0 ORDER BY starts_on,name"))?;
@@ -1387,7 +1356,6 @@ pub fn list_sprints(board_id: Option<String>) -> Result<Vec<Sprint>> {
         .map_err(|e| e.to_string())?;
     Ok(rows)
 }
-#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn create_sprint(input: SprintInput) -> Result<Sprint> {
     let c = db::conn()?;
     let sprint = Sprint {
@@ -1403,7 +1371,6 @@ pub fn create_sprint(input: SprintInput) -> Result<Sprint> {
     err(c.execute("INSERT INTO sprints(id,board_id,name,state,starts_on,ends_on,description,archived) VALUES(?1,?2,?3,?4,?5,?6,?7,0)",params![sprint.id,sprint.board_id,sprint.name,sprint.state,sprint.starts_on,sprint.ends_on,sprint.description]))?;
     Ok(sprint)
 }
-#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn update_sprint(sprint: Sprint) -> Result<()> {
     let c = db::conn()?;
     err(c.execute(
@@ -1443,11 +1410,9 @@ fn launch_on(c: &Connection, id: &str) -> Result<()> {
     err(tx.commit())?;
     Ok(())
 }
-#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn launch_sprint(id: String) -> Result<()> {
     launch_on(&db::conn()?, &id)
 }
-#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn close_sprint(id: String) -> Result<()> {
     let c = db::conn()?;
     err(c.execute(
@@ -1456,7 +1421,6 @@ pub fn close_sprint(id: String) -> Result<()> {
     ))?;
     Ok(())
 }
-#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn archive_sprint(id: String, archived: bool) -> Result<()> {
     let c = db::conn()?;
     err(c.execute(
@@ -1465,7 +1429,6 @@ pub fn archive_sprint(id: String, archived: bool) -> Result<()> {
     ))?;
     Ok(())
 }
-#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn delete_sprint(id: String) -> Result<()> {
     let c = db::conn()?;
     let state: String =
@@ -1481,7 +1444,6 @@ pub fn delete_sprint(id: String) -> Result<()> {
     Ok(())
 }
 
-#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn get_board_card_settings(board_id: String) -> Result<BoardCardSettings> {
     let c = db::conn()?;
     let json: Option<String> = err(c
@@ -1505,7 +1467,6 @@ pub fn get_board_card_settings(board_id: String) -> Result<BoardCardSettings> {
         });
     Ok(BoardCardSettings { board_id, fields })
 }
-#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn save_board_card_settings(settings: BoardCardSettings) -> Result<BoardCardSettings> {
     const CARD_FIELDS: &[&str] = &[
         "priority",
@@ -1537,7 +1498,6 @@ fn read_swimlane(r: &rusqlite::Row<'_>) -> rusqlite::Result<Swimlane> {
         ordering: r.get(5)?,
     })
 }
-#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_swimlanes(board_id: String, sprint_id: Option<String>) -> Result<Vec<Swimlane>> {
     let c = db::conn()?;
     let mut s=err(c.prepare("SELECT id,board_id,sprint_id,name,is_default,ordering FROM swimlanes WHERE board_id=?1 AND (?2 IS NULL OR sprint_id=?2) ORDER BY ordering"))?;
@@ -1546,7 +1506,6 @@ pub fn list_swimlanes(board_id: String, sprint_id: Option<String>) -> Result<Vec
         .map_err(|e| e.to_string())?;
     Ok(rows)
 }
-#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn save_swimlane(input: SwimlaneInput) -> Result<Swimlane> {
     let c = db::conn()?;
     let id = input.id.unwrap_or_else(|| new_id("swimlane"));
@@ -1571,7 +1530,6 @@ pub fn save_swimlane(input: SwimlaneInput) -> Result<Swimlane> {
         ordering,
     })
 }
-#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn delete_swimlane(id: String) -> Result<()> {
     let c = db::conn()?;
     err(c.execute(
@@ -1582,7 +1540,6 @@ pub fn delete_swimlane(id: String) -> Result<()> {
     Ok(())
 }
 
-#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_planning_tags(project_id: String) -> Result<Vec<PlanningTag>> {
     let c = db::conn()?;
     let mut s=err(c.prepare("SELECT id,project_id,parent_id,name,archived FROM planning_tags WHERE project_id=?1 AND archived=0 ORDER BY name"))?;
@@ -1599,7 +1556,6 @@ pub fn list_planning_tags(project_id: String) -> Result<Vec<PlanningTag>> {
     .map_err(|e| e.to_string())?;
     Ok(rows)
 }
-#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn save_planning_tag(input: TagInput) -> Result<PlanningTag> {
     let c = db::conn()?;
     let id = input.id.unwrap_or_else(|| new_id("tag"));
@@ -1623,14 +1579,12 @@ pub fn save_planning_tag(input: TagInput) -> Result<PlanningTag> {
     err(c.execute("INSERT INTO planning_tags(id,project_id,parent_id,name,archived) VALUES(?1,?2,?3,?4,?5) ON CONFLICT(id) DO UPDATE SET parent_id=excluded.parent_id,name=excluded.name,archived=excluded.archived",params![tag.id,tag.project_id,tag.parent_id,tag.name,tag.archived]))?;
     Ok(tag)
 }
-#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn delete_planning_tag(id: String) -> Result<()> {
     let c = db::conn()?;
     err(c.execute("DELETE FROM issue_tags WHERE tag_id=?1", [&id]))?;
     err(c.execute("DELETE FROM planning_tags WHERE id=?1", [id]))?;
     Ok(())
 }
-#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn set_issue_tags(issue_id: String, tag_ids: Vec<String>) -> Result<()> {
     let c = db::conn()?;
     let project: String = err(c.query_row(
@@ -1658,7 +1612,6 @@ pub fn set_issue_tags(issue_id: String, tag_ids: Vec<String>) -> Result<()> {
     Ok(())
 }
 
-#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_checklists(issue_id: String) -> Result<Vec<Checklist>> {
     let c = db::conn()?;
     let mut s = err(c.prepare(
@@ -1676,7 +1629,6 @@ pub fn list_checklists(issue_id: String) -> Result<Vec<Checklist>> {
     .map_err(|e| e.to_string())?;
     Ok(rows)
 }
-#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn save_checklist(input: ChecklistInput) -> Result<Checklist> {
     let c = db::conn()?;
     let id = input.id.unwrap_or_else(|| new_id("checklist"));
@@ -1693,14 +1645,12 @@ pub fn save_checklist(input: ChecklistInput) -> Result<Checklist> {
         ordering,
     })
 }
-#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn delete_checklist(id: String) -> Result<()> {
     let c = db::conn()?;
     err(c.execute("DELETE FROM checklist_items WHERE checklist_id=?1", [&id]))?;
     err(c.execute("DELETE FROM checklists WHERE id=?1", [id]))?;
     Ok(())
 }
-#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_checklist_items(checklist_id: String) -> Result<Vec<ChecklistItem>> {
     let c = db::conn()?;
     let mut s=err(c.prepare("SELECT id,checklist_id,parent_id,item_text,item_done,ordering FROM checklist_items WHERE checklist_id=?1 ORDER BY ordering"))?;
@@ -1718,7 +1668,6 @@ pub fn list_checklist_items(checklist_id: String) -> Result<Vec<ChecklistItem>> 
     .map_err(|e| e.to_string())?;
     Ok(rows)
 }
-#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn save_checklist_item(input: ChecklistItemInput) -> Result<ChecklistItem> {
     let c = db::conn()?;
     let id = input.id.unwrap_or_else(|| new_id("item"));
@@ -1737,7 +1686,6 @@ pub fn save_checklist_item(input: ChecklistItemInput) -> Result<ChecklistItem> {
         ordering,
     })
 }
-#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn toggle_checklist_item(id: String, item_done: bool) -> Result<()> {
     let c = db::conn()?;
     err(c.execute(
@@ -1746,14 +1694,12 @@ pub fn toggle_checklist_item(id: String, item_done: bool) -> Result<()> {
     ))?;
     Ok(())
 }
-#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn delete_checklist_item(id: String) -> Result<()> {
     let c = db::conn()?;
     err(c.execute("DELETE FROM checklist_items WHERE id=?1", [id]))?;
     Ok(())
 }
 
-#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_time_tracking_entries(issue_id: String) -> Result<Vec<TimeTrackingEntry>> {
     let c = db::conn()?;
     let mut s=err(c.prepare("SELECT id,issue_id,profile_id,entry_date,duration_minutes,description FROM time_tracking_entries WHERE issue_id=?1 ORDER BY entry_date DESC"))?;
@@ -1771,7 +1717,6 @@ pub fn list_time_tracking_entries(issue_id: String) -> Result<Vec<TimeTrackingEn
     .map_err(|e| e.to_string())?;
     Ok(rows)
 }
-#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn save_time_tracking_entry(input: TimeEntryInput) -> Result<TimeTrackingEntry> {
     if input.duration_minutes <= 0 {
         return Err("Duration must be positive".into());
@@ -1788,13 +1733,11 @@ pub fn save_time_tracking_entry(input: TimeEntryInput) -> Result<TimeTrackingEnt
     err(c.execute("INSERT INTO time_tracking_entries(id,issue_id,profile_id,entry_date,duration_minutes,description) VALUES(?1,?2,?3,?4,?5,?6) ON CONFLICT(id) DO UPDATE SET entry_date=excluded.entry_date,duration_minutes=excluded.duration_minutes,description=excluded.description",params![entry.id,entry.issue_id,entry.profile_id,entry.entry_date,entry.duration_minutes,entry.description]))?;
     Ok(entry)
 }
-#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn delete_time_tracking_entry(id: String) -> Result<()> {
     let c = db::conn()?;
     err(c.execute("DELETE FROM time_tracking_entries WHERE id=?1", [id]))?;
     Ok(())
 }
-#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn issue_time_total(issue_id: String) -> Result<i64> {
     let c = db::conn()?;
     err(c.query_row(
@@ -1822,7 +1765,6 @@ fn reachable(c: &Connection, from: &str, target: &str) -> Result<bool> {
     }
     Ok(false)
 }
-#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn add_issue_child(parent_id: String, child_id: String) -> Result<IssueLink> {
     if parent_id == child_id {
         return Err("An issue cannot be its own child".into());
@@ -1846,7 +1788,6 @@ pub fn add_issue_child(parent_id: String, child_id: String) -> Result<IssueLink>
 fn valid_external_url(url: &str) -> bool {
     url.starts_with("https://") || url.starts_with("http://")
 }
-#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_issue_tracker_links(issue_id: String) -> Result<Vec<TrackerLink>> {
     let c = db::conn()?;
     let mut s=err(c.prepare("SELECT id,issue_id,target_kind,target_id,url,title FROM issue_tracker_links WHERE issue_id=?1 ORDER BY id"))?;
@@ -1864,7 +1805,6 @@ pub fn list_issue_tracker_links(issue_id: String) -> Result<Vec<TrackerLink>> {
     .map_err(|e| e.to_string())?;
     Ok(rows)
 }
-#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn add_issue_tracker_link(input: TrackerLinkInput) -> Result<TrackerLink> {
     let kind = input.target_kind.to_uppercase();
     if !matches!(kind.as_str(), "ISSUE" | "REVIEW" | "EXTERNAL") {
@@ -1933,19 +1873,16 @@ pub fn add_issue_tracker_link(input: TrackerLinkInput) -> Result<TrackerLink> {
     )?;
     Ok(link)
 }
-#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn remove_issue_tracker_link(id: String) -> Result<()> {
     err(db::conn()?.execute("DELETE FROM issue_tracker_links WHERE id=?1", [id]))?;
     Ok(())
 }
 
-#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn remove_issue_link(id: String) -> Result<()> {
     let c = db::conn()?;
     err(c.execute("DELETE FROM issue_links WHERE id=?1", [id]))?;
     Ok(())
 }
-#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_issue_attachments(issue_id: String) -> Result<Vec<IssueAttachment>> {
     let c = db::conn()?;
     let mut statement = err(c.prepare("SELECT id,issue_id,file_name,mime_type,byte_length,data_url FROM issue_attachments WHERE issue_id=?1 ORDER BY created_at,id"))?;
@@ -1963,7 +1900,6 @@ pub fn list_issue_attachments(issue_id: String) -> Result<Vec<IssueAttachment>> 
     .map_err(|e| e.to_string())?;
     Ok(attachments)
 }
-#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn add_issue_attachment(
     issue_id: String,
     attachment: IssueAttachmentInput,
@@ -1985,12 +1921,10 @@ pub fn add_issue_attachment(
     err(c.execute("INSERT INTO issue_attachments(id,issue_id,file_name,mime_type,byte_length,data_url) VALUES(?1,?2,?3,?4,?5,?6)", params![item.id,item.issue_id,item.file_name,item.mime_type,item.byte_length,item.data_url]))?;
     Ok(item)
 }
-#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn delete_issue_attachment(id: String) -> Result<()> {
     err(db::conn()?.execute("DELETE FROM issue_attachments WHERE id=?1", [id]))?;
     Ok(())
 }
-#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn get_issue_detail(id: String) -> Result<Option<IssueDetail>> {
     let issue = match get_issue(id.clone())? {
         Some(i) => i,
