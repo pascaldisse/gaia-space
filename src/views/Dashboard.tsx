@@ -167,9 +167,6 @@ const [dashboard, { refetch: refetchDashboard }] = createResource(
 
           <section class="ov-section"><header><h2>Following</h2><span class="ov-count">{follows()?.length ?? 0}</span></header><div class="ov-cards"><Show when={!follows()?.length}><p class="ov-empty">Follow people and teams to personalize your overview signals.</p></Show><For each={(followProfiles() ?? []).filter(p => p.id !== profileId() && !p.archived).slice(0, 6)}>{person => <button class="ghost" aria-pressed={followsSubject("profile", person.id)} onClick={() => void toggleFollow("profile", person.id)}>{followsSubject("profile", person.id) ? "Following" : "Follow"} {person.display_name}</button>}</For><For each={(followTeams() ?? []).filter(team => !team.archived).slice(0, 6)}>{team => <button class="ghost" aria-pressed={followsSubject("team", team.id)} onClick={() => void toggleFollow("team", team.id)}>{followsSubject("team", team.id) ? "Following" : "Follow"} {team.name}</button>}</For></div></section>
 <div class="dashboard-grid">
-            <Show when={widgetVisible("issues")}><DashboardSection title="Assigned tickets" count={data().assigned_issues.length} empty="No tickets assigned to you yet." target="Issues">
-              <For each={data().assigned_issues}>{(issue) => <article class="ov-card"><strong class="ov-card-title">#{issue.number} {issue.title}</strong><Show when={issue.due_date}><span class="ov-tag due">Due {issue.due_date}</span></Show></article>}</For>
-            </DashboardSection></Show>
             <Show when={widgetVisible("inbox")}><DashboardSection title="Inbox" count={data().unread_notifications.length} empty="Your inbox is clear." target="Inbox">
               <For each={data().unread_notifications}>{(notice) => <article class="ov-card"><strong class="ov-card-title">{notice.title}</strong><Show when={notice.body}><p>{notice.body}</p></Show></article>}</For>
             </DashboardSection></Show>

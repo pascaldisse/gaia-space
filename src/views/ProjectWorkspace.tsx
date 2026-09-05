@@ -2,7 +2,6 @@ import { For, Show, createEffect, createMemo, createResource, createSignal, onMo
 import { chatApi, type ChannelSummary } from "../api/chat";
 import { personalApi, type Todo } from "../api/personal";
 import { platformApi } from "../api/platform";
-import { planningApi } from "../api/issues";
 import { pipelinesApi } from "../api/pipelines";
 import { currentUser, humanError, profileId, profiles, projects, reloadProfiles, reloadProjects, setProjectId } from "../session";
 import { linkProps, navigate, projectTabs, route, type ProjectTab, type Route } from "../router";
@@ -20,8 +19,11 @@ import Chat from "./Chat";
 import ProjectTasks from "./ProjectTasks";
 import Calendar from "./Calendar";
 import Documents from "./Documents";
-import Boards from "./Boards";
+import TaskRowEdit, { blankTask, focusTaskRow } from "../components/TaskRowEdit";
 import "../components/paper.css";
+import "../components/TaskList.css";
+import "../components/TaskRowEdit.css";
+import "./taskCards.css";
 import "./ChatSpaceLight.css";
 import "./ProjectWorkspace.css";
 
@@ -553,8 +555,12 @@ function ProjectChats(props: {
 }
 
 /** ── DEV ──────────────────────────────────────────────────────────────────────
- *  Tickets and boards for this project — and the honest answer about linking a
- *  repository.
+ *  Dev work is TASKS with `category === 'dev'` — the same entity every other tab
+ *  edits, filtered to the kind of work that belongs here (GitHub/external tracker
+ *  items are these tasks with a LINK, see TaskMeta's Links row). There is no
+ *  separate ticket/board store any more; "New task" here simply opens the shared
+ *  row editor with the category pre-set — and the honest answer about linking a
+ *  repository, below.
  *
  *  WHAT I FOUND ABOUT "LINK A REPOSITORY" (evidence, not a guess):
  *   - `src-tauri/src/git.rs` registers repo_list / repo_add / repo_remove / repo_info /
@@ -573,16 +579,19 @@ function ProjectChats(props: {
  *  So a git repository CANNOT be attached to a project today. This renders that as an
  *  honest empty state rather than a dead control, and says exactly what is missing. */
 function ProjectDev(props: { projectId: string }): JSX.Element {
-  const [tickets] = createResource(
-    () => props.projectId,
-    async (id) => {
-      if (!id) return { open: 0, total: 0 };
-      const [issues, statuses] = await Promise.all([planningApi.issues({ project_id: id }), planningApi.statuses(id)]);
-      const resolved = new Set(statuses.filter((status) => status.resolved).map((status) => status.id));
-      const live = issues.filter((issue) => !issue.archived);
-      return { open: live.filter((issue) => !resolved.has(issue.status_id ?? "")).length, total: live.length };
-    },
+  const actingProfileId = () => currentUser()?.profile_id ?? profileId();
+  const [devTasks, { refetch: reloadDevTasks }] = createResource(
+    () => [props.projectId, actingProfileId()] as const,
+    ([id, profile]) => (id && profile ? personalApi.projectTodos(id, profile, true) : Promise.resolve([] as Todo[])),
   );
+  const tasks = createMemo(() => (devTasks() ?? []).filter((task) => task.category === "dev"));
+  const openTasks = createMemo(() => tasks().filter((task) => !task.done));
+  const nameOf = (id: string) => { const person = profiles()?.find((item) => item.id === id); return person?.display_name || person?.username || id; };
+  const [creating, setCreating] = createSignal(false);
+  const [editingId, setEditingId] = createSignal<string | null>(null);
+  const [devError, setDevError] = createSignal("");
+  const owns = (task: Todo) => task.profile_id === actingProfileId();
+  const closeEdit = (id: string) => { setEditingId(null); focusTaskRow(id); };
   // Package repositories genuinely bind to a project, so this list is real data.
   const [packageRepos] = createResource(
     () => props.projectId,
@@ -593,12 +602,60 @@ function ProjectDev(props: { projectId: string }): JSX.Element {
     <div class="pw-dev">
       <section class="pw-card">
         <SectionHeading
-          title="Tickets and boards"
-          meta={tickets() ? `${tickets()!.open} open of ${tickets()!.total}` : undefined}
+          title="Dev tasks"
+          meta={tasks().length ? `${openTasks().length} open of ${tasks().length}` : undefined}
+          actions={<GhostPill onClick={() => setCreating(true)}>New task</GhostPill>}
         />
-        {/* The board that used to be stacked on the ALL-PROJECTS page. It belongs to
-            the project you opened, which is here. */}
-        <Boards />
+        <Show when={devError()}><p class="pw-error" role="alert">{devError()}</p></Show>
+        <Show when={creating()}>
+          <div class="task-grid task-create-grid" aria-label="New dev task">
+            <div class="task-open">
+              <div class="task-row-editing">
+                <TaskRowEdit
+                  mode="create"
+                  task={blankTask(actingProfileId() ?? "", props.projectId, "dev")}
+                  fixedProject
+                  canEdit
+                  canComplete={false}
+                  ownerName={nameOf(actingProfileId() ?? "")}
+                  onCancel={() => setCreating(false)}
+                  onSaved={() => { setCreating(false); void reloadDevTasks(); }}
+                  onError={setDevError} />
+              </div>
+            </div>
+          </div>
+        </Show>
+        <Show when={!devTasks.loading && !tasks().length && !creating()}>
+          <EmptyState
+            title="No dev tasks in this project yet"
+            hint="A GitHub issue or PR becomes a dev task with a link, added from the task's Links row."
+            actions={<button type="button" class="primary" onClick={() => setCreating(true)}>New task</button>}
+          />
+        </Show>
+        <div class="task-grid" aria-label="Dev tasks">
+          <For each={tasks()}>
+            {(task) => (
+              <Show when={editingId() === task.id} fallback={
+                <article class="task-tile" classList={{ done: task.done }}>
+                  <button type="button" class="task-tile-body" data-task-row={task.id} aria-label={`Edit ${task.content}`} onClick={() => setEditingId(task.id)}>
+                    <span class="task-tile-title">{task.content}</span>
+                    <span class="task-tile-meta">{task.assignee_ids.length ? task.assignee_ids.map(nameOf).join(", ") : "Unassigned"}<Show when={(task.links ?? []).length}><span class="sep">·</span>{(task.links ?? []).length} link{(task.links ?? []).length === 1 ? "" : "s"}</Show></span>
+                  </button>
+                </article>
+              }>
+                <div class="task-open">
+                  <div class="task-row-editing">
+                    <TaskRowEdit task={task} fixedProject canEdit={owns(task)} canComplete={owns(task) || task.assignee_ids.includes(actingProfileId() ?? "")}
+                      ownerName={nameOf(task.profile_id)}
+                      onCancel={() => closeEdit(task.id)}
+                      onSaved={() => { closeEdit(task.id); void reloadDevTasks(); }}
+                      onError={setDevError} />
+                  </div>
+                </div>
+              </Show>
+            )}
+          </For>
+        </div>
       </section>
 
       <section class="pw-card">

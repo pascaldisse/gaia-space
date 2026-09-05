@@ -9,8 +9,8 @@ import { ControlRow, GhostPill, QuietSearch } from "../components/controls";
 import EmptyState from "../components/EmptyState";
 import TaskRowEdit, { blankTask, focusTaskRow } from "../components/TaskRowEdit";
 import { stableTasks } from "./taskIdentity";
-import { humanError, profileId, profiles, projectId as sessionProject, projects, setProjectId } from "../session";
-import { linkProps, navigate, route } from "../router";
+import { humanError, profileId, profiles, projectId as sessionProject, projects } from "../session";
+import { route } from "../router";
 import { Icon } from "../components/Icon";
 import ContentHead from "../components/ContentHead";
 import { bandTone, deadlineBand, todayISO, urgencyOf } from "../statusTone";
@@ -41,9 +41,11 @@ import "./ProjectTasks.css";
  *  edited HERE at all. Now the row IS the editor: clicking it opens the task in
  *  place, in the same in-row editor My tasks has always had.
  *
- *  WHERE THE TICKETS WENT (stage 12d, unchanged) — the tickets view and the board,
- *  both reachable from the quiet "N open tickets →" link below the header. The count
- *  is `projectDashboard.open_issues`, the SAME aggregate the project Overview reads. */
+ *  TICKETS ARE GONE (task unification): what used to be a separate tracker item is
+ *  now a task with `category === 'dev'`, filed and worked on the project's Dev tab.
+ *  The "N open tickets →" line that lived below this header is gone with them —
+ *  it was redundant with the "open" chip in the header above, which already counts
+ *  every open task in this project. */
 export default function ProjectTasks(props: { projectId?: string } = {}) {
   // Scoping precedence: explicit prop (embedded, e.g. the channel workspace's "Tasks"
   // tab, where the project comes from the channel) > URL > session project.
@@ -68,10 +70,6 @@ export default function ProjectTasks(props: { projectId?: string } = {}) {
     () => [selectedProject(), profileId()] as const,
     ([project_id, profile_id]) => project_id && profile_id ? personalApi.projectTodos(project_id, profile_id, true) : Promise.resolve([]),
   );
-  /* The ticket count is READ, never recomputed here: one aggregate, quoted by both
-     this surface and the Overview. Recounting it locally is exactly how the two
-     drifted apart before. */
-  const [dashboard, { refetch: reloadDashboard }] = createResource(selectedProject, id => id ? personalApi.projectDashboard(id) : Promise.resolve(undefined));
   // A project is collaborative: another member's write must arrive without making the
   // current user discover a secret reload gesture. Focus refresh is immediate; the
   // bounded interval covers two people who keep the view open side by side.
@@ -81,21 +79,13 @@ export default function ProjectTasks(props: { projectId?: string } = {}) {
        route param. Only the task intent is honoured — tickets are not created on
        a task surface any more. */
     if (takeWorkIntent() === "new-task") setCreating(true);
-    const refresh = () => { void reloadTasks(); void reloadDashboard(); };
+    const refresh = () => { void reloadTasks(); };
     const interval = window.setInterval(refresh, 15_000);
     window.addEventListener("focus", refresh);
     onCleanup(() => { window.clearInterval(interval); window.removeEventListener("focus", refresh); });
   });
   const project = () => (projects() ?? []).find(item => item.id === selectedProject());
   const nameOf = (id: string) => { const person = profiles()?.find(item => item.id === id); return person?.display_name || person?.username || id; };
-  /* Tickets read their project from the session (Issues.tsx), so the scope is
-     written before the navigation — the destination never asks again. */
-  const openTickets = () => { setProjectId(selectedProject()); navigate({ view: "Issues" }); };
-  const ticketLink = () => ({ ...linkProps({ view: "Issues" }), onClick: (event: MouseEvent) => {
-    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-    event.preventDefault(); openTickets();
-  } });
-  const openTicketCount = () => dashboard()?.open_issues ?? 0;
   /* Rows keep their identity across re-reads (see taskIdentity.ts): a poll must not
      dispose the row a person is editing. */
   const taskRows = stableTasks(() => (tasks.error ? [] : tasks()));
@@ -140,21 +130,11 @@ export default function ProjectTasks(props: { projectId?: string } = {}) {
       { label: "Postpone by a day", onSelect: () => void postpone(task, 1) },
       { label: "Postpone by a week", onSelect: () => void postpone(task, 7) },
     ] : []),
-    ...(owns(task) && !task.done && task.project_id && task.source_entity_type !== "issue"
-      ? [{ label: "Convert to ticket", onSelect: () => void convert(task) }]
-      : []),
     ...(owns(task) ? [{ label: "Delete task…", danger: true, onSelect: () => setPendingDelete(task) }] : []),
   ];
   const postpone = async (task: Todo, days: number) => {
     try { await personalApi.postponeTodo(task.id, days); await reloadTasks(); }
     catch (reason) { setError(humanError(reason)); }
-  };
-  const convert = async (task: Todo) => {
-    try {
-      if (!task.project_id) throw new Error("Give the task a project before converting it into a ticket.");
-      await personalApi.convertTodoToIssue(task.id, task.project_id);
-      await reloadTasks(); void reloadDashboard();
-    } catch (reason) { setError(humanError(reason)); }
   };
   const openTaskMenu = (event: MouseEvent, task: Todo) => {
     event.preventDefault();
@@ -171,7 +151,7 @@ export default function ProjectTasks(props: { projectId?: string } = {}) {
       setPendingDelete(null);
       if (editingId() === task.id) setEditingId(null);
       await reloadTasks();
-      void reloadDashboard();
+     
     } catch (reason) {
       // This surface's one error line. A refusal is never swallowed.
       setError(humanError(reason));
@@ -182,7 +162,7 @@ export default function ProjectTasks(props: { projectId?: string } = {}) {
   };
   const mayComplete = (task: Todo) => owns(task) || task.assignee_ids.includes(profileId());
   const complete = async (task: Todo, done: boolean) => {
-    try { await personalApi.setTodoCompletion(task.id, done); await reloadTasks(); void reloadDashboard(); }
+    try { await personalApi.setTodoCompletion(task.id, done); await reloadTasks(); }
     catch (reason) { setError(humanError(reason)); }
   };
   /* A filter that is ON may never hide behind a closed disclosure — that is how a
@@ -267,7 +247,7 @@ export default function ProjectTasks(props: { projectId?: string } = {}) {
           <TaskRowEdit task={task} fixedProject canEdit={owns(task)} canComplete={mayComplete(task)}
             ownerName={nameOf(task.profile_id)}
             onCancel={() => closeEdit(task.id)}
-            onSaved={() => { closeEdit(task.id); void reloadTasks(); void reloadDashboard(); }}
+            onSaved={() => { closeEdit(task.id); void reloadTasks(); }}
             onError={setError}
             danger={<DeleteButton
               label={`Delete ${task.content}`}
@@ -296,12 +276,6 @@ export default function ProjectTasks(props: { projectId?: string } = {}) {
         <Show when={dueSoonCount()}><Chip value={dueSoonCount()} label="due in 7 days" tone="amber" /></Show>
       </Show>
     } />
-    {/* The connection to tracked work stays visible without moving it back in:
-        one quiet line, the count from the shared aggregate, and a way through. */}
-    <p class="pt-tickets-line">
-      <a class="pt-tickets-link" {...ticketLink()}>{openTicketCount()} open ticket{openTicketCount() === 1 ? "" : "s"} →</a>
-      <span class="pt-tickets-hint">Tracked work with a status lives on the tickets surface and its board.</span>
-    </p>
     <Show when={error()}><p class="planning-error" role="alert">{error()}</p></Show>
     <Show when={tasks.error}><p class="planning-error" role="alert">Could not load project tasks: {String(tasks.error)}</p></Show>
     <section class="project-work-group" aria-label="Tasks">
@@ -355,7 +329,7 @@ export default function ProjectTasks(props: { projectId?: string } = {}) {
                   canComplete={false}
                   ownerName={nameOf(profileId())}
                   onCancel={() => setCreating(false)}
-                  onSaved={() => { setCreating(false); void reloadTasks(); void reloadDashboard(); }}
+                  onSaved={() => { setCreating(false); void reloadTasks(); }}
                   onError={setError} />
               </div>
             </div>

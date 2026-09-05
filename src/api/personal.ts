@@ -8,7 +8,18 @@ export type TodoContentKind = "text"|"markdown";
 export const TODO_CATEGORIES = [{id:"create",label:"Create"},{id:"improve",label:"Improve"},{id:"review",label:"Review"},{id:"decide",label:"Decide"},{id:"admin",label:"Admin"}] as const;
 export type TodoCategory = typeof TODO_CATEGORIES[number]["id"];
 /** `category` is OPTIONAL: absent or null means uncategorised, which is the normal case. */
-export type Todo = { id:string; profile_id:string; content:string; due_date:string|null; project_id:string|null; done:boolean; source_entity_type:string|null; source_entity_id:string|null; notes:string|null; assignee_ids:string[]; content_kind:TodoContentKind; category?:string|null };
+// `links` is optional on the CLIENT TYPE only (not on the wire, where the server always
+// sends the array): dozens of existing test fixtures build a `Todo` literal without it,
+// and a required field there would be a mechanical, feature-unrelated edit to every one
+// of them. Every reader treats an absent value as `[]` (see `TaskMeta.tsx`).
+export type Todo = { id:string; profile_id:string; content:string; due_date:string|null; project_id:string|null; done:boolean; source_entity_type:string|null; source_entity_id:string|null; notes:string|null; assignee_ids:string[]; content_kind:TodoContentKind; category?:string|null; links?:TodoLink[] };
+/** A task's external/cross-task links. `EXTERNAL` = a bare URL (GitHub issue/PR, doc, …),
+ *  `TASK` = another task by id (`target_id`); `url` and `target_id` are mutually exclusive
+ *  by kind. The server owns ids; `add_todo_link` returns the created row. */
+export type TodoLink = { id:string; todo_id:string; kind:"EXTERNAL"|"TASK"; url:string|null; target_id:string|null; title:string|null };
+/** What `create_todo`/`update_todo` accept: a full `Todo` minus the server-assigned id
+ *  (present on update, absent on create). Sending `links` REPLACES the todo's link set. */
+export type TodoInput = Omit<Todo,"id"> & { id?:string };
 export type CalendarItem = { id:string; source_id:string; kind:"meeting"|"task"|"deadline"|"blog"|"external"; title:string; starts_at:number; ends_at:number|null; project_id:string|null; calendar_id:string|null; date:string|null };
 export type AbsenceAvailability = "away"|"partial"|"available";
 // `reason_type` arrives as "Private" when the owner marked it confidential and the
@@ -21,7 +32,7 @@ export type SubscriptionScope = { profile_id:string; event_type:string; target_t
 export type GotoResult = { id:string; entity_type:string; title:string; details:string|null; score:number };
 export type FullTextResult = { id:string; entity_type:string; title:string; snippet:string; breadcrumb:string; score:number };
 export type MeetingOccurrence = { id:string; meeting_id:string; title:string; starts_at:number; ends_at:number; location:string|null };
-export type Dashboard = { open_todos:Todo[]; assigned_issues:{id:string;title:string;project_id:string;number:number;due_date:string|null}[]; meeting_occurrences:MeetingOccurrence[]; unread_notifications:Notification[]; current_absences:Absence[] };
+export type Dashboard = { open_todos:Todo[]; meeting_occurrences:MeetingOccurrence[]; unread_notifications:Notification[]; current_absences:Absence[] };
 export type DashboardPreferences = { profile_id:string; hidden_widgets:string[]; initialized:boolean };
 export type Follow = { profile_id:string; subject_type:"profile"|"team"; subject_id:string };
 export type SubscriptionDeliveryTarget = { profile_id:string; event_type:string; target_kind:"feed"|"channel"|"webhook"; target_id:string; application_id:string|null; enabled:boolean };
@@ -48,7 +59,9 @@ export const personalApi = {
    *  A refusal comes back as a rejection and must reach the screen — never swallowed. */
   deleteTodo:(id:string,actor_id:string)=>call<void>("delete_todo",{id,actorId:actor_id}),
   postponeTodo:(id:string,days:number)=>call<Todo>("postpone_todo",{id,days}),
-  convertTodoToIssue:(id:string,project_id:string,status_id?:string)=>call<{id:string;project_id:string;number:number;title:string}>("convert_todo_to_issue",{id,projectId:project_id,statusId:status_id??null}),
+  todoLinks:(todo_id:string)=>call<TodoLink[]>("list_todo_links",{todoId:todo_id}),
+  addTodoLink:(input:{todo_id:string;kind:TodoLink["kind"];url?:string|null;target_id?:string|null;title?:string|null})=>call<TodoLink>("add_todo_link",{todoId:input.todo_id,kind:input.kind,url:input.url??null,targetId:input.target_id??null,title:input.title??null}),
+  deleteTodoLink:(id:string)=>call<void>("delete_todo_link",{id}),
   absences:(profile_id?:string)=>call<Absence[]>("list_absences",{profileId:profile_id}), createAbsence:(input:Omit<Absence,"id">&{id?:string})=>call<Absence>("create_absence",{input}), updateAbsence:(absence:Absence)=>call<Absence>("update_absence",{absence}), deleteAbsence:(id:string)=>call<void>("delete_absence",{id}), currentAbsences:(date:string)=>call<Absence[]>("current_absences",{date}),
   notifications:(recipient_id:string,unread_only=false)=>call<Notification[]>("list_notifications",{recipientId:recipient_id,unreadOnly:unread_only}), emitNotification:(input:Omit<Notification,"id"|"created_at"|"read_at">&{id?:string})=>call<Notification|null>("emit_notification",{input}), markRead:(id:string)=>call<void>("mark_notification_read",{id}),
   subscriptions:(profile_id:string)=>call<SubscriptionSetting[]>("list_subscription_settings",{profileId:profile_id}), saveSubscription:(setting:SubscriptionSetting)=>call<SubscriptionSetting>("save_subscription_setting",{setting}), deleteSubscription:(profile_id:string,event_type:string)=>call<void>("delete_subscription_setting",{profileId:profile_id,eventType:event_type}),

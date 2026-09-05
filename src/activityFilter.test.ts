@@ -18,11 +18,11 @@ import { railModeOfRoute } from "./nav";
 //   filter <-> kinds         (a filter with no kind behind it is the `provisional` defect)
 //   filtered route -> mode   (a filter must never leave Activity)
 
-const VIEWS = ["Dashboard", "Inbox", "Chat", "Team Tasks", "Code Reviews", "To-Do", "Issues"];
+const VIEWS = ["Dashboard", "Inbox", "Chat", "Team Tasks", "Code Reviews", "To-Do"];
 beforeEach(() => { setRoutePending(false); registerViews(VIEWS); setAvailableViews(VIEWS); });
 
 const ALL_KINDS: AttentionKind[] =
-  ["mention", "dm", "channel", "thread", "todo", "issue", "review", "notification"];
+  ["mention", "dm", "channel", "thread", "todo", "review", "notification"];
 
 const item = (kind: AttentionKind): AttentionItem => ({
   id: `${kind}:1`, kind, title: kind, at: 0, action: "Open", tone: "", route: { view: "Inbox" },
@@ -81,8 +81,8 @@ describe("filter <-> kind", () => {
     expect(kindsOfFilter("mentions")).toEqual(["mention", "thread"]);
   });
 
-  test("Assigned is todo + issue, Reviews is review, Messages is dm + channel", () => {
-    expect(kindsOfFilter("assigned")).toEqual(["todo", "issue"]);
+  test("Assigned is todo, Reviews is review, Messages is dm + channel", () => {
+    expect(kindsOfFilter("assigned")).toEqual(["todo"]);
     expect(kindsOfFilter("reviews")).toEqual(["review"]);
     expect(kindsOfFilter("messages")).toEqual(["dm", "channel"]);
   });
@@ -91,7 +91,7 @@ describe("filter <-> kind", () => {
     const worklist = ALL_KINDS.map(item);
     expect(filterAttention(worklist, "all")).toHaveLength(ALL_KINDS.length);
     expect(filterAttention(worklist, "mentions").map((i) => i.kind)).toEqual(["mention", "thread"]);
-    expect(filterAttention(worklist, "assigned").map((i) => i.kind)).toEqual(["todo", "issue"]);
+    expect(filterAttention(worklist, "assigned").map((i) => i.kind)).toEqual(["todo"]);
     expect(filterAttention(worklist, "reviews").map((i) => i.kind)).toEqual(["review"]);
     expect(filterAttention(worklist, "updates").map((i) => i.kind)).toEqual(["notification"]);
   });

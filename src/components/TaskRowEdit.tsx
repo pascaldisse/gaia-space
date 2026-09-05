@@ -320,9 +320,9 @@ export default function TaskRowEdit(props: {
 
 /** The blank a create opens on: everything the form does not ask for, decided by the
  *  surface. It is a `Todo` so the ONE form can read it without a second shape. */
-export const blankTask = (authorId: string, projectId?: string): Todo => ({
+export const blankTask = (authorId: string, projectId?: string, category?: string | null): Todo => ({
   id: "", profile_id: authorId, content: "", notes: "", due_date: null,
   project_id: projectId || null, done: false,
   source_entity_type: null, source_entity_id: null,
-  assignee_ids: [], content_kind: "text", category: null,
+  assignee_ids: [], content_kind: "text", category: category ?? null, links: [],
 });

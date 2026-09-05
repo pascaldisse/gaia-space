@@ -925,16 +925,16 @@ async function removeExternalIssueLink(id: string) {
                 </details>
 
                 <section class="external-issue-links">
-<h3>External tickets ({externalIssueLinks()?.length ?? 0})</h3>
+<h3>External links ({externalIssueLinks()?.length ?? 0})</h3>
 <ul>
-<For each={externalIssueLinks()} fallback={<li class="hint">No external tickets linked.</li>}>
-{(link) => <li><a href={link.external_url} target="_blank" rel="noopener noreferrer">{link.title || link.external_url}</a><button class="ghost small" aria-label={`Remove external ticket ${link.title || link.external_url}`} onClick={() => removeExternalIssueLink(link.id)}>×</button></li>}
+<For each={externalIssueLinks()} fallback={<li class="hint">No external links linked.</li>}>
+{(link) => <li><a href={link.external_url} target="_blank" rel="noopener noreferrer">{link.title || link.external_url}</a><button class="ghost small" aria-label={`Remove external link ${link.title || link.external_url}`} onClick={() => removeExternalIssueLink(link.id)}>×</button></li>}
 </For>
 </ul>
 <form class="new-rule-form" onSubmit={addExternalIssueLink}>
-<input class="grow" type="url" placeholder="https://tracker.example/PROJ-42" value={externalIssueUrl()} onInput={(e) => setExternalIssueUrl(e.currentTarget.value)} />
-<input placeholder="Ticket title (optional)" value={externalIssueTitle()} onInput={(e) => setExternalIssueTitle(e.currentTarget.value)} />
-<button class="ghost">Link ticket</button>
+<input class="grow" type="url" placeholder="GitHub issue / PR URL…" value={externalIssueUrl()} onInput={(e) => setExternalIssueUrl(e.currentTarget.value)} />
+<input placeholder="Link title (optional)" value={externalIssueTitle()} onInput={(e) => setExternalIssueTitle(e.currentTarget.value)} />
+<button class="ghost">Add link</button>
 </form>
 </section>
 <details class="gate-rules external-checks" open>

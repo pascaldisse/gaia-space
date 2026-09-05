@@ -39,7 +39,7 @@ const project = (over: Record<string, unknown> = {}) => ({
   created_by: "me", archived: false, deadline: null, ...over,
 });
 const mount = async () => {
-  registerViews(["Issues", "Boards", "Chat", "Documents", "Calendar", "Packages", "Project Steering", "Project Tasks", "Dashboard"]);
+  registerViews(["Chat", "Documents", "Calendar", "Packages", "Project Steering", "Project Tasks", "Dashboard"]);
   setAvailableViews(null);
   initRouter(createMemoryAdapter("projects/p1/steering"));
   const host = document.createElement("div");
@@ -64,11 +64,9 @@ describe("project at a glance inside Steering", () => {
     reply = (cmd) => {
       switch (cmd) {
         case "list_projects": return [project()];
-        case "list_issue_statuses": return [{ id: "open", project_id: "p1", name: "Open", resolved: false, color: "#fff", ordering: 0 }];
-        case "list_issues": return [
-          { id: "i1", project_id: "p1", number: 1, title: "One", description: null, status_id: "open", assignee_id: null, created_by: null, due_date: null, priority: null, archived: false, assignee_ids: [] },
+        case "list_project_todos": return [
+          { id: "t1", profile_id: "me", content: "One", due_date: null, project_id: "p1", done: false, source_entity_type: null, source_entity_id: null, notes: null, assignee_ids: [], content_kind: "text", category: "dev" },
         ];
-        case "list_boards": return [{ id: "b1", project_id: "p1", name: "Board", backlog_type: "kanban", archived: false }];
         case "list_channels_with_meta": return [
           { id: "c1", content_type: "public", name: "general", description: null, project_id: "p1", archived: false, member_count: 1, unread_count: 0, last_message_at: null },
           { id: "c2", content_type: "public", name: "other", description: null, project_id: "p2", archived: false, member_count: 1, unread_count: 0, last_message_at: null },
@@ -92,10 +90,10 @@ describe("project at a glance inside Steering", () => {
     expect(stats).toEqual([
       // EVERY STAT OPENS THE PROJECT'S OWN TAB (stage 19). The old targets
       // (`/issues`, `/boards`, `/chat`, `/documents`) dropped the project on the way
-      // and landed the reader in the global list. Tickets and boards share the Dev
-      // tab because that is one tab; packages have no project tab and keep theirs.
-      ["1Open tickets", "/projects/p1/dev"],
-      ["1Boards", "/projects/p1/dev"],
+      // and landed the reader in the global list. Dev tasks live on the Dev tab;
+      // packages have no project tab and keep theirs.
+      ["1Open tasks", "/projects/p1/tasks"],
+      ["1Dev tasks", "/projects/p1/dev"],
       ["1Channels", "/projects/p1/chats"],
       ["1Documents", "/projects/p1/knowledge"],
       ["1Upcoming meetings", "/projects/p1/calendar"],
