@@ -41,3 +41,7 @@ docs/finance/
 *finanzplan*
 # GitHub push bridge delivery dedupe state; deployment-owned.
 bridge/github-push/state.json
+
+# build artifacts once committed by mistake (09-06)
+legacy/flutter/.gradle/
+legacy/flutter/.expo/
