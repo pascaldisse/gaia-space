@@ -2,7 +2,8 @@ import { createMemo, createResource, createSignal, createUniqueId, onCleanup, on
 import { personalApi, type CalendarItem } from "../api/personal";
 import { platformApi } from "../api/platform";
 import { calendarsApi } from "../api/calendar-feeds";
-import { meetingLinkError, meetingsApi, type Meeting, type MeetingParticipant } from "../api/meetings";
+import { hasMeetingLink, meetingLinkError, meetingsApi, type Meeting, type MeetingParticipant } from "../api/meetings";
+import type { Profile } from "../api/platform";
 import CallPanel from "./CallPanel";
 import { currentUser, humanError, isWeb, profileId } from "../session";
 import { linkProps, route, useDeepLink } from "../router";
@@ -136,6 +137,25 @@ const [options,{refetch:reloadOptions}] = createResource(() => profileId(), owne
 const prefs = () => { if (options.error) return undefined; return options(); };
 const updateOptions = async (patch:Record<string,boolean|number>) => { const current=prefs(); if (!current) return; try { await personalApi.saveCalendarOptions({...current,...patch}); reloadOptions(); } catch (reason) { setError(humanError(reason)); } };
 const meetingOf = (item:CalendarItem|undefined) => item?.kind==="meeting" ? meetings()?.find(m=>m.id===meetingIdOf(item)) : undefined;
+/** The day card answers the two first questions inline — where (link/location) and
+    who (organizer + invitees) — so nobody has to open the drawer to find the link.
+    The meeting is taken from the loaded list; if the list does not carry it (stale
+    list, deep-linked day), it is read directly so the row is never silently blank. */
+function AgendaMeetingInfo(props:{ item:CalendarItem; listed:Meeting|undefined; people:Profile[]; onError:(m:string)=>void }) {
+  const id = () => meetingIdOf(props.item);
+  const [fetched] = createResource(() => props.listed ? null : `${id()}|${profileId()}`, async () => (await meetingsApi.get(id(), profileId()||"")) ?? undefined);
+  const meeting = () => props.listed ?? fetched();
+  const [participants] = createResource(() => `${id()}|${profileId()}`, () => meetingsApi.participants(id(), profileId()||"").catch(() => [] as MeetingParticipant[]));
+  const nameOf = (pid:string) => props.people.find(p=>p.id===pid)?.display_name ?? pid;
+  const invitees = () => (participants()??[]).filter(p=>p.profile_id!==meeting()?.organizer_id);
+  return <Show when={meeting()}>{m=><div class="cal-agenda-info">
+    <Show when={hasMeetingLink(m())} fallback={<Show when={m().location}><span class="cal-agenda-where">{m().location}</span></Show>}>
+      <span class="cal-agenda-where"><a href={m().meeting_url!.trim()} target="_blank" rel="noopener noreferrer">{m().meeting_url!.trim()}</a> <JoinLink meeting={m()} class="cal-agenda-join" onError={props.onError}/></span>
+    </Show>
+    <Show when={m().organizer_id}><span class="cal-agenda-who">Organizer: {nameOf(m().organizer_id!)}</span></Show>
+    <Show when={participants.loading} fallback={<Show when={invitees().length} fallback={<span class="cal-agenda-who">No one invited yet.</span>}><span class="cal-agenda-who">Invited: {invitees().map(p=>`${nameOf(p.profile_id)}${p.status==="invited"?"":` (${p.status})`}`).join(", ")}</span></Show>}><span class="cal-agenda-who">Loading people…</span></Show>
+  </div>}</Show>;
+}
 const [draft,setDraft] = createSignal<Meeting>();
 const [participants,{refetch:reloadParticipants}] = createResource(() => draft()?.id, id => id ? meetingsApi.participants(id, profileId()) : Promise.resolve([]));
 // Reading `items()` after a failed load re-throws inside the render; the visible
@@ -373,6 +393,7 @@ subline={scopeProjectId() ? "This project's meetings, deadlines and time off on 
 <span class="cal-agenda-time">{kindLabels[item.kind]}{item.kind==="meeting" ? ` · ${new Date(item.starts_at*1000).toLocaleTimeString(UI_LOCALE,{hour:"2-digit",minute:"2-digit"})}` : item.date ? ` · ${item.date}` : ""}</span>
 <strong>{item.title}</strong>
 </button>
+<Show when={item.kind==="meeting"}><AgendaMeetingInfo item={item} listed={meetingOf(item)} people={people()??[]} onError={setError}/></Show>
 <Show when={item.kind!=="external"}><a class="cal-agenda-link" {...itemHref(item)}>Open</a></Show>
 </li>}</For>
 </ul>
