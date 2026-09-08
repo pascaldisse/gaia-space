@@ -1,0 +1,12 @@
+stage→1 recon
+installed_app→/Applications/GAIA Space.app
+installed_version→0.1.0
+installed_build→0.1.0
+installed_bundle_mtime→2026-08-08 14:37:27 CEST
+installed_embedded_git_sha→not found; binary 40-hex scan rejected as non-git metadata
+origin_master_head→50bc753d676e91371859e7fd16673cb951446f2c
+tauri_conf_version→0.1.0
+SCHEMA_VERSION→144
+db→/Users/pascaldisse/Library/Application Support/com.gaia.space/space.db
+db_user_version→142
+running→16682 /Applications/GAIA Space.app/Contents/MacOS/gaia-space
