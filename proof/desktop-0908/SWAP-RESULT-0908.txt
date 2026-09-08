@@ -1,0 +1,15 @@
+GAIA Space desktop swap · 2026-09-08 22:16–22:18 CEST
+worktree → ~/projects/gaia-space-wt/desktop-0908 · branch ops/desktop-0908
+DB prebackup → ~/.gaia/backups/space-local.bak-0908-predesktop.db
+backup sha256 → cfb1af2fc8ff4ee72f2e73041eb274c0ed92611ed3e4be0548b017c2171dd53d
+before → schema=142 · todos=341 · sheets=2 · integrity=ok
+old pid → 16682 · graceful osascript quit → exited · no TERM
+install attempted → /Applications/GAIA Space.app · old retained /Applications/GAIA Space.app.bak-0908
+codesign --verify --deep --strict → valid
+new process → pid 26111 · exits before window exists
+new DB after launch → schema=142 · todos=341 · sheets=2 · integrity=ok
+new log → AppIntents NSCocoaErrorDomain Code=4097 · no migration/schema errors observed
+rollback → new bundle removed · old bundle restored to /Applications/GAIA Space.app · DB restored backup
+postrollback old pid → 26247
+postrollback → schema=142 · todos=341 · sheets=2 · integrity=ok
+visual new-build proofs → UNVERIFIED; app exited, no GAIA Space window
