@@ -673,7 +673,7 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
     const doc = allDocuments()?.find((d) => d.id === id);
     if (!doc) return;
     applyContainer(doc.container_type, doc.container_id ?? undefined);
-    linkEntity("document", id, { containerType: doc.container_type, containerId: doc.container_id ?? undefined });
+    linkEntity("document", id, { containerType: doc.container_type, containerId: doc.container_id ?? undefined }, true);
   }, () => setSelectedDocumentId(null));
 
   const [editTitle, setEditTitle] = createSignal("");
