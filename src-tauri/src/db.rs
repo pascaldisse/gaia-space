@@ -2264,6 +2264,22 @@ CREATE TABLE search_index(entity_type TEXT, entity_id TEXT, title TEXT, body TEX
         migrate(&conn).expect("already migrated is a no-op");
     }
 
+    #[test]
+    fn v143_empty_profiles_names_the_unmigrated_issue() {
+        let conn = open_in_memory().expect("owned in-memory fixture");
+        conn.execute_batch("CREATE TABLE profiles(id TEXT PRIMARY KEY, created_at INTEGER);
+CREATE TABLE projects(id TEXT PRIMARY KEY, created_by TEXT);
+CREATE TABLE issues(id TEXT PRIMARY KEY, project_id TEXT, created_by TEXT);
+CREATE TABLE todos(id TEXT PRIMARY KEY, profile_id TEXT NOT NULL);")
+            .expect("minimal V143 fixture");
+        conn.execute("INSERT INTO projects(id,created_by) VALUES('project',NULL)", []).expect("ownerless project");
+        conn.execute("INSERT INTO issues(id,project_id,created_by) VALUES('issue-no-profile','project',NULL)", []).expect("ownerless issue");
+        let error = v143_migrate(&conn).expect_err("empty profiles returns a migration error");
+        assert!(error.to_string().contains("issue-no-profile"));
+        let todos: i64 = conn.query_row("SELECT count(*) FROM todos", [], |row| row.get(0)).expect("atomic check");
+        assert_eq!(todos, 0);
+    }
+
     // --- one database per process: path resolution ---------------------------
 
     /// The app-data dir is only a *default*. Once a path is bound (desktop setup, or a
