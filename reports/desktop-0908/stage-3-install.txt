@@ -1,0 +1,9 @@
+stage→3 install
+running_at_decision→16682 /Applications/GAIA Space.app/Contents/MacOS/gaia-space
+status→STAGED, awaiting jetzt
+source_bundle→/Users/pascaldisse/projects/gaia-space-wt/desktop-0908/src-tauri/target/release/bundle/macos/GAIA Space.app
+destination→/Users/pascaldisse/projects/gaia-space-wt/desktop-0908/dist/GAIA Space.app
+destination_size→39M
+previous_bundle→none; no prior staging bundle
+db_backup→not created; new bundle not launched
+codesign→verify --deep --strict exit=0
