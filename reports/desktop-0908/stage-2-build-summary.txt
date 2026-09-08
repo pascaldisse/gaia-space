@@ -1,0 +1,12 @@
+stage→2 build
+command→bun install && bun run tauri build
+bundle→/Users/pascaldisse/projects/gaia-space-wt/desktop-0908/src-tauri/target/release/bundle/macos/GAIA Space.app
+bundle_size→39M
+codesign→ad-hoc; verify --deep --strict exit=0
+build_tail→
+Finished release profile optimized target(s) in 1m54s
+Built application→/Users/pascaldisse/projects/gaia-space-wt/desktop-0908/src-tauri/target/release/gaia-space
+Bundling→/Users/pascaldisse/projects/gaia-space-wt/desktop-0908/src-tauri/target/release/bundle/macos/GAIA Space.app
+Bundling→/Users/pascaldisse/projects/gaia-space-wt/desktop-0908/src-tauri/target/release/bundle/dmg/GAIA Space_0.1.0_aarch64.dmg
+Finished→2 bundles
+full_output→§stage-2-build.log
