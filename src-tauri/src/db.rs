@@ -885,7 +885,7 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     // do not invent or rename tables in those deliberately incomplete databases.
     if version < 143 {
         tx.execute_batch(SCHEMA_V143_TODO_LINKS)?;
-        if v143_ready(&tx)? { tx.execute_batch(SCHEMA_V143)?; }
+        if v143_ready(&tx)? { v143_migrate(&tx)?; }
     }
     // V144: task unification owns the live work search corpus. V143 renamed issue
     // tables; remove stale index rows/triggers without touching *_legacy evidence.
@@ -1281,7 +1281,7 @@ END;
 pub(crate) const SCHEMA_V143: &str = r#"
 
 INSERT INTO todos(id,profile_id,content,notes,due_date,project_id,done,category,content_kind,created_at)
-SELECT i.id,COALESCE(i.created_by,p.created_by),i.title,NULLIF(i.description,''),i.due_date,i.project_id,
+SELECT i.id,COALESCE(i.created_by,p.created_by,(SELECT id FROM profiles ORDER BY created_at, rowid LIMIT 1)),i.title,NULLIF(i.description,''),i.due_date,i.project_id,
  CASE WHEN COALESCE(s.resolved,0)=1 OR i.archived=1 THEN 1 ELSE 0 END,
  CASE WHEN EXISTS(SELECT 1 FROM issue_tracker_links itl WHERE itl.issue_id=i.id AND itl.target_kind='EXTERNAL') THEN 'dev' ELSE NULL END,
  'markdown',i.created_at
@@ -2191,6 +2191,23 @@ fn v143_ready(conn: &Connection) -> Result<bool> {
         .collect::<std::result::Result<Vec<_>, _>>()?;
     Ok(["notes", "project_id", "content_kind", "category"].iter().all(|column| columns.iter().any(|name| name == column)))
 }
+/// V143 requires a non-null todo owner. A legacy row without either owner adopts
+/// the oldest profile; if none exists, reject the exact row before any V143 write.
+fn v143_migrate(conn: &Connection) -> Result<()> {
+    let missing_owner: std::result::Result<String, rusqlite::Error> = conn.query_row(
+        "SELECT i.id FROM issues i JOIN projects p ON p.id=i.project_id
+         WHERE i.created_by IS NULL AND p.created_by IS NULL
+           AND NOT EXISTS(SELECT 1 FROM profiles)
+           AND NOT EXISTS(SELECT 1 FROM todos t WHERE t.id=i.id)
+         ORDER BY i.rowid LIMIT 1", [], |row| row.get(0));
+    match missing_owner {
+        Ok(issue_id) => return Err(rusqlite::Error::InvalidParameterName(format!(
+            "V143 migration cannot assign profile to issue {issue_id}: profiles table is empty"))),
+        Err(rusqlite::Error::QueryReturnedNoRows) => {},
+        Err(error) => return Err(error),
+    }
+    conn.execute_batch(SCHEMA_V143)
+}
 fn add_column_if_missing(
     conn: &Connection,
     table: &str,
@@ -2215,6 +2232,37 @@ fn add_column_if_missing(
 mod tests {
     use super::*;
     use std::collections::BTreeSet;
+
+    #[test]
+    fn v143_null_owner_falls_back_to_oldest_profile() {
+        let temp = TempDb::new("gaia-space-v143-null-owner");
+        let conn = open_at(&temp).expect("owned schema-142 fixture");
+        conn.execute_batch("CREATE TABLE profiles(id TEXT PRIMARY KEY, username TEXT, display_name TEXT, created_at INTEGER);
+CREATE TABLE projects(id TEXT PRIMARY KEY, created_by TEXT, name TEXT, key TEXT, description TEXT, created_at INTEGER);
+CREATE TABLE todos(id TEXT PRIMARY KEY, profile_id TEXT NOT NULL, content TEXT NOT NULL, notes TEXT, due_date TEXT, project_id TEXT, done INTEGER NOT NULL DEFAULT 0, category TEXT, content_kind TEXT, created_at INTEGER);
+CREATE TABLE todo_assignees(todo_id TEXT, profile_id TEXT);
+CREATE TABLE issues(id TEXT PRIMARY KEY, project_id TEXT NOT NULL, created_by TEXT, title TEXT NOT NULL, description TEXT, due_date TEXT, status_id TEXT, archived INTEGER NOT NULL DEFAULT 0, assignee_id TEXT, created_at INTEGER);
+CREATE TABLE issue_statuses(id TEXT PRIMARY KEY, resolved INTEGER);
+CREATE TABLE issue_assignees(issue_id TEXT, profile_id TEXT);
+CREATE TABLE issue_tracker_links(id TEXT PRIMARY KEY, issue_id TEXT, target_kind TEXT, url TEXT, target_id TEXT, title TEXT);
+CREATE TABLE issue_links(id TEXT PRIMARY KEY, issue_id TEXT, linked_issue_id TEXT);
+CREATE TABLE issue_comments(id TEXT PRIMARY KEY, issue_id TEXT, author_id TEXT, created_at INTEGER, body TEXT);
+CREATE TABLE issue_activities(id TEXT PRIMARY KEY); CREATE TABLE issue_attachments(id TEXT PRIMARY KEY);
+CREATE TABLE issue_board_positions(id TEXT PRIMARY KEY); CREATE TABLE issue_tags(id TEXT PRIMARY KEY);
+CREATE TABLE search_index(entity_type TEXT, entity_id TEXT, title TEXT, body TEXT, breadcrumb TEXT);")
+            .expect("schema-142 fixture");
+        conn.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('first','first','First',1)", []).expect("first profile");
+        conn.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('later','later','Later',2)", []).expect("second profile");
+        conn.execute("INSERT INTO projects(id,created_by,name,key,description,created_at) VALUES('project',NULL,'Project','PRJ','',1)", []).expect("ownerless project");
+        conn.execute("INSERT INTO issues(id,project_id,created_by,title,description,due_date,status_id,archived,assignee_id,created_at) VALUES('issue-null-owner','project',NULL,'Legacy issue',NULL,NULL,NULL,0,NULL,3)", []).expect("ownerless issue");
+        conn.pragma_update(None, "user_version", 142).expect("schema-142 version");
+        migrate(&conn).expect("V143 fallback migration");
+        let owner: String = conn.query_row("SELECT profile_id FROM todos WHERE id='issue-null-owner'", [], |row| row.get(0)).expect("migrated todo");
+        assert_eq!(owner, "first");
+        let version: i64 = conn.query_row("PRAGMA user_version", [], |row| row.get(0)).expect("schema version");
+        assert!(version >= 144);
+        migrate(&conn).expect("already migrated is a no-op");
+    }
 
     // --- one database per process: path resolution ---------------------------
 
