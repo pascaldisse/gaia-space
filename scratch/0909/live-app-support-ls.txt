@@ -1,0 +1,7 @@
+total 8880
+drwxr-xr-x@   6 pascaldisse  staff      192 Sep  9 18:15 .
+drwx------+ 158 pascaldisse  staff     5056 Sep  2 20:56 ..
+drwxr-xr-x@   3 pascaldisse  staff       96 Sep  3 20:07 git
+drwxr-xr-x@   2 pascaldisse  staff       64 Jul 26 14:08 packages
+-rw-r--r--@   1 pascaldisse  staff  2273280 Sep  8 22:17 space.db
+-rw-r--r--@   1 pascaldisse  staff  2273280 Sep  8 22:17 space.db.bak-0909-pre-v144

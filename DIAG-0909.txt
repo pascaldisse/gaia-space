@@ -1,0 +1,33 @@
+DIAG 0909 — staged desktop, read-only live-system diagnosis
+
+§ scope
+- staged binary → dist/GAIA Space.app/Contents/MacOS/gaia-space
+- live app-support access → ls + cp only
+- no /Applications writes; no live DB writes; no launch using live DB
+- scratch → scratch/0909/
+
+§ startup paths
+- override → SPACE_DB; precedence → src-tauri/src/db.rs:112-129,166-173
+- migration → db.rs:131-138; setup → src-tauri/src/lib.rs:613-635
+- app-data fallback directory evaluated at db.rs:154-170; selected DB remains SPACE_DB
+- startup source reads no app-support settings/config JSON
+- data-relative files → db::data_dir(); derive from overridden DB parent
+- observed live inventory → git/, packages/, space.db, space.db.bak-0909-pre-v144; no -wal/-shm/json
+
+§ runs — direct binary; RUST_BACKTRACE=1; SPACE_DB=scratch copy
+- termination → SIGTERM after main window observed; exit 143 expected, not app failure
+- A → pre-v144 backup copy; UI/main @1s; debug-server line; panic none; user_version 142→144; todos 341→345; integrity ok
+- B → full app-support copy; UI/main @1s; debug-server line; panic none; user_version 142→144; todos 341→345; integrity ok
+- C → prior 09-08 scratch DB; UI/main @1s; debug-server line; panic none; user_version 144→144; todos 345; integrity ok
+- logs/status/UI/query proof → scratch/0909/{A,B,C}.*
+
+§ row inspection
+- pre-migration copy → profiles=5
+- ownerless legacy issue → issue-18c5d4d940890130-0 | Verify CF issue | issue.created_by=NULL | project.created_by=NULL
+- V143 fallback selects oldest profile; no migration error; no offending panic row
+- guard/error location if profiles absent → src-tauri/src/db.rs:2194-2209; message → "V143 migration cannot assign profile to issue <id>: profiles table is empty"
+
+§ original SIGABRT
+- reproduction → none; no panic message; no gaia-space source panic line
+- IPS only → tao::...::app_delegate::did_finish_launching → panic_cannot_unwind
+- hypothesis → original AppleEvent/window-restoration launch context; not copied DB or app-support sidecars
