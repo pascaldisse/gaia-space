@@ -1,0 +1,10 @@
+swap3 step3 · 2026-09-09
+retained prior bundle -> /Applications/GAIA Space.bak-0909.app
+installed staged bundle -> /Applications/GAIA Space.app
+installed UUID:
+UUID: C1FCAF38-4574-3AD1-8035-B7B094263B8A (arm64) /Applications/GAIA Space.app/Contents/MacOS/gaia-space
+installed SHA-256 -> 737135430732234a6b1bb3274b29699ef9fcdf073a3eb4527974ecdafddff926
+codesign:
+valid
+LaunchServices force-register:
+ok
