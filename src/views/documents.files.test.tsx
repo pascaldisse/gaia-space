@@ -2,14 +2,13 @@ import { expect, test, describe, afterEach, beforeEach, mock } from "bun:test";
 import { invoke } from "../api/invoke";
 mock.module("@tauri-apps/api/core", () => ({ invoke }));
 import { render } from "solid-js/web";
-import * as XLSX from "xlsx";
 import Documents from "./Documents";
 import { setProfileId, setProjectId } from "../session";
 import { navigate, registerViews, setAvailableViews } from "../router";
 
 // Files are first-class documents: they arrive by drop or picker with real transfer
-// progress, and they are *read* in the browser — including the zip-archive office
-// formats, which need an actual reader, not a download link.
+// progress — and they are HANDED OVER, not imitated. Knowledge states what a file is
+// and gives you the bytes; the reader that owns the format opens it.
 
 const realFetch = globalThis.fetch;
 const realXhr = globalThis.XMLHttpRequest;
@@ -67,39 +66,36 @@ const fileDoc = (over: Record<string, unknown> = {}) => ({
 });
 
 describe("document files", () => {
-  test("a spreadsheet is rendered as a table per sheet, not offered as a download only", async () => {
+  test("a spreadsheet is a card and a download — no in-app converter runs", async () => {
     setProfileId("me");
-    // A real workbook, written by the same reader the app uses: the assertion is about
-    // our rendering path, and the fixture cannot drift from the format.
-    const sheet = XLSX.utils.aoa_to_sheet([["Region", "Revenue"], ["North", 42]]);
-    const book = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(book, sheet, "Q3");
-    const bytes = XLSX.write(book, { type: "array", bookType: "xlsx" }) as ArrayBuffer;
-    fileBytes = bytes;
-
     serve({
       list_documents: [fileDoc()],
       list_document_folders: [],
-      read_document_file: {
+      get_document_file: {
         document_id: "f1", filename: "book.xlsx",
         mime: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        size: bytes.byteLength, truncated: false, text: null, data_base64: null,
+        size: 18_432, uploaded_by: "me", uploaded_at: 1,
       },
     });
     const host = await mount();
     navigate({ view: "Documents", entityType: "document", entityId: "f1", containerType: "my-docs" });
     await settle(200);
 
-    const body = host.querySelector(".office-body");
-    expect(body).not.toBeNull();
-    expect(body!.querySelector("table")).not.toBeNull();
-    expect(body!.textContent).toContain("Region");
-    expect(body!.textContent).toContain("North");
-    expect(body!.textContent).toContain("42");
-    // Sheets are named, so a multi-tab workbook is navigable rather than merged.
-    expect(body!.textContent).toContain("Q3");
-    // The download stays available; it is no longer the *only* answer.
-    expect(host.querySelector("a.file-download")).not.toBeNull();
+    // THE CONVERTERS ARE GONE (mammoth/SheetJS were loaded on demand and rendered a
+    // workbook into the pane). A library page does not re-implement Excel.
+    expect(host.querySelector(".office-body, table")).toBeNull();
+
+    const card = host.querySelector(".doc-file-card") as HTMLElement;
+    expect(card).not.toBeNull();
+    expect(card.textContent).toContain("book.xlsx");
+    expect(card.textContent).toContain("Spreadsheet");
+    expect(card.textContent).toContain("18 KB");
+    expect(host.querySelector("a.dfc-download")).not.toBeNull();
+
+    // And the bytes were never fetched to draw this: no file route, no byte-carrying
+    // command. Only the metadata row was read.
+    expect(calls.some((call) => call.command === "read_document_file")).toBe(false);
+    expect(calls.some((call) => call.url.includes("api/documents/files/"))).toBe(false);
   });
 
   test("dropping files on the library uploads them where a click would have filed them", async () => {
