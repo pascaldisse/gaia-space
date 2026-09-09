@@ -14,3 +14,4 @@ UUID of installed running executable path:
 UUID: C1FCAF38-4574-3AD1-8035-B7B094263B8A (arm64) /Applications/GAIA Space.app/Contents/MacOS/gaia-space
 screenshot -> /Users/pascaldisse/projects/gaia-space-wt/desktop-0908/proof/desktop-0909/swap3/swap3-window.png
 screenshot bytes -> 958435
+window capture correction: app activated by bundle identifier com.gaia.space; swap3-window.png replaced with foreground GAIA Space capture
