@@ -1,0 +1,16 @@
+swap3 step4 launch probe · 2026-09-09
+launch command -> open '/Applications/GAIA Space.app' --stderr '/Users/pascaldisse/projects/gaia-space-wt/desktop-0908/proof/desktop-0909/swap3/launch.err' --stdout '/Users/pascaldisse/projects/gaia-space-wt/desktop-0908/proof/desktop-0909/swap3/launch.out'
+process -> 66247
+66247 /Applications/GAIA Space.app/Contents/MacOS/gaia-space
+process UUID:
+error: /Applications/GAIA: No such file or directory
+launch.err:
+launch.out:
+identity correction + window capture:
+pid -> 66247
+ps:
+66247 /Applications/GAIA Space.app/Contents/MacOS/gaia-space
+UUID of installed running executable path:
+UUID: C1FCAF38-4574-3AD1-8035-B7B094263B8A (arm64) /Applications/GAIA Space.app/Contents/MacOS/gaia-space
+screenshot -> /Users/pascaldisse/projects/gaia-space-wt/desktop-0908/proof/desktop-0909/swap3/swap3-window.png
+screenshot bytes -> 958435
