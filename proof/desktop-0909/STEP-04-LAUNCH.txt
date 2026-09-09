@@ -1,5 +1,12 @@
-swap2 step4 · launch
-pid → 62412
-process → alive after <=30s
-System Events window count/result → 72:88: execution error: System Events got an error: Can’t get process "GAIA Space". (-1728)
-window screenshot → proof/desktop-0909/swap2-window.png
+swap2 step4 · launch failed → rollback completed
+new process pid observed → 62412; crash report dialog captured
+termination → Namespace SIGNAL, Code 6, Abort trap: 6
+crash log → /Users/pascaldisse/Library/Logs/DiagnosticReports/gaia-space-2026-09-09-181547.ips
+window screenshot → proof/desktop-0909/swap2-window.png (crash dialog)
+rollback bundle → restored /Applications/GAIA Space.app from /Applications/GAIA Space.bak-0909.app
+rollback DB → restored /Users/pascaldisse/Library/Application Support/com.gaia.space/space.db from /Users/pascaldisse/Library/Application Support/com.gaia.space/space.db.bak-0909-pre-v144
+postrollback db (user_version, todos, sheets, integrity):
+142
+341
+2
+ok
