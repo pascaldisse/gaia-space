@@ -1,0 +1,5 @@
+swap2 step4 · launch
+pid → 62412
+process → alive after <=30s
+System Events window count/result → 72:88: execution error: System Events got an error: Can’t get process "GAIA Space". (-1728)
+window screenshot → proof/desktop-0909/swap2-window.png
