@@ -11,7 +11,7 @@ import ConfirmDialog from "../components/ConfirmDialog";
 import PromptDialog from "../components/PromptDialog";
 import ContextMenu, { type ContextMenuItem } from "../components/ContextMenu";
 import DeleteButton from "../components/DeleteButton";
-import { Icon } from "../components/Icon";
+import { Icon, type IconName } from "../components/Icon";
 import { useDeepLink, hrefFor, linkEntity, linkProps, navigate, route } from "../router";
 import {
   documentsApi,
@@ -28,7 +28,7 @@ import {
   parseSheet,
   versionSnippet,
   serializeSheet,
-  type DocumentFilePreview,
+  type DocumentFile,
   type DocumentDiscussion,
   type FavoriteDocument,
 } from "../api/documents";
@@ -857,8 +857,8 @@ if (doc?.kind === "budget") setBudget(parseBudget(doc.body));
   const [downloading, setDownloading] = createSignal(false);
   async function downloadFile(doc: Document) {
     if (doc.doc_type !== "file") return;
-    const state = filePreview();
-    const name = (state?.status === "ok" ? state.preview.filename : null) ?? doc.title;
+    const state = fileFacts();
+    const name = (state?.status === "ok" ? state.file.filename : null) ?? doc.title;
     if (isWeb()) {
       const link = window.document.createElement("a");
       link.href = documentsApi.fileDownloadUrl(doc.id);
@@ -926,12 +926,20 @@ if (doc?.kind === "budget") setBudget(parseBudget(doc.body));
     return folder ? `${place} / ${folder}` : place;
   };
 
-  // A preview is a convenience, never a gate: it can be slow, truncated, or missing
-  // bytes on disk, and in every one of those cases the reader still gets a reason and
-  // the file itself. So the fetch carries its own deadline and its failure is a VALUE,
-  // not a thrown resource error — a thrown one leaves the pane spinning forever.
-  type FilePreviewState =
-    | { status: "ok"; preview: DocumentFilePreview }
+  /** ── AN UPLOAD IS A FILE, NOT A PAGE ──────────────────────────────────────
+   *  Knowledge used to render uploads inside the pane: a PDF in an <object>, a
+   *  spreadsheet through a JS converter, a text file in a <pre>. In a column that
+   *  shares the width with a list and a history rail, every one of them arrived
+   *  cramped — a worse copy of the reader the person already owns. So the pane
+   *  stops imitating a viewer. It states WHAT the file is and hands over the bytes.
+   *
+   *  Written documents are unaffected: they ARE pages, and still render here.
+   *
+   *  The facts come from `get_document_file` — name, type, size, who uploaded it and
+   *  when — which reads a metadata row and NO bytes. The old path fetched the file
+   *  itself (base64 in a command response) only to print its name. */
+  type FileFactsState =
+    | { status: "ok"; file: DocumentFile }
     | { status: "error"; message: string };
   const filePreviewTimeoutMs = () => {
     const injected = (window as unknown as { __GAIA_FILE_PREVIEW_TIMEOUT_MS?: number }).__GAIA_FILE_PREVIEW_TIMEOUT_MS;
@@ -945,160 +953,118 @@ if (doc?.kind === "budget") setBudget(parseBudget(doc.body));
       return await Promise.race([
         work,
         new Promise<never>((_, reject) => {
-          timer = setTimeout(() => reject(new Error("the preview took too long to load")), ms);
+          timer = setTimeout(() => reject(new Error("the file details took too long to load")), ms);
         }),
       ]);
     } finally {
       if (timer) clearTimeout(timer);
     }
   };
-  const [filePreview] = createResource(
+  /* The lookup's failure is a VALUE, not a thrown resource error: a thrown one leaves
+     the pane spinning forever, and a missing metadata row must never withhold the
+     download — the bytes have their own route and do not depend on this read. */
+  const [fileFacts] = createResource(
     () => (selectedDocument()?.doc_type === "file" ? selectedDocumentId() : null),
-    async (id): Promise<FilePreviewState | null> => {
+    async (id): Promise<FileFactsState | null> => {
       if (!id) return null;
       try {
-        return { status: "ok", preview: await withDeadline(documentsApi.readDocumentFile(id), filePreviewTimeoutMs()) };
+        const file = await withDeadline(documentsApi.getDocumentFile(id), filePreviewTimeoutMs());
+        if (!file) return { status: "error", message: "this document has no stored file" };
+        return { status: "ok", file };
       } catch (error) {
         return { status: "error", message: (error as Error)?.message ?? String(error) };
       }
     },
   );
-  const previewDataUrl = (p: DocumentFilePreview) =>
-    p.data_base64 ? `data:${p.mime};base64,${p.data_base64}` : "";
-  // The stored bytes have a stable URL in web mode: that is what makes a PDF viewable
-  // in the browser and every other type downloadable, instead of "it is on some disk".
+  // The stored bytes have a stable URL in web mode: that is what makes every type
+  // downloadable, instead of "it is on some disk".
   const fileHref = (documentId: string) =>
     isWeb() ? `${import.meta.env.BASE_URL}api/documents/files/${documentId}` : "";
-  // Office documents are zip archives, so nothing but a real reader can show them.
-  // Both readers are pure-JS and loaded on demand: a person who never opens a .docx
-  // never downloads the converter.
-  const OFFICE_MIME: Record<string, "docx" | "xlsx"> = {
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
-    "application/vnd.ms-excel": "xlsx",
-  };
-  const officeKind = (preview: DocumentFilePreview): "docx" | "xlsx" | null => {
-    const byMime = OFFICE_MIME[preview.mime];
-    if (byMime) return byMime;
-    const name = preview.filename.toLowerCase();
-    if (name.endsWith(".docx")) return "docx";
-    if (name.endsWith(".xlsx") || name.endsWith(".xls")) return "xlsx";
-    return null;
-  };
-  const base64ToBytes = (value: string) => {
-    const binary = atob(value);
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
-    return bytes;
-  };
-  async function officeBytes(documentId: string, preview: DocumentFilePreview): Promise<ArrayBuffer> {
-    // Web has the whole file behind a URL; desktop has the preview payload, which the
-    // backend may have capped — a truncated archive is unreadable, and says so.
-    if (isWeb()) {
-      const response = await fetch(fileHref(documentId), { credentials: "include" });
-      if (!response.ok) throw new Error(`could not read the file (HTTP ${response.status})`);
-      return await response.arrayBuffer();
-    }
-    if (!preview.data_base64) throw new Error("no bytes available for this file");
-    if (preview.truncated) throw new Error("the stored preview is truncated, so the archive cannot be opened");
-    return base64ToBytes(preview.data_base64).buffer as ArrayBuffer;
-  }
-  function OfficePreview(props: { preview: DocumentFilePreview; kind: "docx" | "xlsx" }) {
-    const [rendered] = createResource(
-      () => ({ id: selectedDocumentId(), preview: props.preview, kind: props.kind }),
-      async ({ id, preview, kind }) => {
-        if (!id) return null;
-        const bytes = await officeBytes(id, preview);
-        if (kind === "docx") {
-          const mammoth = await import("mammoth");
-          const result = await mammoth.convertToHtml({ arrayBuffer: bytes });
-          return sanitizeRichHtml(result.value);
-        }
-        const XLSX = await import("xlsx");
-        const book = XLSX.read(bytes, { type: "array" });
-        // Every sheet, each under its own name: a workbook is not just its first tab.
-        return book.SheetNames.map((name) =>
-          `<h3>${name.replace(/[<>&]/g, "")}</h3>${sanitizeRichHtml(XLSX.utils.sheet_to_html(book.Sheets[name]))}`,
-        ).join("");
-      },
-    );
-    return (
-      <div class="office-preview">
-        <Show when={!rendered.loading} fallback={<p class="hint" role="status">Rendering {props.preview.filename}…</p>}>
-          <Show
-            when={!rendered.error}
-            fallback={<p class="error-bar" role="alert">{String(rendered.error)}</p>}
-          >
-            <div class="office-body" innerHTML={rendered() ?? ""} />
-          </Show>
-        </Show>
-      </div>
-    );
-  }
 
-  /** No preview: say why, then hand over the bytes anyway — the stored file has its own
-   *  URL, so "we could not render it" never has to mean "you cannot have it". */
-  function FilePreviewUnavailable(props: { message: string }) {
+  /** ONE WORD FOR THE KIND, and it is the word people use — "PDF", "Word document",
+   *  "Image", not `application/vnd.openxmlformats-…`. A mime type is a machine's
+   *  answer to "what is this"; printing it at a reader was never an answer. */
+  const FILE_KINDS: { test: (mime: string, name: string) => boolean; label: string; icon: IconName }[] = [
+    { test: (m) => m === "application/pdf", label: "PDF document", icon: "book" },
+    { test: (m, n) => m.startsWith("image/") || /\.(png|jpe?g|gif|webp|svg|heic)$/.test(n), label: "Image", icon: "grid" },
+    { test: (m, n) => /wordprocessingml|msword/.test(m) || /\.docx?$/.test(n), label: "Word document", icon: "book" },
+    { test: (m, n) => /spreadsheetml|ms-excel/.test(m) || /\.xlsx?$/.test(n), label: "Spreadsheet", icon: "columns" },
+    { test: (m, n) => /presentationml|ms-powerpoint/.test(m) || /\.pptx?$/.test(n), label: "Presentation", icon: "layers" },
+    { test: (m, n) => /zip|compressed|tar|rar|7z/.test(m) || /\.(zip|tar|gz|rar|7z)$/.test(n), label: "Archive", icon: "package" },
+    { test: (m) => m.startsWith("video/"), label: "Video", icon: "grid" },
+    { test: (m) => m.startsWith("audio/"), label: "Audio", icon: "grid" },
+    { test: (m, n) => m.startsWith("text/") || /\.(txt|md|csv|json|ya?ml|log)$/.test(n), label: "Text file", icon: "book-nav" },
+  ];
+  const fileKind = (mime: string, filename: string) => {
+    const name = filename.toLowerCase();
+    return FILE_KINDS.find((kind) => kind.test(mime, name)) ?? { label: "File", icon: "book-nav" as IconName };
+  };
+  const fileExtension = (filename: string) => {
+    const dot = filename.lastIndexOf(".");
+    return dot > 0 && dot < filename.length - 1 ? filename.slice(dot + 1).toUpperCase() : "FILE";
+  };
+  /** Binary-prefixed, one decimal, the unit a person reads. `0 bytes` stays `0 bytes`:
+   *  an empty upload is a fact worth showing plainly. */
+  const humanSize = (bytes: number) => {
+    if (!Number.isFinite(bytes) || bytes < 0) return "unknown size";
+    if (bytes < 1024) return `${bytes} bytes`;
+    const units = ["KB", "MB", "GB", "TB"];
+    let value = bytes / 1024;
+    let unit = 0;
+    while (value >= 1024 && unit < units.length - 1) { value /= 1024; unit += 1; }
+    return `${value >= 10 ? Math.round(value) : value.toFixed(1)} ${units[unit]}`;
+  };
+
+  /** THE CARD. One object, stated once: what it is, how big, who put it there, and the
+   *  one act it supports. It is the shape an attachment already has in a channel, at
+   *  the size a library page can afford to give it. */
+  function FileCard(props: { file: DocumentFile | null; message?: string }) {
     const doc = () => selectedDocument();
-    const name = () => doc()?.title ?? "file";
+    const name = () => props.file?.filename ?? doc()?.title ?? "file";
+    const kind = () => fileKind(props.file?.mime ?? "", name());
+    const uploader = () => {
+      const id = props.file?.uploaded_by;
+      if (!id) return null;
+      const person = profiles()?.find((p) => p.id === id);
+      return person?.display_name || person?.username || null;
+    };
+    const uploadedAt = () =>
+      props.file?.uploaded_at ? new Date(props.file.uploaded_at * 1000).toLocaleDateString() : null;
     return (
-      <div class="file-preview file-preview-error">
-        <p class="error-bar" role="alert">Preview unavailable: {props.message}</p>
-        <Show when={isWeb()}>
-          <p>
-            <a class="file-download" href={fileHref(selectedDocumentId() ?? "")} download={name()}>
-              ↓ Download {name()}
-            </a>
-          </p>
-        </Show>
-      </div>
-    );
-  }
-
-  function FilePreview(props: { preview: DocumentFilePreview }) {
-    const p = () => props.preview;
-    return (
-      <div class="file-preview" data-mime={p().mime}>
-        <div class="file-meta">
-          <strong>{p().filename}</strong>
-          <span>{p().mime}</span>
-          <span>{p().size} bytes</span>
-          <Show when={p().truncated}><span class="hint">preview truncated</span></Show>
+      <div class="doc-file-card" data-kind={kind().label}>
+        <div class="dfc-glyph" aria-hidden="true">
+          <Icon name={kind().icon} size={26} />
+          <span class="dfc-ext">{fileExtension(name())}</span>
         </div>
-        <Show when={p().mime.startsWith("image/")}>
-          <img class="file-image" src={previewDataUrl(p())} alt={p().filename} />
-        </Show>
-        <Show when={p().text !== null}>
-          <pre class="file-text">{p().text}</pre>
-        </Show>
-        <Show when={isWeb() && p().mime === "application/pdf"}>
-          <object
-            class="file-pdf"
-            data={fileHref(selectedDocumentId() ?? "")}
-            type="application/pdf"
-            aria-label={`PDF preview of ${p().filename}`}
-          >
-            <a href={fileHref(selectedDocumentId() ?? "")}>Open {p().filename}</a>
-          </object>
-        </Show>
-        <Show when={isWeb()}>
-          <p>
-            <a class="file-download" href={fileHref(selectedDocumentId() ?? "")} download={p().filename}>
-              ↓ Download {p().filename}
-            </a>
+        <div class="dfc-facts">
+          <h2 class="dfc-name" title={name()}>{name()}</h2>
+          <p class="dfc-meta">
+            <span>{kind().label}</span>
+            <Show when={props.file}>{(file) => <><span class="dfc-sep">·</span><span>{humanSize(file().size)}</span></>}</Show>
+            <Show when={uploadedAt()}>{(when) => <><span class="dfc-sep">·</span><span>Added {when()}</span></>}</Show>
+            <Show when={uploader()}>{(who) => <><span class="dfc-sep">·</span><span>by {who()}</span></>}</Show>
           </p>
-        </Show>
-        <Show when={officeKind(p())}>
-          {(kind) => <OfficePreview preview={p()} kind={kind()} />}
-        </Show>
-        <Show when={
-          p().text === null
-          && !p().mime.startsWith("image/")
-          && !officeKind(p())
-          && !(isWeb() && p().mime === "application/pdf")
-        }>
-          <p class="hint">No inline preview for this type — the file is stored beside the database.</p>
-        </Show>
+          {/* THE PANE NO LONGER PRETENDS TO BE A VIEWER, so it says so once instead of
+              leaving the reader waiting for something that is not coming. */}
+          <p class="dfc-hint">Download the file to open it in the reader it belongs to.</p>
+          <Show when={props.message}>
+            {(message) => <p class="dfc-note" role="alert">Details unavailable: {message()}. The file itself is still here.</p>}
+          </Show>
+          <div class="dfc-actions">
+            <Show
+              when={isWeb()}
+              fallback={
+                <button type="button" class="primary dfc-download" disabled={downloading()} onClick={() => { const d = doc(); if (d) void downloadFile(d); }}>
+                  {downloading() ? "Saving…" : "Download"}
+                </button>
+              }
+            >
+              <a class="primary dfc-download file-download" href={fileHref(selectedDocumentId() ?? "")} download={name()}>
+                Download
+              </a>
+            </Show>
+          </div>
+        </div>
       </div>
     );
   }
@@ -2034,13 +2000,13 @@ if (restored.kind === "budget") setBudget(parseBudget(restored.body));
                   </Show>
                 }>
                   <div class="editor-panes">
-                    <Show when={filePreview()} fallback={<p class="hint pad" role="status">Loading file…</p>}>
+                    <Show when={fileFacts()} fallback={<p class="hint pad" role="status">Loading file…</p>}>
                       {(state) => (
                         <Show
-                          when={state().status === "ok" ? (state() as { status: "ok"; preview: DocumentFilePreview }).preview : null}
-                          fallback={<FilePreviewUnavailable message={(state() as { status: "error"; message: string }).message} />}
+                          when={state().status === "ok" ? (state() as { status: "ok"; file: DocumentFile }).file : null}
+                          fallback={<FileCard file={null} message={(state() as { status: "error"; message: string }).message} />}
                         >
-                          {(preview) => <FilePreview preview={preview()} />}
+                          {(file) => <FileCard file={file()} />}
                         </Show>
                       )}
                     </Show>

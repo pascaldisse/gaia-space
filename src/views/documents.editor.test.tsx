@@ -138,7 +138,7 @@ describe("document editing surfaces", () => {
       list_document_folders: { ok: true, value: [] },
       list_documents: () => ({ ok: true, value: uploaded ? [doc(), file] : [doc()] }),
       upload_document_file: () => { uploaded = true; return { ok: true, value: { document_id: "up1", filename: "logo.png", mime: "image/png", size: 4, uploaded_by: "me", uploaded_at: 1 } }; },
-      read_document_file: { ok: true, value: { document_id: "up1", filename: "logo.png", mime: "image/png", size: 4, truncated: false, text: null, data_base64: "iVBORw==" } },
+      get_document_file: { ok: true, value: { document_id: "up1", filename: "logo.png", mime: "image/png", size: 4, uploaded_by: "me", uploaded_at: 1 } },
     });
     // The upload transport is XHR, because only XHR can report how far a body has been
     // sent; the reply shape is the same JSON the route returns.
@@ -173,26 +173,37 @@ describe("document editing surfaces", () => {
     expect(sent[0]).toContain("api/documents/upload");
     expect(sent[0]).toContain("filename=logo.png");
     expect(sent[0]).toContain("container_type=my-docs");
-    // The upload lands in the tree and opens as a preview, not as an empty editor.
+    // The upload lands in the tree and opens as its FILE CARD, not as an empty editor
+    // and not as an inline viewer: no <img>, no <object>, no decoded payload.
     expect(host.textContent).toContain("logo.png");
-    const img = host.querySelector(".file-preview img.file-image") as HTMLImageElement;
-    expect(img).not.toBeNull();
-    expect(img.getAttribute("src")).toBe("data:image/png;base64,iVBORw==");
+    const card = host.querySelector(".doc-file-card") as HTMLElement;
+    expect(card).not.toBeNull();
+    expect(card.textContent).toContain("Image");
+    expect(card.querySelector("img, object, iframe, embed, pre")).toBeNull();
     expect(host.querySelector("textarea.editor-body")).toBeNull();
   });
 
-  test("a text upload previews its decoded contents and announces truncation", async () => {
+  test("a text upload is a card with its facts and a download, never a <pre> of its bytes", async () => {
     setProfileId("me");
     serve({
       list_document_folders: { ok: true, value: [] },
       list_documents: { ok: true, value: [doc({ id: "up2", doc_type: "file", title: "notes.txt" })] },
-      read_document_file: { ok: true, value: { document_id: "up2", filename: "notes.txt", mime: "text/plain", size: 4096, truncated: true, text: "hello upload", data_base64: null } },
+      get_document_file: { ok: true, value: { document_id: "up2", filename: "notes.txt", mime: "text/plain", size: 4096, uploaded_by: "me", uploaded_at: 1 } },
     });
     const host = await mount();
     await open("up2");
 
-    expect(host.querySelector(".file-text")!.textContent).toBe("hello upload");
-    expect(host.textContent).toContain("preview truncated");
+    const card = host.querySelector(".doc-file-card") as HTMLElement;
+    expect(card).not.toBeNull();
+    // The kind is stated in a word, the size in a unit a person reads.
+    expect(card.textContent).toContain("Text file");
+    expect(card.textContent).toContain("4.0 KB");
+    expect(card.textContent).toContain("notes.txt");
+    // Nothing renders the payload any more.
+    expect(host.querySelector("pre")).toBeNull();
+    expect(host.textContent).not.toContain("preview truncated");
+    // And the one act it supports is offered.
+    expect(card.querySelector(".dfc-download")).not.toBeNull();
   });
 
   test("a document you did not author offers no blog publish control", async () => {
