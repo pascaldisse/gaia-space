@@ -1,0 +1,14 @@
+swap3 step2 · 2026-09-09
+live DB -> /Users/pascaldisse/Library/Application Support/com.gaia.space/space.db
+backup -> /Users/pascaldisse/Library/Application Support/com.gaia.space/space.db.bak-0909-pre-v144-swap3
+backup SHA-256 -> cfb1af2fc8ff4ee72f2e73041eb274c0ed92611ed3e4be0548b017c2171dd53d
+sidecars:
+/Users/pascaldisse/Library/Application Support/com.gaia.space/space.db-wal -> absent
+/Users/pascaldisse/Library/Application Support/com.gaia.space/space.db-shm -> absent
+before: user_version, todos, sheets, integrity:
+142
+341
+2
+ok
+backup integrity:
+ok
