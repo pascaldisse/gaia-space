@@ -1,0 +1,18 @@
+swap3 step0 correction · 2026-09-09
+direct stale path cleanup:
+/Users/pascaldisse/projects/gs-w11c-pers1/src-tauri/target/debug/bundle/macos/GAIA Space.app -> exit=0
+/Users/pascaldisse/projects/gaia-space/src-tauri/target/release/bundle/macos/GAIA Space.app -> exit=0
+dmg mounts before:
+ls: /Volumes/dmg.*: No such file or directory
+not mounted/no GAIA Space app -> /Volumes/dmg.FV2Syf
+not mounted/no GAIA Space app -> /Volumes/dmg.ZwFpBY
+not mounted/no GAIA Space app -> /Volumes/dmg.kaga3z
+registered GAIA Space paths after correction:
+path:                       /Volumes/dmg.FV2Syf/GAIA Space.app (0x3eac)
+path:                       /Volumes/dmg.ZwFpBY/GAIA Space.app (0xc3bc)
+path:                       /Volumes/dmg.kaga3z/GAIA Space.app (0xc400)
+path:                       /Users/pascaldisse/projects/gaia-space-wt/v143-fix/dist/GAIA Space.app (0xc568)
+path:                       /Users/pascaldisse/projects/gaia-space/src-tauri/gen/apple/build/arm64-sim/GAIA Space.app (0x1d6c)
+path:                       /Users/pascaldisse/Library/Developer/Xcode/DerivedData/gaia-space-aeswavlnpjcxyqbpcrzmruioplrg/Build/Products/debug-iphonesimulator/GAIA Space.app (0x1d78)
+path:                       /Users/pascaldisse/Library/Developer/Xcode/DerivedData/gaia-space-aeswavlnpjcxyqbpcrzmruioplrg/Build/Products/debug-iphoneos/GAIA Space.app (0x1d80)
+path:                       /Applications/GAIA Space.app (0xca20)
