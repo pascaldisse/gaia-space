@@ -1,0 +1,10 @@
+swap2 step2 · 2026-09-09
+live db → /Users/pascaldisse/Library/Application Support/com.gaia.space/space.db
+backup → /Users/pascaldisse/Library/Application Support/com.gaia.space/space.db.bak-0909-pre-v144
+backup sha256 → cfb1af2fc8ff4ee72f2e73041eb274c0ed92611ed3e4be0548b017c2171dd53d
+before query output (user_version, todos, sheets, integrity):
+142
+341
+2
+ok
+backup integrity → ok
