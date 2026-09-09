@@ -791,13 +791,42 @@ a.documents-library-card { cursor: grab; }
 .blog-chip { font-size: 0.75em; text-transform: uppercase; letter-spacing: 0.04em; padding: 0.15em 0.5em; border-radius: 1em; background: var(--accent); color: #fff; }
 .blog-chip.archived { background: var(--dk-line); color: var(--text-muted); }
 
-/* Uploaded-file documents render their payload instead of an editor: the bytes live on
-   disk, so there is nothing here to edit — only to inspect. */
-.file-preview { padding: 0.9em; overflow: auto; display: grid; gap: 0.7em; align-content: start; }
-.file-meta { display: flex; flex-wrap: wrap; gap: 0.6em; align-items: baseline; color: var(--text-muted); font-size: 0.85em; }
-.file-meta strong { color: inherit; font-size: 1.05em; }
-.file-image { max-width: 100%; border: var(--dk-hairline) solid var(--dk-line); border-radius: 0.4em; }
-.file-text { margin: 0; white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.85em; }
+/* AN UPLOAD IS A FILE, NOT A PAGE. The pane used to imitate a reader — a PDF in an
+   <object>, a workbook through a JS converter — inside a column shared with a list and
+   a history rail, which made every document arrive cramped. It states the file and
+   hands over the bytes instead. One card, centred, with room around it. */
+.doc-file-card {
+  margin: clamp(1.5em, 6vh, 3.5em) auto;
+  max-width: 34em; width: calc(100% - 2.4em);
+  display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 1.15em;
+  padding: 1.5em; border: var(--dk-hairline) solid var(--dk-line); border-radius: 0.9em;
+  background: var(--surface);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.04), 0 8px 26px -18px rgb(0 0 0 / 0.35);
+}
+.dfc-glyph {
+  display: grid; place-items: center; align-content: center; gap: 0.35em;
+  width: 4.4em; height: 4.4em; border-radius: 0.7em;
+  background: var(--surface-hover); color: var(--text-muted);
+}
+.dfc-ext { font-size: 0.62em; font-weight: 800; letter-spacing: 0.07em; }
+.dfc-facts { min-width: 0; display: grid; gap: 0.45em; align-content: start; }
+.dfc-name {
+  margin: 0; font: 700 1.12em/1.3 var(--font-head, inherit); color: var(--text-strong);
+  overflow-wrap: anywhere;
+}
+.dfc-meta { margin: 0; display: flex; flex-wrap: wrap; gap: 0.4em; color: var(--text-muted); font-size: 0.85em; }
+.dfc-sep { opacity: 0.55; }
+.dfc-hint { margin: 0.15em 0 0; color: var(--text-muted); font-size: 0.85em; }
+.dfc-note { margin: 0.15em 0 0; color: var(--text-muted); font-size: 0.85em; }
+.dfc-actions { margin-top: 0.6em; }
+a.dfc-download { display: inline-flex; align-items: center; text-decoration: none; }
+.theme-space-light .doc-file-card { border-color: var(--line); background: var(--paper); }
+.theme-space-light .dfc-glyph { background: var(--wash-2); color: var(--muted); }
+.theme-space-light .dfc-name { color: var(--ink); }
+.theme-space-light .dfc-meta, .theme-space-light .dfc-hint, .theme-space-light .dfc-note { color: var(--muted); }
+@media (max-width: 620px) {
+  .doc-file-card { grid-template-columns: minmax(0, 1fr); gap: 0.9em; padding: 1.2em; }
+}
 .document-comments { padding: .75rem; border-bottom: 1px solid var(--surface-border); display:grid; gap:.55rem; max-width:20rem; }
 .comments-head { display:flex; justify-content:space-between; align-items:center; }
 .meeting-binding,.comment-compose { display:flex; gap:.35rem; }
@@ -809,10 +838,6 @@ a.documents-library-card { cursor: grab; }
 .comment-row p { margin:0 0 .3rem; white-space:pre-wrap; }
 .comment-row .active { border-color:var(--accent); }
 
-/* PDF and download: a stored file is viewable where the browser can view it, and
-   fetchable where it cannot. "It is on a disk somewhere" is not a viewer. */
-.file-pdf { width: 100%; min-height: 60vh; border: var(--dk-hairline) solid var(--dk-line); border-radius: 0.4em; background: var(--surface); }
-.file-download { font-size: 0.9em; }
 
 /* Favourites head the personal tree; the star lives with the document it marks. */
 .favorites-section { padding: 0.3em 0 0.5em; border-bottom: var(--dk-hairline) solid var(--dk-line); margin-bottom: 0.4em; }
@@ -843,9 +868,3 @@ a.documents-library-card { cursor: grab; }
 .upload-progress { padding: 0.3em 0.5em; display: grid; gap: 0.25em; }
 .upload-progress progress { width: 100%; height: 0.5em; }
 
-/* Office documents rendered in place (docx via mammoth, xlsx via SheetJS). */
-.office-preview { overflow: auto; }
-.office-body { font-size: 0.9em; }
-.office-body table { border-collapse: collapse; margin-bottom: 1em; }
-.office-body td, .office-body th { border: var(--dk-hairline) solid var(--dk-line); padding: 0.2em 0.45em; }
-.office-body h3 { margin: 0.8em 0 0.3em; font-size: 0.95em; }

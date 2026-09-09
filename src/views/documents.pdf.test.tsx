@@ -6,9 +6,10 @@ import Documents from "./Documents";
 import { setProfileId, setProjectId } from "../session";
 import { navigate, registerViews, setAvailableViews } from "../router";
 
-// Opening an uploaded PDF must never end in a spinner that never stops: the bytes have
-// a URL of their own, so a slow or failed *preview* still owes the reader a viewer, a
-// stated reason, and a download that works.
+// AN UPLOAD IS A FILE, NOT A PAGE. Knowledge no longer imitates a reader: a PDF is
+// stated as a card and handed over. What these tests guard is that the lookup of its
+// facts can never withhold the file — a stall, a failure or a missing metadata row
+// still ends in a card with a working download, never in a spinner that never stops.
 
 const realFetch = globalThis.fetch;
 let dispose: (() => void) | undefined;
@@ -37,14 +38,14 @@ const pdfDoc = {
   archived: false, created_by: "me",
 };
 
-/** `read_document_file` behaves as told; everything else answers empty. */
-const serve = (preview: "hang" | "error" | Record<string, unknown>) => {
+/** `get_document_file` behaves as told; everything else answers empty. */
+const serve = (preview: "hang" | "error" | Record<string, unknown> | null) => {
   globalThis.fetch = (async (url: unknown) => {
     const raw = String(url);
     const command = raw.split("api/cmd/")[1] ?? raw;
     const json = (value: unknown) =>
       new Response(JSON.stringify({ ok: true, value }), { status: 200, headers: { "content-type": "application/json" } });
-    if (command === "read_document_file") {
+    if (command === "get_document_file") {
       if (preview === "hang") return await new Promise<Response>(() => {});
       if (preview === "error") {
         return new Response(JSON.stringify({ ok: false, error: "read upload: No such file or directory" }), {
@@ -70,43 +71,55 @@ const open = async () => {
 };
 
 describe("pdf documents", () => {
-  test("a stalled preview ends in a stated error and a working download, not an endless spinner", async () => {
+  const card = (host: HTMLElement) => host.querySelector(".doc-file-card") as HTMLElement | null;
+  const download = (host: HTMLElement) => host.querySelector("a.dfc-download") as HTMLAnchorElement | null;
+
+  test("a stalled lookup ends in a card with a working download, not an endless spinner", async () => {
     setProfileId("me");
     serve("hang");
     const host = await open();
 
     expect(host.textContent).not.toContain("Loading file…");
-    const alert = host.querySelector("[role='alert']");
-    expect(alert).not.toBeNull();
-    expect(alert!.textContent!.toLowerCase()).toContain("took too long");
-    const download = host.querySelector("a.file-download") as HTMLAnchorElement | null;
-    expect(download).not.toBeNull();
-    expect(download!.getAttribute("href")).toContain("api/documents/files/doc-pdf");
+    expect(card(host)).not.toBeNull();
+    const note = host.querySelector("[role='alert']");
+    expect(note).not.toBeNull();
+    expect(note!.textContent!.toLowerCase()).toContain("took too long");
+    expect(download(host)).not.toBeNull();
+    expect(download(host)!.getAttribute("href")).toContain("api/documents/files/doc-pdf");
   });
 
-  test("a failed preview says why and still offers the file", async () => {
+  test("a failed lookup says why and still offers the file", async () => {
     setProfileId("me");
     serve("error");
     const host = await open();
 
     expect(host.textContent).not.toContain("Loading file…");
-    const alert = host.querySelector("[role='alert']");
-    expect(alert).not.toBeNull();
-    expect(alert!.textContent).toContain("No such file or directory");
-    expect(host.querySelector("a.file-download")).not.toBeNull();
+    const note = host.querySelector("[role='alert']");
+    expect(note).not.toBeNull();
+    expect(note!.textContent).toContain("No such file or directory");
+    expect(download(host)).not.toBeNull();
   });
 
-  test("a pdf is previewed from its own URL, with no base64 payload needed", async () => {
+  test("a pdf is a card, not an embedded viewer", async () => {
     setProfileId("me");
     serve({
       document_id: "doc-pdf", filename: "LOI Page.pdf", mime: "application/pdf",
-      size: 240000, truncated: true, text: null, data_base64: null,
+      size: 240000, uploaded_by: "me", uploaded_at: 1,
     });
     const host = await open();
 
-    const frame = host.querySelector(".file-pdf") as HTMLObjectElement | null;
-    expect(frame).not.toBeNull();
-    expect(frame!.getAttribute("data")).toContain("api/documents/files/doc-pdf");
-    expect(host.querySelector("a.file-download")).not.toBeNull();
+    // THE VIEWER IS GONE. This is the whole point of the change: no <object>, no
+    // <iframe>, no <embed> — the reader opens the file in the app that owns it.
+    expect(host.querySelector("object, iframe, embed")).toBeNull();
+
+    const it = card(host)!;
+    expect(it).not.toBeNull();
+    expect(it.textContent).toContain("LOI Page.pdf");
+    expect(it.textContent).toContain("PDF document");
+    expect(it.textContent).toContain("234 KB");
+    expect(download(host)!.getAttribute("href")).toContain("api/documents/files/doc-pdf");
+    expect(download(host)!.getAttribute("download")).toBe("LOI Page.pdf");
+    // No bytes were ever asked for: the card reads a metadata row.
+    expect(host.textContent).not.toContain("base64");
   });
 });
