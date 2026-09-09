@@ -1,0 +1,50 @@
+DIAG 0909-2 — LaunchServices/open context; D
+
+§ guardrails
+- live /Applications → read-only xattr + ls
+- live app-support/space.db → untouched
+- scratch only → scratch/0909/D/
+- `open --help` → --stdout / --stderr / --env supported; launchctl fallback unused
+
+§ quarantine
+- staged dist/GAIA Space.app → only com.apple.provenance; no com.apple.quarantine
+- /Applications/GAIA Space.app → only com.apple.provenance; no com.apple.quarantine
+- D copied bundle D1 → provenance only
+- D2 xattr -dr com.apple.quarantine → exit 0; provenance remains; quarantine absent
+- swap #2 historical state → UNDETERMINED; requested STEP-03-BUNDLE-SWAP.txt absent at supplied/likely local paths; § D/step-03-bundle-swap-read.txt
+
+§ D1 — LaunchServices
+- cmd → open -a D/GAIA\ Space.app --stdout D1.out --stderr D1.err --env SPACE_DB=D/space.db --env RUST_BACKTRACE=1
+- start 18:29:23+0200; open exit 0
+- db user_version → 142 → 144
+- pid 64562 @3s +30s → alive; System Events → visible=true, windows=1
+- command → D/GAIA Space.app/Contents/MacOS/gaia-space; AppTranslocation absent
+- stderr → debug server on 127.0.0.1:9433
+- panicked at → none; first gaia-space panic frame → none; .ips new → none; log show → § D/D1-log-show.txt
+- termination → manual SIGTERM after capture; exited
+
+§ D2 — explicit xattr strip + fresh backup DB
+- start 18:30:50+0200; open exit 0
+- db user_version → 142 → 144
+- pid 64746 @3s +30s → alive; System Events → visible=true, windows=1
+- command → D/GAIA Space.app/Contents/MacOS/gaia-space; AppTranslocation absent
+- stderr → debug server on 127.0.0.1:9433
+- panicked at → none; first gaia-space panic frame → none; .ips new → none; log show → § D/D2-log-show.txt
+- 9433 @3s → gaia-space pid 64746 LISTEN; post-kill now → unbound
+- termination → manual SIGTERM after capture; exited
+
+§ D3 static only — no DB override omitted; would target live default path
+- default DB → db.rs:154-157 app.path().app_data_dir()/space.db
+- precedence → DB_PATH; SPACE_DB; app-data — db.rs:116-129,166-173
+- desktop setup lexical .expect/.unwrap/panic! → none; lib.rs:613-635
+- db runtime pre-test path → no .expect/.unwrap/panic!; errors propagated by Result/?
+- debug server bind → debug_server.rs:35; bind error → eprintln + return; no panic
+- post-setup debug handler mutex unwraps → debug_server.rs:224,235,245,278,295,400,424,433,558; implicit message `called Result::unwrap() on an Err value` if poisoned; not startup/bind path
+- run result handler → lib.rs:638 unwrap_or_else; startup error prints then exit 1; no panic
+
+§ ancillary
+- Saved Application State grep -i gaia → no match
+- 9433 current listener → none
+
+§ hypothesis
+- staged bundle launches via LaunchServices with/without quarantine; original crash not reproduced → prior crash requires installed-bundle-specific LaunchServices/restoration state or transient macOS framework condition, not copied DB/quarantine/translocation.
