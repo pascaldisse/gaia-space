@@ -11,6 +11,10 @@ export type Config = {
   wholeSpace?: WholeSpaceConfig;
   /** Opt-in write path: create Space work items from a linked room (see actions.ts). */
   actions?: ActionsConfig;
+  /** Mirror Space channel chat into the linked GAIA rooms (the `RoomLink` forwarder). Default
+   *  true. Set false to keep room provisioning and the `!space` actions while NEVER forwarding
+   *  channel messages into GAIA — no Space chatter ever triggers an agent turn. */
+  forwardMessages: boolean;
   mappings: Mapping[];
   space: {
     baseUrl: string; personalAccessToken?: string; username?: string; password?: string; sessionCookie?: string; pollIntervalMs: number; requestTimeoutMs: number;
@@ -25,7 +29,7 @@ export type Config = {
 export type SpaceMessage = { id: string; channel_id: string; author_id: string | null; text: string; created_at: number; thread_of: string | null; archived: boolean };
 export type GaiaEvent = { id: string; author: string; text: string };
 
-const defaults: Omit<Config, "mappings" | "mode" | "wholeSpace"> = {
+const defaults: Omit<Config, "mappings" | "mode" | "wholeSpace" | "forwardMessages"> = {
   space: { baseUrl: "http://127.0.0.1:8090", pollIntervalMs: 1_000, requestTimeoutMs: 15_000, ownAccountMode: false, outboundIdPrefix: "bridge-", outboundLedgerPath: "bridge/room-link/state/outbound-ids.json", outboundLedgerLimit: 5_000 },
   gaia: { baseUrl: "http://127.0.0.1:8787", workspaceId: "", replyTimeoutMs: 120_000, pollIntervalMs: 1_000, requestTimeoutMs: 15_000 },
 };
@@ -43,6 +47,7 @@ export function parseConfig(raw: unknown): Config {
   const input = raw as Record<string, unknown>;
   const wholeSpace = parseWholeSpace(input.wholeSpace);
   const actions = parseActions(input.actions);
+  const forwardMessages = input.forwardMessages === undefined ? true : input.forwardMessages === true;
   const mode = input.mode === undefined ? (wholeSpace ? "whole-space" : "mappings") : input.mode;
   if (mode !== "mappings" && mode !== "whole-space") throw new Error('config mode must be "mappings" or "whole-space"');
   if (mode === "whole-space" && !wholeSpace) throw new Error("config wholeSpace is required in whole-space mode");
@@ -73,7 +78,7 @@ export function parseConfig(raw: unknown): Config {
   if (!space.personalAccessToken && !space.sessionCookie && (!space.username || !space.password)) throw new Error("config space requires personalAccessToken or sessionCookie or username and password");
   // Own-account mode leans on the id prefix as its stateless second guard, so it must be usable.
   if (space.ownAccountMode && !/^[A-Za-z0-9._-]+$/.test(space.outboundIdPrefix)) throw new Error("config space.outboundIdPrefix must be non-empty and may only contain letters, numbers, dots, underscores, hyphens");
-  return { mode, wholeSpace, actions, mappings, space, gaia: {
+  return { mode, wholeSpace, actions, forwardMessages, mappings, space, gaia: {
     baseUrl: typeof gaiaInput.baseUrl === "string" ? requiredString(gaiaInput.baseUrl, "gaia.baseUrl") : defaults.gaia.baseUrl,
     workspaceId: requiredString(gaiaInput.workspaceId, "gaia.workspaceId"),
     replyTimeoutMs: positive(gaiaInput.replyTimeoutMs, "gaia.replyTimeoutMs", defaults.gaia.replyTimeoutMs),
@@ -219,11 +224,11 @@ if (import.meta.main) {
   if (actionsConfig?.enabled) console.log(`actions enabled: "${actionsConfig.commandPrefix} task|ticket <title>" then "${actionsConfig.commandPrefix} confirm <token>"; rooms ${actionsConfig.allowedRoomIds.length ? actionsConfig.allowedRoomIds.join(", ") : "(all linked)"}`);
 
   if (config.mode === "mappings") {
-    const link = new RoomLink(config.mappings, space, gaiaTransport, config.gaia.replyTimeoutMs, config.gaia.pollIntervalMs, origin);
+    const link = config.forwardMessages ? new RoomLink(config.mappings, space, gaiaTransport, config.gaia.replyTimeoutMs, config.gaia.pollIntervalMs, origin) : undefined;
     const actions = makeActions(config.mappings);
-    console.log(`room-link started: ${config.mappings.length} mapping(s)`);
+    console.log(`room-link started: ${config.mappings.length} mapping(s)${config.forwardMessages ? "" : "; message forwarding DISABLED (actions only — no Space chat enters GAIA)"}`);
     for (;;) {
-      try { await link.pollOnce(); await actions?.pollOnce(); } catch (error) { console.error("room-link poll failed:", error); }
+      try { await link?.pollOnce(); await actions?.pollOnce(); } catch (error) { console.error("room-link poll failed:", error); }
       await sleep(config.space.pollIntervalMs);
     }
   }
@@ -235,7 +240,8 @@ if (import.meta.main) {
   console.log(`whole-space started: hub ${wholeSpace.hubRoomId}; linked ${result.created.length + result.existing.length} channel(s) (${result.created.length} new, ${result.skipped.length} filtered out)`);
   if (provisionOnly) { console.log(JSON.stringify(await runner.store.load(), null, 2)); process.exit(0); }
 
-  const link = new RoomLink(mappingsOf(await runner.store.load()), space, gaiaTransport, config.gaia.replyTimeoutMs, config.gaia.pollIntervalMs, origin);
+  if (!config.forwardMessages) console.log("whole-space: message forwarding DISABLED — provisioning + actions only; no Space channel chat enters GAIA");
+  const link = config.forwardMessages ? new RoomLink(mappingsOf(await runner.store.load()), space, gaiaTransport, config.gaia.replyTimeoutMs, config.gaia.pollIntervalMs, origin) : undefined;
   const actions = makeActions(mappingsOf(await runner.store.load()));
   let lastDiscovery = Date.now(), lastDigest = 0;
   for (;;) {
@@ -244,7 +250,7 @@ if (import.meta.main) {
       if (now - lastDiscovery >= wholeSpace.discoveryIntervalMs) {
         lastDiscovery = now;
         const next = await runner.provision();
-        if (next.created.length) { const table = mappingsOf(await runner.store.load()); link.setMappings(table); actions?.setMappings(table); }
+        if (next.created.length) { const table = mappingsOf(await runner.store.load()); link?.setMappings(table); actions?.setMappings(table); }
         result = next;
       }
       if (wholeSpace.hub.digestEnabled && digestDue(lastDigest, now, wholeSpace.hub.digestIntervalMs)) {
@@ -252,7 +258,7 @@ if (import.meta.main) {
         await gaia.send(wholeSpace.hubRoomId, digestText(result, wholeSpace.hubRoomId));
       }
       await runner.hub.pollOnce();
-      await link.pollOnce();
+      await link?.pollOnce();
       await actions?.pollOnce();
     } catch (error) { console.error("whole-space poll failed:", error); }
     await sleep(config.space.pollIntervalMs);

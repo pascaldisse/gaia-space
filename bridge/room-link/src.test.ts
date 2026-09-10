@@ -12,6 +12,14 @@ describe("configuration and loop guard", () => {
     expect(() => parseConfig({ mappings: [], space: { sessionCookie: "x" }, gaia: {} })).toThrow("gaia.workspaceId");
   });
 
+  test("message forwarding is on by default and can be switched off without touching actions", () => {
+    expect(parseConfig({ mappings: [], space: { sessionCookie: "t" }, gaia: { workspaceId: "w" } }).forwardMessages).toBe(true);
+    const off = parseConfig({ forwardMessages: false, mappings: [{ spaceChannelId: "c", roomId: "r" }], actions: { enabled: true }, space: { sessionCookie: "t" }, gaia: { workspaceId: "w" } });
+    expect(off.forwardMessages).toBe(false);
+    expect(off.actions?.enabled).toBe(true); // actions survive with forwarding disabled
+    expect(parseConfig({ forwardMessages: "nope" as unknown as boolean, mappings: [], space: { sessionCookie: "t" }, gaia: { workspaceId: "w" } }).forwardMessages).toBe(false);
+  });
+
   test("a personal access token is a complete Space credential on its own", () => {
     const config = parseConfig({ mappings: [], space: { personalAccessToken: " pat-secret " }, gaia: { workspaceId: "workspace-1" } });
     expect(config.space.personalAccessToken).toBe("pat-secret");
