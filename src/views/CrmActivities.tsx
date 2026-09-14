@@ -182,10 +182,9 @@ export default function CrmActivities(props: {
 /** An inbox activity is missing exactly one thing, so it offers exactly one control:
  *  the deal it should belong to. Choosing MOVES it onto that deal (§linkActivity). */
 function LinkPicker(props: { deals: Deal[]; onLink: (dealId: string) => void }) {
-  return <select class="crm-activity-link" aria-label="Deal zuordnen" value="" onChange={event => { const value = event.currentTarget.value; event.currentTarget.value = ""; if (value) props.onLink(value); }}>
-    <option value="">Ohne Deal – zuordnen…</option>
-    <For each={props.deals}>{deal => <option value={deal.id}>{deal.title}</option>}</For>
-  </select>;
+  return <PillMenu class="crm-activity-link" label="Deal zuordnen" value="" placeholder="Ohne Deal – zuordnen…"
+    options={[{ value: "", label: "Ohne Deal – zuordnen…", disabled: true }, ...props.deals.map(deal => ({ value: deal.id, label: deal.title }))]}
+    onChange={dealId => { if (dealId) props.onLink(dealId); }} />;
 }
 
 function ActivityRow(props: { entry: ActivityEntry; deals: () => Deal[]; onLink: (activityId: string, dealId: string) => void; onToggle: (id: string) => void; onOpenDeal: (id: string) => void; onOpenOrg: (id: string) => void }) {
