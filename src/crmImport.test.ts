@@ -4,7 +4,7 @@ import {
   IMPORT_SOURCE_FALLBACK, autoMap, buildRows, detectHeaderRow, headersOf, importLeads, isCsvName, isSpreadsheetName,
   markDuplicates, normalizeAddress, normalizeCompany, organizationFrom, planOf, readImportFile, type SheetTable,
 } from "./crmImport";
-import { leadInbox, leadInvariantViolations, normalize, seed, type CrmData } from "./crmStore";
+import { emptyLocation, leadInbox, leadInvariantViolations, normalize, seed, type CrmData } from "./crmStore";
 
 // The import path, proven on real workbook bytes: the file is parsed in-process by
 // `xlsx`, mapped by header NAME, checked against the stored document, and written as
@@ -137,6 +137,26 @@ test("a different address at the same company name is not a duplicate", () => {
   data.organizations.push(organizationFrom(data, { ...blank(), name: "Optik Nord", address: "Hauptstr. 1, 20095 Hamburg" }));
   const rows = markDuplicates(data, buildRows(table([["Firma", "Adresse"], ["Optik Nord", "Markt 9, 24103 Kiel"]]), 0, { name: 0, address: 1 }));
   expect(rows[0].duplicate).toBeNull();
+});
+
+// Regression: the stored addresses used to be joined into ONE string per organization,
+// so a customer with two sites compared as a single fictitious address that matched
+// neither branch — the list of an existing multi-site customer imported itself again.
+test("every site of a multi-site organization collides, not the two of them glued together", () => {
+  const data = emptyDoc();
+  const org = organizationFrom(data, { ...blank(), name: "Optik Nord GmbH", address: "Hauptstr. 1, 20095 Hamburg" });
+  org.locations.push({ ...emptyLocation("Filiale Altona"), address: "Nebenweg 7, 22765 Hamburg" });
+  data.organizations.push(org);
+  const rows = markDuplicates(data, buildRows(table([
+    ["Firma", "Adresse"],
+    ["Optik Nord", "Hauptstraße 1, 20095 Hamburg"],
+    ["Optik Nord", "Nebenweg 7, 22765 Hamburg"],
+    ["Optik Nord", "Markt 9, 24103 Kiel"],
+  ]), 0, { name: 0, address: 1 }));
+  expect(rows[0].duplicate).toEqual({ kind: "existing", name: "Optik Nord GmbH" });
+  expect(rows[1].duplicate).toEqual({ kind: "existing", name: "Optik Nord GmbH" });
+  // A third, genuinely new site is still a new record — the fix must not over-match.
+  expect(rows[2].duplicate).toBeNull();
 });
 
 test("a duplicate can be imported anyway, because the decision is the user's", () => {

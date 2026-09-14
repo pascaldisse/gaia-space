@@ -176,10 +176,17 @@ export const duplicateKeys = (name: string, address: string) => {
   const place = normalizeAddress(address);
   return place ? [company, `${company}|${place}`] : [company];
 };
-const collides = (a: { name: string; address: string }, b: { name: string; address: string }) => {
-  if (!normalizeCompany(a.name) || normalizeCompany(a.name) !== normalizeCompany(b.name)) return false;
-  const left = normalizeAddress(a.address), right = normalizeAddress(b.address);
-  return !left || !right || left === right;
+/** A known record is a company plus EVERY address it is reachable at: an organization
+ *  with two sites must collide on either of them, so a list that carries the branch
+ *  address of an existing customer is a duplicate, not a second company. Joining the
+ *  sites into one string compared them as a single fictitious address that matched
+ *  nothing — a multi-site customer was silently imported twice. */
+type KnownRecord = { name: string; addresses: string[]; label: string };
+const collides = (candidate: { name: string; address: string }, known: KnownRecord) => {
+  if (!normalizeCompany(candidate.name) || normalizeCompany(candidate.name) !== normalizeCompany(known.name)) return false;
+  const left = normalizeAddress(candidate.address);
+  const rights = known.addresses.map(normalizeAddress).filter(Boolean);
+  return !left || !rights.length || rights.includes(left);
 };
 
 const emptyValues = (): Record<ImportField, string> =>
@@ -206,10 +213,10 @@ export const buildRows = (table: SheetTable, headerRow: number, mapping: Mapping
 /** Duplicates against the stored document AND against earlier lines of the same file —
  *  a list exported twice in one sheet is the commonest way to double a customer. */
 export const markDuplicates = (data: CrmData, rows: ImportRow[]): ImportRow[] => {
-  const existing = live(data.organizations).map(org => ({
-    name: org.name, address: org.locations.map(location => location.address).join(" "), label: org.name,
+  const existing: KnownRecord[] = live(data.organizations).map(org => ({
+    name: org.name, addresses: (org.locations ?? []).map(location => location.address), label: org.name,
   }));
-  const seen: Array<{ name: string; address: string; label: string }> = [];
+  const seen: KnownRecord[] = [];
   return rows.map(row => {
     if (row.error) return { ...row, duplicate: null, skip: true };
     const candidate = { name: row.values.name, address: row.values.address };
@@ -217,7 +224,7 @@ export const markDuplicates = (data: CrmData, rows: ImportRow[]): ImportRow[] =>
     const earlier = known ? undefined : seen.find(item => collides(candidate, item));
     const duplicate = known ? { kind: "existing" as DuplicateKind, name: known.label }
       : earlier ? { kind: "file" as DuplicateKind, name: earlier.label } : null;
-    seen.push({ ...candidate, label: row.values.name });
+    seen.push({ name: candidate.name, addresses: [candidate.address], label: row.values.name });
     return { ...row, duplicate, skip: !!duplicate };
   });
 };
