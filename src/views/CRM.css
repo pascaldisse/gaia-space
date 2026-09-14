@@ -28,6 +28,9 @@
 .crm-trash-row small{color:var(--text-muted);font-size:10px}
 .crm-trash-row .ghost{border:1px solid var(--surface-border);border-radius:6px;background:transparent;color:var(--text);padding:5px 9px;font:inherit;font-size:11px;cursor:pointer}
 .crm-trash-row .ghost.danger{color:var(--status-danger-ink)}
+/* Outcome controls must override the neutral detail-button base rule above. */
+.crm-detail .ghost.success{color:var(--status-success-ink);border-color:var(--status-success-ink);background:var(--status-success-bg)}
+.crm-detail .ghost.danger{color:var(--status-danger-ink);border-color:var(--status-danger-ink);background:var(--status-danger-bg)}
 .crm-linked-row{display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;width:100%;text-align:left;padding:10px 11px;border:1px solid var(--surface-border);border-radius:7px;background:var(--surface);color:var(--text);font:inherit;cursor:pointer}
 .crm-linked-row:hover{border-color:var(--accent)}
 .crm-linked-row span{display:grid;gap:3px;font-size:12px}
