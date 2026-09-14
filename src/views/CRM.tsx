@@ -1,11 +1,14 @@
 import { createEffect, createMemo, createSignal, For, Show } from "solid-js";
 import PageHeader, { Chip } from "../components/PageHeader";
 import { Icon } from "../components/Icon";
+import { route } from "../router";
 import { CRM_STAGES, PIPELINE_STAGES, emptyLocation, id, loadCrm, saveCrm, type Account, type ActivityKind, type Contact, type CrmStage, type Location } from "../crmStore";
 import "./CRM.css";
 
 const split = (value: string) => value.split(/[,\n]/).map(x => x.trim()).filter(Boolean);
 const date = (value: string) => value ? new Intl.DateTimeFormat("de-DE", { dateStyle: "medium" }).format(new Date(`${value}T12:00:00`)) : "Kein Termin";
+type CrmView = "Pipeline" | "Kunden" | "Offene Deals" | "Abgeschlossene Deals" | "Kalender";
+const viewForRouteTab = (tab: string | undefined): CrmView => ({ pipeline: "Pipeline", customers: "Kunden", open: "Offene Deals", closed: "Abgeschlossene Deals", calendar: "Kalender" }[tab ?? "pipeline"] ?? "Pipeline");
 function DropZone(props: { label: string; tone: "lost" | "won"; onDrop: (locationId: string) => void }) { return <div class={`crm-drop-zone ${props.tone}`} onDragEnter={e => e.preventDefault()} onDragOver={e => { e.preventDefault(); if (e.dataTransfer) e.dataTransfer.dropEffect = "move"; }} onDrop={e => { e.preventDefault(); const locationId = e.dataTransfer?.getData("text/plain"); if (locationId) props.onDrop(locationId); }}>{props.label}</div> }
 
 export default function CRM() {
@@ -14,7 +17,8 @@ export default function CRM() {
   const [query, setQuery] = createSignal("");
   const [newOpen, setNewOpen] = createSignal(false);
   const [filterOwner, setFilterOwner] = createSignal("Alle");
-  const [view, setView] = createSignal<"Pipeline" | "Kunden" | "Offene Deals" | "Abgeschlossene Deals" | "Kalender">("Pipeline");
+  const [view, setView] = createSignal<CrmView>(viewForRouteTab(route().tab));
+  createEffect(() => setView(viewForRouteTab(route().tab)));
   const [dragging, setDragging] = createSignal<string | null>(null);
   const [dragOverStage, setDragOverStage] = createSignal<CrmStage | null>(null);
   createEffect(() => saveCrm(accounts()));
@@ -37,7 +41,6 @@ export default function CRM() {
       <button class="primary" onClick={() => setNewOpen(true)}><Icon name="plus" size={16}/> Betrieb hinzufügen</button>
     </nav>
     <Show when={newOpen()}><NewAccount onClose={() => setNewOpen(false)} onSave={addAccount}/></Show>
-    <nav class="crm-view-tabs" aria-label="CRM Ansichten"><For each={["Pipeline", "Kunden", "Offene Deals", "Abgeschlossene Deals", "Kalender"] as const}>{name => <button classList={{ active: view() === name }} onClick={() => setView(name)}>{name}</button>}</For></nav>
     <Show when={view() === "Pipeline"}><section class="crm-pipeline"><div class="crm-pipeline-summary"><span>{visible().filter(x => x.location.status === "Aktiv" && x.location.stage !== "Gewonnen").length} offene Deals</span><span>Pipeline: Vertrieb</span></div><div class="crm-board" aria-label="Vertriebspipeline">
       <For each={PIPELINE_STAGES}>{stage => <section class="crm-column" classList={{ "is-drop-target": dragOverStage() === stage }} onDragEnter={e => { e.preventDefault(); setDragOverStage(stage); }} onDragOver={e => { e.preventDefault(); if (e.dataTransfer) e.dataTransfer.dropEffect = "move"; setDragOverStage(stage); }} onDragLeave={() => setDragOverStage(null)} onDrop={e => { e.preventDefault(); const locationId = e.dataTransfer?.getData("text/plain") || dragging(); if (locationId) move(locationId, stage); setDragging(null); setDragOverStage(null); }}>
         <header><strong>{stage}</strong><span>{visible().filter(x => x.location.stage === stage && x.location.status === "Aktiv").length}</span></header>

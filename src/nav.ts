@@ -100,7 +100,7 @@ export const viewLabel = (view: string) => VIEW_LABELS[view] ?? view;
 // to. Storing it would let the two disagree, which is exactly the defect this
 // mapping exists to prevent.
 // ---------------------------------------------------------------------------
-export type RailMode = "home" | "chats" | "activity" | "tasks" | "projects" | "calendar" | "knowledge" | "development" | "more";
+export type RailMode = "home" | "chats" | "activity" | "tasks" | "projects" | "calendar" | "knowledge" | "development" | "crm" | "more";
 
 /** Every view has EXACTLY ONE home mode. A view that is absent here belongs to
  *  "more", whose sidebar is built from the LIVE view registry — so a newly
@@ -140,6 +140,7 @@ const MODE_OF_VIEW: Record<string, RailMode> = {
   Pipelines: "development",
   "Dev Environments": "development",
   Packages: "development",
+  CRM: "crm",
 };
 
 export const railModeOfView = (view: string): RailMode => MODE_OF_VIEW[view] ?? "more";

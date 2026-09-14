@@ -34,6 +34,10 @@ export type Route = {
 export const activityFilters = ["mentions", "messages", "assigned", "reviews", "updates"] as const;
 const isActivityFilter = (value: string): value is typeof activityFilters[number] =>
   activityFilters.includes(value as typeof activityFilters[number]);
+/** CRM is one destination with five work views; preserving the selected view in the
+ * address makes the CRM rail truthful and lets a shared link open the same workspace. */
+export const crmTabs = ["pipeline", "customers", "open", "closed", "calendar"] as const;
+const isCrmTab = (value: string): value is typeof crmTabs[number] => crmTabs.includes(value as typeof crmTabs[number]);
 
 /** Channel workspace tabs (communication-first shell). `messages` is the default surface;
  *  the work tabs mount EXISTING views scoped to the channel's project (ChannelWorkspace),
@@ -184,6 +188,10 @@ export function parsePath(path: string): Route {
     return { view: FALLBACK_VIEW };
   }
 
+  // /crm/<view> — the CRM's own work views, beneath one top-level destination.
+  if (slugToView[head] === "CRM" && rest.length === 1 && isCrmTab(rest[0]))
+    return norm({ view: "CRM", tab: rest[0] });
+
   // /inbox/<filter> — Activity's worklist, narrowed. Keyed off the registered slug,
   // not a hardcoded word, so it follows the view's own routing key.
   if (slugToView[head] === "Inbox" && rest.length === 1 && isActivityFilter(rest[0]))
@@ -238,6 +246,7 @@ export function buildPath(r: Route): string {
   // A project's TICKET LIST is the Dev tab. Only the list: a single ticket keeps its
   // own `/projects/<id>/issues/<issueId>` address, handled by the entity grammar below.
   if (r.view === "Issues" && r.projectId && !r.entityId) return `projects/${enc(r.projectId)}/dev`;
+  if (view === "CRM" && isCrmTab(r.tab ?? "")) return `${slug}/${r.tab}`;
   if (view === "Inbox" && isActivityFilter(r.tab ?? "")) return `${slug}/${r.tab}`;
   if (r.entityType === "channel" && r.entityId && isChannelTab(r.tab ?? ""))
     return `channel/${enc(r.entityId)}/${r.tab}`;

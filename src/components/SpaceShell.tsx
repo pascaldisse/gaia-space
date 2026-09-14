@@ -45,6 +45,7 @@ const RAIL: { mode: RailMode; label: string; landing: string; icon: IconName; ba
   { mode: "calendar", label: "Calendar", landing: "Calendar", icon: "calendar" },
   { mode: "knowledge", label: "Library", landing: "Documents", icon: "book-nav" },
   { mode: "development", label: "Development", landing: "Development", icon: "target" },
+  { mode: "crm", label: "CRM", landing: "CRM", icon: "columns" },
 ];
 
 /** A sidebar entry names an OBJECT of the current mode. `filter` marks the entries that
@@ -53,7 +54,7 @@ const RAIL: { mode: RailMode; label: string; landing: string; icon: IconName; ba
  *  arrives filtered, and back/forward tell the truth.
  *  They used to be destinations wearing the costume of filters — Assigned went to Team
  *  Tasks, Reviews to Code Reviews, Mentions was `provisional` and went nowhere. */
-type SideEntry = { label: string; view: string; icon: IconName; strong?: boolean; filter?: ActivityFilter; badge?: "chat" | "mentions" };
+type SideEntry = { label: string; view: string; icon: IconName; strong?: boolean; filter?: ActivityFilter; tab?: string; badge?: "chat" | "mentions" };
 
 /** Per-mode sidebar links. Threads and Mentions are no longer permanent global entries:
  *  Threads lives in Chats (a thread IS a conversation), Mentions in Activity (it is one
@@ -117,12 +118,19 @@ const MODE_LINKS: Record<RailMode, SideEntry[]> = {
     { label: "Packages", view: "Packages", icon: "package" },
     { label: "Dev environments", view: "Dev Environments", icon: "repo" },
   ],
+  crm: [
+    { label: "Pipeline", view: "CRM", icon: "columns", strong: true, tab: "pipeline" },
+    { label: "Kunden", view: "CRM", icon: "users", tab: "customers" },
+    { label: "Offene Deals", view: "CRM", icon: "alert", tab: "open" },
+    { label: "Abgeschlossene Deals", view: "CRM", icon: "check", tab: "closed" },
+    { label: "Kalender", view: "CRM", icon: "calendar", tab: "calendar" },
+  ],
   more: [],
 };
 
 const MODE_TITLE: Record<RailMode, string> = {
   home: "Home", chats: "Chats", activity: "Activity",
-  tasks: "Tasks", projects: "Projects", calendar: "Calendar", knowledge: "Knowledge", development: "Development", more: "More",
+  tasks: "Tasks", projects: "Projects", calendar: "Calendar", knowledge: "Knowledge", development: "Development", crm: "CRM", more: "More",
 };
 
 /** linkProps() is evaluated ONCE when a node is created, so a plain spread freezes the
@@ -467,7 +475,7 @@ export default function SpaceShell(props: {
   /** A filter entry is active when the route's filter is its own; every other entry is
    *  active when its view is the open one. Exactly one entry lights either way. */
   const entryActive = (entry: SideEntry) =>
-    entry.filter ? route().view === "Inbox" && activityFilter() === entry.filter : props.active === entry.view;
+    entry.filter ? route().view === "Inbox" && activityFilter() === entry.filter : entry.tab ? props.active === entry.view && route().tab === entry.tab : props.active === entry.view;
   /** A filter's own count, from the same source as the badge. A count of 0 is drawn
    *  without tone (`metricTone`'s rule) rather than hidden — the filter is still real. */
   const entryCount = (entry: SideEntry) =>
@@ -496,7 +504,7 @@ export default function SpaceShell(props: {
       classList={{ active: entryActive(entry) }}
       {...navLink(() => (entry.filter && entry.filter !== "all"
         ? { view: entry.view, tab: entry.filter }
-        : { view: entry.view }))}
+        : entry.tab ? { view: entry.view, tab: entry.tab } : { view: entry.view }))}
     >
       <span class="side-icon" aria-hidden="true"><Icon name={entry.icon} size={15} /></span>
       {entry.strong ? <strong>{entry.label}</strong> : entry.label}
