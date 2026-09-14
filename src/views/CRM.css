@@ -65,3 +65,14 @@
 .crm-stage-row .crm-stage-menu{flex:1;min-width:180px}
 .crm-add-location{display:inline-flex!important;align-items:center;gap:5px;height:32px;padding:0 10px;border:1px solid #00a98f;border-radius:7px;background:#e8faf6;color:#087d6d;font:600 11px var(--font-head,inherit);cursor:pointer}.crm-add-location:hover{background:#d9f6ef}
 .crm-location-actions{display:flex;align-items:center;gap:7px}
+/* ── Pipeline stage settings: phase name + phase-owned win probability ─────── */
+.crm-pipeline-summary{align-items:center;gap:12px}
+.crm-stage-settings-button{display:inline-flex!important;align-items:center;gap:5px;height:30px;padding:0 10px;border:1px solid var(--surface-border);border-radius:7px;background:var(--canvas);color:var(--text);font:inherit;font-size:11px;font-weight:600;white-space:nowrap;cursor:pointer}
+.crm-stage-settings-button:hover{border-color:var(--accent);color:var(--accent)}
+.crm-stage-settings{width:min(520px,100%)}
+.crm-stage-settings-list{display:grid;gap:6px}
+.crm-stage-settings-head{display:grid;grid-template-columns:1fr 108px;gap:9px;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted)}
+.crm-stage-settings-row{display:grid;grid-template-columns:1fr 108px;gap:9px;align-items:center}
+.crm-stage-settings-row input{box-sizing:border-box;width:100%;font:inherit;font-size:12px;color:var(--text);background:var(--ctl-bg);border:1px solid var(--surface-border);border-radius:var(--ctl-radius-sm);padding:7px 8px}
+.crm-readonly-field{display:flex;align-items:baseline;gap:8px;padding:7px 8px;border:1px dashed var(--surface-border);border-radius:var(--ctl-radius-sm);background:var(--ctl-bg);color:var(--text);font-size:13px;font-weight:650}
+.crm-readonly-field small{font-weight:400;color:var(--text-muted);font-size:10px}

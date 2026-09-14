@@ -37,10 +37,45 @@ export type Organization = {
 };
 export type Deal = {
   id: string; organizationId: string; locationId: string | null; title: string; stage: CrmStage; status: DealStatus;
-  owner: string; source: string; value: string; currency: "EUR" | "CHF" | "USD"; probability: number; expectedClose: string; labels: string[]; nextStep: string; nextStepDate: string;
+  owner: string; source: string; value: string; currency: "EUR" | "CHF" | "USD"; expectedClose: string; labels: string[]; nextStep: string; nextStepDate: string;
   notes: Note[]; activities: Activity[]; files: CrmFile[]; createdAt: string; closedAt: string | null; deletedAt: string | null;
 };
-export type CrmData = { version: 2; organizations: Organization[]; deals: Deal[]; labels: Label[] };
+export type CrmData = { version: 2; organizations: Organization[]; deals: Deal[]; labels: Label[]; pipelineStages: PipelineStage[] };
+
+/** ── Pipeline configuration ──────────────────────────────────────────────────
+ *  The win probability belongs to the STAGE, never to the single deal: a deal in
+ *  "Angebot erstellt" is exactly as likely as the pipeline says that phase is. The
+ *  stage `id` is the stable key deals are stored under and dragged between; `name`
+ *  is the display text and may be renamed freely without touching a deal. */
+export type PipelineStage = { id: CrmStage; name: string; probability: number };
+const STAGE_DEFAULTS: Array<[CrmStage, number]> = [
+  ["Non-Qualified", 10], ["Qualified", 20], ["Kontakt hergestellt", 30],
+  ["Gespräch vereinbart", 40], ["Angebot erstellt", 50], ["Abgeschlossen", 70],
+];
+/** A won deal is settled, not estimated: it counts fully, a lost one not at all. */
+export const WON_PROBABILITY = 100;
+export const LOST_PROBABILITY = 0;
+export const defaultPipelineStages = (): PipelineStage[] =>
+  STAGE_DEFAULTS.map(([id, probability]) => ({ id, name: id, probability }));
+const clampPercent = (value: unknown) => Math.max(0, Math.min(100, Math.round(Number(value) || 0)));
+/** Order and ids come from the code, name and percent from the stored document, so a
+ *  broken or stale configuration can never lose a column or orphan a deal. */
+export const normalizePipelineStages = (raw: unknown): PipelineStage[] =>
+  defaultPipelineStages().map(stage => {
+    const stored = Array.isArray(raw) ? (raw as any[]).find(item => item?.id === stage.id) : undefined;
+    if (!stored) return stage;
+    return { id: stage.id, name: String(stored.name ?? "").trim() || stage.name, probability: stored.probability === undefined ? stage.probability : clampPercent(stored.probability) };
+  });
+export const stageConfig = (data: CrmData, stage: CrmStage): PipelineStage =>
+  data.pipelineStages?.find(item => item.id === stage) ?? defaultPipelineStages().find(item => item.id === stage)!;
+export const stageName = (data: CrmData, stage: CrmStage) => stageConfig(data, stage).name;
+export const stageProbability = (data: CrmData, stage: CrmStage) => stageConfig(data, stage).probability;
+/** The only place a deal's probability exists: derived from status, then stage. */
+export const dealProbability = (data: CrmData, deal: Deal) =>
+  deal.status === "Gewonnen" ? WON_PROBABILITY : deal.status === "Verloren" ? LOST_PROBABILITY : stageProbability(data, deal.stage);
+export const setPipelineStages = (data: CrmData, stages: PipelineStage[]) => {
+  data.pipelineStages = normalizePipelineStages(stages);
+};
 
 export const LABEL_COLORS = ["#00C2A8", "#2F6BFF", "#6B3D8B", "#B2500F", "#0F1B33", "#118C5C", "#8B2E5A", "#5A6473"] as const;
 
@@ -54,7 +89,7 @@ export const emptyLocation = (name = ""): Location =>
 export const emptyOrganization = (name: string, owner = ""): Organization =>
   ({ id: id("org"), name, website: "", employees: "", decisionMaker: "", software: "", source: "", owner, labels: [], locations: [emptyLocation(name)], createdAt: now(), deletedAt: null });
 export const emptyDeal = (organizationId: string, title: string, owner = ""): Deal =>
-  ({ id: id("deal"), organizationId, locationId: null, title, stage: "Non-Qualified", status: "Offen", owner, source: "", value: "", currency: "EUR", probability: 0, expectedClose: "", labels: [], nextStep: "", nextStepDate: "", notes: [], activities: [], files: [], createdAt: now(), closedAt: null, deletedAt: null });
+  ({ id: id("deal"), organizationId, locationId: null, title, stage: "Non-Qualified", status: "Offen", owner, source: "", value: "", currency: "EUR", expectedClose: "", labels: [], nextStep: "", nextStepDate: "", notes: [], activities: [], files: [], createdAt: now(), closedAt: null, deletedAt: null });
 
 /** ── Label library ───────────────────────────────────────────────────────── */
 export const labelByName = (data: CrmData, name: string) =>
@@ -151,7 +186,7 @@ const stageOf = (value: unknown): CrmStage =>
  *  activities that v1 hung on LOCATIONS move onto the organization's first deal,
  *  because a conversation is about an opportunity, not about an address. */
 export const migrateV1 = (accounts: any[]): CrmData => {
-  const data: CrmData = { version: 2, organizations: [], deals: [], labels: [] };
+  const data: CrmData = { version: 2, organizations: [], deals: [], labels: [], pipelineStages: defaultPipelineStages() };
   const label = (name: string) => ensureLabel(data, name);
   for (const account of accounts ?? []) {
     const locations: Location[] = (account.locations ?? []).map((loc: any) => ({
@@ -175,7 +210,7 @@ export const migrateV1 = (accounts: any[]): CrmData => {
       data.deals.push({
         id: raw.id ?? id("deal"), organizationId: org.id, locationId: raw.locationId ?? null, title: raw.title || org.name,
         stage: stageOf(raw.stage), status: wasWon ? "Gewonnen" : wasLost ? "Verloren" : "Offen",
-        owner: raw.owner ?? org.owner, source: raw.source ?? org.source, value: raw.value ?? "", expectedClose: raw.expectedClose ?? "",
+        owner: raw.owner ?? org.owner, source: raw.source ?? org.source, value: raw.value ?? "", currency: raw.currency ?? "EUR", expectedClose: raw.expectedClose ?? "",
         labels: (raw.labels ?? account.labels ?? []).map(label), nextStep: raw.nextStep ?? "", nextStepDate: raw.nextStepDate ?? "",
         notes: [...(raw.notes ?? []), ...(index === 0 ? (account.locations ?? []).flatMap((loc: any) => loc.notes ?? []) : [])]
           .map((note: any) => ({ id: note.id ?? id("note"), title: note.title ?? "Notiz", body: note.body ?? "", author: note.author ?? "", createdAt: note.createdAt ?? now() })),
@@ -196,7 +231,7 @@ export const seed = (): CrmData => {
     { ...emptyLocation("Beispiel Optik · Mitte"), address: "Musterstraße 12\n10115 Berlin", employees: "7", emails: ["kontakt@beispiel-optik.de"], phones: ["030 123456"], contacts: [{ id: id("contact"), name: "Max Mustermann", role: "Inhaber", emails: ["max@beispiel-optik.de"], phones: ["030 123456"], preferred: "Telefon" }] },
     { ...emptyLocation("Beispiel Optik · Prenzlauer Berg"), address: "Musterallee 4\n10405 Berlin", employees: "5" },
   ];
-  const data: CrmData = { version: 2, organizations: [org], deals: [], labels: withStarterLabels([]) };
+  const data: CrmData = { version: 2, organizations: [org], deals: [], labels: withStarterLabels([]), pipelineStages: defaultPipelineStages() };
   org.labels = [ensureLabel(data, "Gründungskunde")];
   const deal = { ...emptyDeal(org.id, "Beispiel Optik GmbH", "Jannes"), stage: "Qualified" as CrmStage, nextStep: "Erstgespräch terminieren", labels: [...org.labels], source: "Beispieldaten" };
   data.deals.push(deal);
@@ -210,9 +245,12 @@ export const normalize = (raw: any): CrmData => {
   if (raw.version === 2 && Array.isArray(raw.organizations) && Array.isArray(raw.deals)) {
     return {
       version: 2,
+      pipelineStages: normalizePipelineStages(raw.pipelineStages),
       labels: withStarterLabels((raw.labels ?? []).map((label: any, index: number) => ({ id: label.id ?? id("label"), name: label.name ?? "", color: label.color ?? LABEL_COLORS[index % LABEL_COLORS.length] }))),
       organizations: raw.organizations.map((org: any) => ({ ...emptyOrganization(org.name ?? ""), ...org, labels: org.labels ?? [], locations: org.locations?.length ? org.locations : [emptyLocation(org.name ?? "")], deletedAt: org.deletedAt ?? null })),
-      deals: raw.deals.map((deal: any) => ({ ...emptyDeal(deal.organizationId ?? "", deal.title ?? ""), ...deal, stage: stageOf(deal.stage), status: DEAL_STATUS.includes(deal.status) ? deal.status : "Offen", labels: deal.labels ?? [], notes: deal.notes ?? [], activities: deal.activities ?? [], files: deal.files ?? [], deletedAt: deal.deletedAt ?? null, closedAt: deal.closedAt ?? null })),
+      // `probability` was a manual per-deal field in early v2 documents; the stage owns
+      // it now, so it is dropped on read rather than carried as dead weight.
+      deals: raw.deals.map(({ probability: _dropped, ...deal }: any) => ({ ...emptyDeal(deal.organizationId ?? "", deal.title ?? ""), ...deal, stage: stageOf(deal.stage), status: DEAL_STATUS.includes(deal.status) ? deal.status : "Offen", labels: deal.labels ?? [], notes: deal.notes ?? [], activities: deal.activities ?? [], files: deal.files ?? [], deletedAt: deal.deletedAt ?? null, closedAt: deal.closedAt ?? null })),
     };
   }
   if (raw.accounts) return migrateV1(raw.accounts);

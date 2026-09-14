@@ -147,3 +147,34 @@ test("activities stay deal-owned and appear in one dated feed", async () => {
   await settle();
   expect(host.querySelector(".crm-detail")?.getAttribute("aria-label")).toBe("Deal Optik Nord");
 });
+
+// The pipeline settings are the ONLY place a win probability is typed: the board
+// headings follow the display name, the stored document keeps the stable keys.
+test("pipeline settings rename a stage and set its probability; the deal panel only reads it", async () => {
+  navigate({ view: "CRM", tab: "pipeline" });
+  const host = mount();
+  await settle();
+  (host.querySelector(".crm-stage-settings-button") as HTMLElement).click();
+  await settle();
+  const form = host.querySelector(".crm-stage-settings") as HTMLFormElement;
+  const name = form.querySelector('input[aria-label="Name der Phase Qualified"]') as HTMLInputElement;
+  const percent = form.querySelector('input[aria-label="Wahrscheinlichkeit der Phase Qualified"]') as HTMLInputElement;
+  expect(percent.value).toBe("20");
+  name.value = "Erstkontakt geprüft"; name.dispatchEvent(new Event("input", { bubbles: true }));
+  percent.value = "35"; percent.dispatchEvent(new Event("input", { bubbles: true }));
+  form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+  await settle();
+  const columns = [...host.querySelectorAll(".crm-column > header strong")].map(node => node.textContent);
+  expect(columns[1]).toBe("Erstkontakt geprüft");
+  expect(host.querySelectorAll(".crm-column > header span")[1]?.textContent).toContain("35%");
+  const stored = JSON.parse(localStorage.getItem("gaia.crm.prototype.v2")!);
+  expect(stored.pipelineStages[1]).toMatchObject({ id: "Qualified", name: "Erstkontakt geprüft", probability: 35 });
+  expect(stored.deals[0].stage).toBe("Qualified");   // drag keys untouched by a rename
+  expect(stored.deals[0].probability).toBeUndefined(); // no manual per-deal probability
+  // The panel states the inherited percentage and offers no editor for it.
+  (host.querySelector(".crm-board .crm-card") as HTMLElement).click();
+  await settle();
+  const panel = host.querySelector(".crm-detail")!;
+  expect(panel.querySelector(".crm-readonly-field")?.textContent).toContain("35%");
+  expect(panel.querySelector('input[type="number"]')).toBeNull();
+});

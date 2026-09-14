@@ -1,15 +1,16 @@
-import { createEffect, createSignal, For, Show, onCleanup, onMount } from "solid-js";
+import { createEffect, createSignal, For, Index, Show, onCleanup, onMount } from "solid-js";
 import PageHeader, { Chip } from "../components/PageHeader";
 import { Icon } from "../components/Icon";
 import DateField from "../components/DateField";
 import { PillMenu } from "../components/controls";
 import { navigate, route } from "../router";
 import {
-  ACTIVITY_KINDS, CRM_STAGES, PIPELINE_STAGES, activitiesOf, closeDeal, convertToDeal, customers as customerOrgs,
-  dealsOf, emptyDeal, emptyLocation, emptyOrganization, ensureLabel, id, leads as leadOrgs, live, loadCrm,
-  moveDeal, notesOf, openDeals, organizationOf, purge, restore, saveCrm, softDeleteDeal, softDeleteOrganization, trash,
+  ACTIVITY_KINDS, CRM_STAGES, PIPELINE_STAGES, WON_PROBABILITY, activitiesOf, closeDeal, convertToDeal, customers as customerOrgs,
+  dealProbability, dealsOf, emptyDeal, emptyLocation, emptyOrganization, ensureLabel, id, leads as leadOrgs, live, loadCrm,
+  moveDeal, notesOf, openDeals, organizationOf, purge, restore, saveCrm, setPipelineStages, softDeleteDeal, softDeleteOrganization,
+  stageName, stageProbability, trash,
   type Activity, type ActivityKind, type Contact, type CrmData, type CrmStage, type Deal, type Label, type Location,
-  type Organization,
+  type Organization, type PipelineStage,
 } from "../crmStore";
 import "./CRM.css";
 
@@ -42,6 +43,7 @@ export default function CRM() {
   const [labelFilter, setLabelFilter] = createSignal<string[]>([]);
   const [filterOwner, setFilterOwner] = createSignal("Alle");
   const [newOpen, setNewOpen] = createSignal(false);
+  const [stageSettingsOpen, setStageSettingsOpen] = createSignal(false);
   const [tab, setTab] = createSignal<CrmTab>(tabOf(route().tab));
   createEffect(() => setTab(tabOf(route().tab)));
   createEffect(() => saveCrm(data()));
@@ -142,6 +144,9 @@ export default function CRM() {
       : tab() === "customers" ? customerOrgs(data()).filter(orgMatches).length
         : tab() === "trash" ? trash(data()).deals.length + trash(data()).organizations.length
           : tab() === "activities" ? activityFeed().length : listFor(tab()).length;
+  /** Weighting reads the stage, never the deal: one source of truth for the forecast. */
+  const probabilityOf = (stage: CrmStage) => stageProbability(data(), stage);
+  const weighted = (deal: Deal) => dealAmount(deal) * dealProbability(data(), deal) / 100;
   const activityFeed = () => live(data().deals).filter(dealMatches)
     .flatMap(deal => deal.activities.map(activity => ({ deal, activity })))
     .sort((a, b) => (a.activity.dueDate || "9999").localeCompare(b.activity.dueDate || "9999"));
@@ -155,19 +160,21 @@ export default function CRM() {
       <button class="primary" onClick={() => setNewOpen(true)}><Icon name="plus" size={16} /> Organisation</button>
     </nav>
     <Show when={newOpen()}><NewOrganization onClose={() => setNewOpen(false)} onSave={addOrganization} /></Show>
+    <Show when={stageSettingsOpen()}><PipelineSettings stages={data().pipelineStages} onClose={() => setStageSettingsOpen(false)} onSave={stages => { mutate(draft => setPipelineStages(draft, stages)); setStageSettingsOpen(false); }} /></Show>
     <Show when={drag()}>{active => <>
       <div class="crm-drag-ghost" style={{ left: `${active().x + 14}px`, top: `${active().y + 14}px` }}>{active().kind === "deal" ? "Deal verschieben" : "Lead umwandeln"}</div>
     </>}</Show>
 
     <Show when={tab() === "pipeline"}>
       <section class="crm-pipeline">
-        <div class="crm-pipeline-summary"><span><strong>{money(boardDeals().reduce((sum, deal) => sum + dealAmount(deal), 0))}</strong> Gesamtwert · <strong>{money(boardDeals().reduce((sum, deal) => sum + dealAmount(deal) * deal.probability / 100, 0))}</strong> gewichteter Pipelinewert · {boardDeals().length} offene Deals</span><span>Pipeline: Vertrieb</span></div>
+        <div class="crm-pipeline-summary"><span><strong>{money(boardDeals().reduce((sum, deal) => sum + dealAmount(deal), 0))}</strong> Gesamtwert · <strong>{money(boardDeals().reduce((sum, deal) => sum + weighted(deal), 0))}</strong> gewichteter Pipelinewert · {boardDeals().length} offene Deals</span>
+          <button class="ghost small crm-stage-settings-button" onClick={() => setStageSettingsOpen(true)}><Icon name="settings" size={14} /> Pipeline-Einstellungen</button></div>
         <div class="crm-board" aria-label="Vertriebspipeline">
           <For each={PIPELINE_STAGES}>{stage => {
             const inStage = () => boardDeals().filter(deal => deal.stage === stage);
             return <section class="crm-column" data-crm-stage={stage} classList={{ "is-drop-target": dragOverStage() === stage }}>
-              <header><strong>{stage}</strong><span>{inStage().length} · {money(inStage().reduce((sum, deal) => sum + dealAmount(deal) * deal.probability / 100, 0))} gewichtet</span></header>
-              <div class="crm-column-cards"><For each={inStage()}>{deal => <DealCard deal={deal} org={orgOf(deal)} library={labels()} onPointerDown={startDrag({ kind: "deal", id: deal.id })} onOpen={() => openRecord({ kind: "deal", id: deal.id })} />}</For></div>
+              <header><strong>{stageName(data(), stage)}</strong><span>{inStage().length} · {probabilityOf(stage)}% · {money(inStage().reduce((sum, deal) => sum + weighted(deal), 0))} gewichtet</span></header>
+              <div class="crm-column-cards"><For each={inStage()}>{deal => <DealCard deal={deal} org={orgOf(deal)} library={labels()} probability={probabilityOf(deal.stage)} onPointerDown={startDrag({ kind: "deal", id: deal.id })} onOpen={() => openRecord({ kind: "deal", id: deal.id })} />}</For></div>
             </section>;
           }}</For>
         </div>
@@ -216,7 +223,7 @@ export default function CRM() {
           <For each={trash(data()).organizations}>{org => <div class="crm-trash-row"><span><strong>{org.name}</strong><small>Organisation · gelöscht {stamp(org.deletedAt!)}</small></span>
             <button class="ghost small" onClick={() => mutate(draft => restore(draft, org.id))}>Wiederherstellen</button>
             <button class="ghost small danger" onClick={() => mutate(draft => purge(draft, org.id))}>Endgültig löschen</button></div>}</For>
-          <For each={trash(data()).deals.filter(deal => !trash(data()).organizations.some(org => org.id === deal.organizationId))}>{deal => <div class="crm-trash-row"><span><strong>{deal.title}</strong><small>Deal · {deal.stage} · gelöscht {stamp(deal.deletedAt!)}</small></span>
+          <For each={trash(data()).deals.filter(deal => !trash(data()).organizations.some(org => org.id === deal.organizationId))}>{deal => <div class="crm-trash-row"><span><strong>{deal.title}</strong><small>Deal · {stageName(data(), deal.stage)} · gelöscht {stamp(deal.deletedAt!)}</small></span>
             <button class="ghost small" onClick={() => mutate(draft => restore(draft, deal.id))}>Wiederherstellen</button>
             <button class="ghost small danger" onClick={() => mutate(draft => purge(draft, deal.id))}>Endgültig löschen</button></div>}</For>
         </div>
@@ -297,13 +304,13 @@ function LabelPicker(props: { label: string; selected: string[]; library: Label[
   </div>;
 }
 
-function DealCard(props: { deal: Deal; org: Organization | undefined; library: Label[]; onPointerDown: (event: PointerEvent) => void; onOpen: () => void }) {
+function DealCard(props: { deal: Deal; org: Organization | undefined; library: Label[]; probability: number; onPointerDown: (event: PointerEvent) => void; onOpen: () => void }) {
   return <div class="crm-card" role="button" tabindex="0" onPointerDown={props.onPointerDown} onClick={props.onOpen}>
     <strong>{props.deal.title}</strong>
     <span class="crm-card-account">{props.org?.name ?? "Ohne Organisation"}</span>
     <LabelChips ids={[...props.deal.labels, ...(props.org?.labels ?? []).filter(labelId => !props.deal.labels.includes(labelId))]} library={props.library} />
     <Show when={props.deal.nextStep}><span class="crm-card-next"><Icon name="alert" size={14} />{props.deal.nextStep}</span></Show>
-    <footer><span>{props.deal.owner || "Nicht zugeteilt"}</span><span>{money(dealAmount(props.deal), props.deal.currency)}<Show when={props.deal.probability > 0}> · {props.deal.probability}%</Show></span></footer>
+    <footer><span>{props.deal.owner || "Nicht zugeteilt"}</span><span>{money(dealAmount(props.deal), props.deal.currency)}<Show when={props.probability > 0}> · {props.probability}%</Show></span></footer>
   </div>;
 }
 
@@ -315,7 +322,7 @@ function DealTable(props: { title: string; deals: () => Deal[]; data: () => CrmD
       <For each={props.deals()}>{deal => <button onClick={() => props.onOpen(deal.id)}>
         <strong>{deal.title}</strong>
         <span class="crm-link" onClick={event => { event.stopPropagation(); const org = organizationOf(props.data(), deal); if (org) props.onOpenOrg(org.id); }}>{organizationOf(props.data(), deal)?.name ?? "—"}</span>
-        <span class="crm-stage-chip">{deal.status === "Offen" ? deal.stage : deal.status}</span>
+        <span class="crm-stage-chip">{deal.status === "Offen" ? stageName(props.data(), deal.stage) : deal.status}</span>
         <span>{deal.nextStep || "—"}</span><span>{deal.owner || "—"}</span>
       </button>}</For>
     </div>
@@ -352,6 +359,31 @@ function NewOrganization(props: { onClose: () => void; onSave: (name: string, ow
   </form></div>;
 }
 
+/** Pipeline settings: rename a phase and set what winning from there is worth. Ids and
+ *  order are fixed, so an edit here can never strand a deal or reshuffle the board. */
+function PipelineSettings(props: { stages: PipelineStage[]; onClose: () => void; onSave: (stages: PipelineStage[]) => void }) {
+  const [draft, setDraft] = createSignal<PipelineStage[]>(props.stages.map(stage => ({ ...stage })));
+  const patch = (stageId: CrmStage, values: Partial<PipelineStage>) =>
+    setDraft(current => current.map(stage => stage.id === stageId ? { ...stage, ...values } : stage));
+  return <div class="crm-overlay" role="presentation"><form class="crm-modal crm-stage-settings" onSubmit={e => { e.preventDefault(); props.onSave(draft()); }}>
+    <header><h2>Pipeline-Einstellungen</h2><button type="button" class="icon-button" onClick={props.onClose}><Icon name="close" /></button></header>
+    <p>Die Gewinnwahrscheinlichkeit gehört zur Phase: Jeder Deal in einer Phase rechnet mit diesem Prozentsatz. Gewonnene Deals zählen automatisch mit {WON_PROBABILITY} %.</p>
+    <div class="crm-stage-settings-list">
+      <div class="crm-stage-settings-head"><span>Phase</span><span>Wahrscheinlichkeit</span></div>
+      {/* Index, not For: the rows are a fixed list of stages being EDITED, so a
+          keystroke must patch a field, never rebuild the row and drop the caret. */}
+      <Index each={draft()}>{stage => <div class="crm-stage-settings-row">
+        <input aria-label={`Name der Phase ${stage().id}`} value={stage().name} onInput={e => patch(stage().id, { name: e.currentTarget.value })} />
+        <div class="crm-percent-input">
+          <input type="number" min="0" max="100" step="5" aria-label={`Wahrscheinlichkeit der Phase ${stage().id}`} value={stage().probability}
+            onInput={e => patch(stage().id, { probability: Math.max(0, Math.min(100, Math.round(Number(e.currentTarget.value) || 0))) })} /><span>%</span>
+        </div>
+      </div>}</Index>
+    </div>
+    <footer><button type="button" class="ghost" onClick={props.onClose}>Abbrechen</button><button class="primary">Speichern</button></footer>
+  </form></div>;
+}
+
 const Field = (props: { label: string; value: string; onChange: (value: string) => void }) =>
   <label>{props.label}<input value={props.value} onInput={e => props.onChange(e.currentTarget.value)} /></label>;
 
@@ -371,7 +403,7 @@ function DealPanel(props: { dealId: string; data: () => CrmData; onMutate: (fn: 
       <h1>{current().title}</h1><span class="crm-record-kind">Deal</span>
     </div><button class="icon-button" onClick={props.onClose} aria-label="Deal schließen"><Icon name="close" /></button></header>
     <div class="crm-stage-row">
-      <PillMenu class="crm-field-menu crm-stage-menu" label="Pipeline-Phase" value={current().stage} options={CRM_STAGES.map(stage => ({ value: stage, label: stage }))} onChange={stage => props.onMutate(draft => moveDeal(draft, props.dealId, stage as CrmStage))} />
+      <PillMenu class="crm-field-menu crm-stage-menu" label="Pipeline-Phase" value={current().stage} options={CRM_STAGES.map(stage => ({ value: stage, label: `${stageName(props.data(), stage)} · ${stageProbability(props.data(), stage)}%` }))} onChange={stage => props.onMutate(draft => moveDeal(draft, props.dealId, stage as CrmStage))} />
       <button class="ghost success" style={{ background: "#e6f6e8", color: "#118c5c", "border-color": "#118c5c" }} onClick={() => { props.onMutate(draft => closeDeal(draft, props.dealId, "Gewonnen")); props.onClose(); navigate({ view: "CRM", tab: "won" }); }}>Gewonnen</button>
       <button class="ghost danger" onClick={() => { props.onMutate(draft => closeDeal(draft, props.dealId, "Verloren")); props.onClose(); navigate({ view: "CRM", tab: "lost" }); }}>Verloren</button>
       <button class="ghost danger" onClick={() => { props.onMutate(draft => softDeleteDeal(draft, props.dealId)); props.onClose(); }} aria-label="Deal in den Papierkorb"><Icon name="trash" size={15} /></button>
@@ -384,7 +416,9 @@ function DealPanel(props: { dealId: string; data: () => CrmData; onMutate: (fn: 
         <Field label="Titel" value={current().title} onChange={title => patch({ title })} />
         <label>Deal-Wert<input inputmode="decimal" value={current().value} onInput={e => patch({ value: e.currentTarget.value.replace(/[^0-9,.]/g, "") })} placeholder="z. B. 12.500" /></label>
         <label>Währung<select value={current().currency} onChange={e => patch({ currency: e.currentTarget.value as Deal["currency"] })}><option value="EUR">EUR (€)</option><option value="CHF">CHF</option><option value="USD">USD ($)</option></select></label>
-        <label>Gewinnwahrscheinlichkeit<div class="crm-percent-input"><input type="number" min="0" max="100" value={current().probability} onInput={e => patch({ probability: Math.max(0, Math.min(100, Number(e.currentTarget.value) || 0)) })} /><span>%</span></div><small>Gewichteter Deal-Wert: {money(dealAmount(current()) * current().probability / 100, current().currency)}</small></label>
+        {/* Probability is not a deal field: it is the phase's, so moving the card is the
+            only honest way to change it. Won counts fully, lost not at all. */}
+        <label>Gewinnwahrscheinlichkeit<output class="crm-readonly-field">{dealProbability(props.data(), current())}%<small>{current().status === "Offen" ? `aus Phase „${stageName(props.data(), current().stage)}“` : `Status ${current().status}`}</small></output><small>Gewichteter Deal-Wert: {money(dealAmount(current()) * dealProbability(props.data(), current()) / 100, current().currency)}</small></label>
         <Field label="Quelle" value={current().source} onChange={source => patch({ source })} />
         <label>Verantwortliche Person<PillMenu class="crm-field-menu" label="Verantwortliche Person" value={current().owner} options={CRM_OWNERS.map(owner => ({ value: owner === "Nicht zugeteilt" ? "" : owner, label: owner }))} onChange={owner => patch({ owner })} /></label>
         <label>Erwarteter Abschluss<DateField label="Erwarteter Abschluss" value={current().expectedClose} onChange={expectedClose => patch({ expectedClose })} placeholder="Datum wählen" /></label>
@@ -475,7 +509,7 @@ function OrganizationPanel(props: { orgId: string; data: () => CrmData; onMutate
     <Show when={tab() === "Deals"}><div class="crm-detail-body"><section class="crm-section">
       <h2>Deals dieser Organisation</h2>
       <For each={deals()}>{deal => <button class="crm-linked-row" onClick={() => props.onOpenDeal(deal.id)}>
-        <span><strong>{deal.title}</strong><small>{deal.status === "Offen" ? deal.stage : deal.status} · {deal.owner || "Nicht zugeteilt"}</small></span>
+        <span><strong>{deal.title}</strong><small>{deal.status === "Offen" ? stageName(props.data(), deal.stage) : deal.status} · {deal.owner || "Nicht zugeteilt"}</small></span>
         <span class="crm-stage-chip">{deal.notes.length} Notiz(en) · {deal.activities.length} Aktivität(en)</span>
       </button>}</For>
       <Show when={!deals().length}><p class="crm-empty">Noch kein Deal. „Deal anlegen“ startet eine Verkaufschance, ohne diesen Datensatz zu verändern.</p></Show>

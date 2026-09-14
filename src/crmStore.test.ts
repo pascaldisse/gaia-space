@@ -1,7 +1,8 @@
 import { expect, test } from "bun:test";
 import {
-  activitiesOf, closeDeal, convertToDeal, customers, dealsOf, ensureLabel, labelsOf, leads, migrateV1, moveDeal,
-  normalize, openDeals, purge, restore, seed, softDeleteDeal, softDeleteOrganization, trash, type CrmData,
+  activitiesOf, closeDeal, convertToDeal, customers, dealProbability, dealsOf, defaultPipelineStages, ensureLabel, labelsOf,
+  leads, migrateV1, moveDeal, normalize, openDeals, purge, restore, seed, setPipelineStages, softDeleteDeal,
+  softDeleteOrganization, stageName, stageProbability, trash, type CrmData,
 } from "./crmStore";
 
 const v1Account = (over: Record<string, unknown> = {}) => ({
@@ -128,7 +129,7 @@ test("closing and moving a deal flips status without inventing a stage", () => {
 });
 
 test("an organization without a won deal is a lead; converting adds a deal, not a record", () => {
-  const data: CrmData = { version: 2, organizations: [], deals: [], labels: [] };
+  const data: CrmData = { version: 2, organizations: [], deals: [], labels: [], pipelineStages: defaultPipelineStages() };
   const fresh = seed();
   data.organizations.push(fresh.organizations[0]);
   expect(leads(data)).toHaveLength(1);
@@ -146,4 +147,52 @@ test("organization activity rollup is derived from its deals", () => {
   const orgId = data.organizations[0].id;
   expect(activitiesOf(data, orgId).map(entry => entry.activity.title)).toEqual(["Rückruf"]);
   expect(activitiesOf(data, orgId)[0].deal.id).toBe(data.deals[0].id);
+});
+
+// ── The pipeline owns the win probability ───────────────────────────────────
+test("stage defaults are the pipeline's, and a deal reads its probability from its stage", () => {
+  const data = seed();
+  expect(data.pipelineStages.map(stage => [stage.id, stage.probability])).toEqual([
+    ["Non-Qualified", 10], ["Qualified", 20], ["Kontakt hergestellt", 30],
+    ["Gespräch vereinbart", 40], ["Angebot erstellt", 50], ["Abgeschlossen", 70],
+  ]);
+  const deal = data.deals[0];
+  expect(dealProbability(data, deal)).toBe(20);            // Qualified
+  moveDeal(data, deal.id, "Angebot erstellt");
+  expect(dealProbability(data, data.deals[0])).toBe(50);
+  closeDeal(data, deal.id, "Gewonnen");
+  expect(dealProbability(data, data.deals[0])).toBe(100);  // won is settled, not estimated
+  closeDeal(data, deal.id, "Verloren");
+  expect(dealProbability(data, data.deals[0])).toBe(0);
+});
+
+test("renaming a stage changes the display name only; deals keep the stable stage key", () => {
+  const data = seed();
+  setPipelineStages(data, data.pipelineStages.map(stage => stage.id === "Qualified" ? { ...stage, name: "Erstkontakt geprüft", probability: 35 } : stage));
+  expect(data.deals[0].stage).toBe("Qualified");
+  expect(stageName(data, "Qualified")).toBe("Erstkontakt geprüft");
+  expect(stageProbability(data, "Qualified")).toBe(35);
+  // Persisting and reading back keeps the configuration and clamps junk percentages.
+  const round = normalize(JSON.parse(JSON.stringify(data)));
+  expect(stageName(round, "Qualified")).toBe("Erstkontakt geprüft");
+  expect(stageProbability(round, "Qualified")).toBe(35);
+});
+
+test("a stored document without or with a broken pipeline configuration falls back per stage", () => {
+  const base = seed();
+  const raw: any = JSON.parse(JSON.stringify(base));
+  delete raw.pipelineStages;
+  expect(normalize(raw).pipelineStages).toEqual(defaultPipelineStages());
+  const broken = normalize({ ...raw, pipelineStages: [{ id: "Unbekannt", name: "X", probability: 5 }, { id: "Abgeschlossen", name: "", probability: 480 }] });
+  expect(broken.pipelineStages.map(stage => stage.id)).toEqual(defaultPipelineStages().map(stage => stage.id));
+  expect(stageName(broken, "Abgeschlossen")).toBe("Abgeschlossen");
+  expect(stageProbability(broken, "Abgeschlossen")).toBe(100);
+});
+
+test("a legacy per-deal probability is dropped on read: the stage is the only source", () => {
+  const raw: any = JSON.parse(JSON.stringify(seed()));
+  raw.deals[0].probability = 90;
+  const data = normalize(raw);
+  expect("probability" in data.deals[0]).toBe(false);
+  expect(dealProbability(data, data.deals[0])).toBe(20);
 });
