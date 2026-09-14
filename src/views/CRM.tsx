@@ -274,7 +274,7 @@ function LabelPicker(props: { label: string; selected: string[]; library: Label[
     </button>
     <Show when={open()}>
       <div class="crm-labelpicker-menu" role="listbox">
-        <input autofocus value={search()} onInput={e => setSearch(e.currentTarget.value)} placeholder="Label suchen…" aria-label="Label suchen" />
+        <input autofocus value={search()} onInput={e => setSearch(e.currentTarget.value)} placeholder="Suchen oder neues Label eingeben…" aria-label="Label suchen oder erstellen" />
         <div class="crm-labelpicker-options">
           <For each={matches()}>{label => <label class="crm-labelpicker-option">
             <input type="checkbox" checked={props.selected.includes(label.id)} onChange={() => toggle(label.id)} />
@@ -282,6 +282,7 @@ function LabelPicker(props: { label: string; selected: string[]; library: Label[
           </label>}</For>
           <Show when={!matches().length && !search().trim()}><p class="crm-empty">Noch keine Labels angelegt.</p></Show>
         </div>
+        <Show when={props.onCreate && !search().trim()}><p class="crm-labelpicker-hint">Neuen Namen eingeben, um ein Label anzulegen.</p></Show>
         <Show when={props.onCreate && search().trim() && !exact()}>
           <button type="button" class="crm-labelpicker-create" onClick={() => { props.onCreate!(search().trim()); setSearch(""); }}>
             <Icon name="plus" size={13} /> „{search().trim()}“ anlegen

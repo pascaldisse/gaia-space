@@ -61,6 +61,9 @@ export const labelByName = (data: CrmData, name: string) =>
   data.labels.find(label => label.name.toLocaleLowerCase("de") === name.trim().toLocaleLowerCase("de"));
 export const makeLabel = (name: string, index: number): Label =>
   ({ id: id("label"), name: name.trim(), color: LABEL_COLORS[index % LABEL_COLORS.length] });
+
+const STARTER_LABELS: Array<[string, string]> = [["Heißer Lead", "#B2500F"], ["Warmer Lead", "#E0A100"], ["Kalter Lead", "#2F6BFF"], ["Empfohlen", "#6B3D8B"], ["Gründungskunde", "#00C2A8"]];
+const withStarterLabels = (labels: Label[]) => [...labels, ...STARTER_LABELS.filter(([name]) => !labels.some(label => label.name.toLocaleLowerCase("de") === name.toLocaleLowerCase("de"))).map(([name, color]) => ({ id: id("label"), name, color }))];
 /** Names a label once, centrally: existing name -> existing id, new name -> new entry. */
 export const ensureLabel = (data: CrmData, name: string): string => {
   const existing = labelByName(data, name);
@@ -182,6 +185,7 @@ export const migrateV1 = (accounts: any[]): CrmData => {
       });
     });
   }
+  data.labels = withStarterLabels(data.labels);
   return data;
 };
 
@@ -192,7 +196,7 @@ export const seed = (): CrmData => {
     { ...emptyLocation("Beispiel Optik · Mitte"), address: "Musterstraße 12\n10115 Berlin", employees: "7", emails: ["kontakt@beispiel-optik.de"], phones: ["030 123456"], contacts: [{ id: id("contact"), name: "Max Mustermann", role: "Inhaber", emails: ["max@beispiel-optik.de"], phones: ["030 123456"], preferred: "Telefon" }] },
     { ...emptyLocation("Beispiel Optik · Prenzlauer Berg"), address: "Musterallee 4\n10405 Berlin", employees: "5" },
   ];
-  const data: CrmData = { version: 2, organizations: [org], deals: [], labels: [] };
+  const data: CrmData = { version: 2, organizations: [org], deals: [], labels: withStarterLabels([]) };
   org.labels = [ensureLabel(data, "Gründungskunde")];
   const deal = { ...emptyDeal(org.id, "Beispiel Optik GmbH", "Jannes"), stage: "Qualified" as CrmStage, nextStep: "Erstgespräch terminieren", labels: [...org.labels], source: "Beispieldaten" };
   data.deals.push(deal);
@@ -206,7 +210,7 @@ export const normalize = (raw: any): CrmData => {
   if (raw.version === 2 && Array.isArray(raw.organizations) && Array.isArray(raw.deals)) {
     return {
       version: 2,
-      labels: (raw.labels ?? []).map((label: any, index: number) => ({ id: label.id ?? id("label"), name: label.name ?? "", color: label.color ?? LABEL_COLORS[index % LABEL_COLORS.length] })),
+      labels: withStarterLabels((raw.labels ?? []).map((label: any, index: number) => ({ id: label.id ?? id("label"), name: label.name ?? "", color: label.color ?? LABEL_COLORS[index % LABEL_COLORS.length] }))),
       organizations: raw.organizations.map((org: any) => ({ ...emptyOrganization(org.name ?? ""), ...org, labels: org.labels ?? [], locations: org.locations?.length ? org.locations : [emptyLocation(org.name ?? "")], deletedAt: org.deletedAt ?? null })),
       deals: raw.deals.map((deal: any) => ({ ...emptyDeal(deal.organizationId ?? "", deal.title ?? ""), ...deal, stage: stageOf(deal.stage), status: DEAL_STATUS.includes(deal.status) ? deal.status : "Offen", labels: deal.labels ?? [], notes: deal.notes ?? [], activities: deal.activities ?? [], files: deal.files ?? [], deletedAt: deal.deletedAt ?? null, closedAt: deal.closedAt ?? null })),
     };
