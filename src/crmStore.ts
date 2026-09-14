@@ -2,6 +2,8 @@ export const CRM_STAGES = [
   "Non-Qualified", "Qualified", "Kontakt hergestellt", "Gespräch vereinbart", "Angebot erstellt", "Verhandlung", "Gewonnen",
 ] as const;
 export type CrmStage = typeof CRM_STAGES[number];
+/** Won is terminal: it belongs in the deals archive, not in an active pipeline column. */
+export const PIPELINE_STAGES = CRM_STAGES.filter(stage => stage !== "Gewonnen") as Exclude<CrmStage, "Gewonnen">[];
 export type ActivityKind = "Anruf" | "E-Mail" | "Besuch" | "Video-Call" | "Aufgabe";
 export type Contact = { id: string; name: string; role: string; emails: string[]; phones: string[]; preferred: string };
 export type Note = { id: string; body: string; author: string; createdAt: string };
