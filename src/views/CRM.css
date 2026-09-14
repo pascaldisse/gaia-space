@@ -275,3 +275,5 @@
 .crm-import-check input{width:16px;height:16px}
 .crm-import-note{font-size:11px}
 .crm-import-more{padding:9px 12px;border-top:1px solid var(--surface-border)}
+/* Toolbar action: same control geometry as filters and the organization action. */
+.crm-import-trigger{display:inline-flex!important;align-items:center!important;gap:6px;height:38px!important;padding:0 12px!important;border:1px solid var(--surface-border);border-radius:8px;background:var(--canvas);color:var(--text);font:600 12px var(--font-head,inherit);white-space:nowrap;cursor:pointer}.crm-import-trigger:hover{border-color:var(--accent);background:var(--accent-soft);color:var(--accent-text)}.crm-import-trigger .icon{flex:none}

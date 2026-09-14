@@ -200,7 +200,7 @@ export default function CRM() {
       {/* Importing is a LEAD action: it is offered where leads are triaged, and it names
           what it does — a file becomes records in this inbox, not "data" somewhere. */}
       <Show when={tab() === "leads"}>
-        <button class="ghost" onClick={() => setImportOpen(true)}><Icon name="upload" size={16} /> Importieren</button>
+        <button class="crm-import-trigger" onClick={() => setImportOpen(true)}><Icon name="upload" size={16} /> Importieren</button>
       </Show>
       <button class="primary" onClick={() => setNewOpen(true)}><Icon name="plus" size={16} /> Organisation</button>
     </nav>
