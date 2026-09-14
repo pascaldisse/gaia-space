@@ -1,5 +1,5 @@
 export const CRM_STAGES = [
-  "Non-Qualified", "Qualified", "Kontakt hergestellt", "Gespräch vereinbart", "Angebot erstellt", "Verhandlung", "Gewonnen",
+  "Non-Qualified", "Qualified", "Kontakt hergestellt", "Gespräch vereinbart", "Angebot erstellt", "Abgeschlossen", "Gewonnen",
 ] as const;
 export type CrmStage = typeof CRM_STAGES[number];
 /** Won is terminal: it belongs in the deals archive, not in an active pipeline column. */
@@ -23,6 +23,6 @@ const seed = (): Account[] => [{
     { id: "location-example-2", name: "Beispiel Optik · Prenzlauer Berg", stage: "Kontakt hergestellt", status: "Aktiv", address: "Musterallee 4\n10405 Berlin", employees: "5", emails: [], phones: [], nextStep: "Follow-up senden", nextStepDate: "", contacts: [], notes: [], activities: [], files: [] },
   ],
 }];
-export const loadCrm = (): Account[] => { try { const raw = localStorage.getItem(KEY); const accounts: Account[] = raw ? JSON.parse(raw) : seed(); return accounts.map(account => ({ ...account, locationCount: account.locations.length, stage: account.stage ?? account.locations[0]?.stage ?? "Non-Qualified", status: account.status ?? account.locations[0]?.status ?? "Aktiv", dealScope: account.dealScope ?? "Betrieb", locations: account.locations.map(location => ({ ...location, employees: location.employees ?? "" })) })); } catch { return seed(); } };
+export const loadCrm = (): Account[] => { try { const raw = localStorage.getItem(KEY); const accounts: Account[] = raw ? JSON.parse(raw) : seed(); const stageOf = (stage: string | undefined): CrmStage => stage === "Verhandlung" ? "Abgeschlossen" : (CRM_STAGES.includes(stage as CrmStage) ? stage as CrmStage : "Non-Qualified"); return accounts.map(account => ({ ...account, locationCount: account.locations.length, stage: stageOf(account.stage ?? account.locations[0]?.stage), status: account.status ?? account.locations[0]?.status ?? "Aktiv", dealScope: account.dealScope ?? "Betrieb", locations: account.locations.map(location => ({ ...location, stage: stageOf(location.stage), employees: location.employees ?? "" })) })); } catch { return seed(); } };
 export const saveCrm = (accounts: Account[]) => localStorage.setItem(KEY, JSON.stringify(accounts));
 export const emptyLocation = (name = "") : Location => ({ id: id("location"), name, stage: "Non-Qualified", status: "Aktiv", address: "", employees: "", emails: [], phones: [], nextStep: "", nextStepDate: "", contacts: [], notes: [], activities: [], files: [] });
