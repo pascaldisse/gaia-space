@@ -16,14 +16,15 @@
  *  because an activity may be delegated away from the deal it belongs to. */
 
 import {
-  ACTIVITY_KINDS, activityEntries, activityState, dayKey, dealProbability, live, organizationOf,
+  ACTIVITY_KINDS, activityEntries, activityState, dayKey, dealAmount, dealProbability, live, organizationOf,
   stageConfig, stageName, PIPELINE_STAGES,
   type ActivityEntry, type ActivityKind, type ActivityState, type CrmData, type CrmStage, type Deal,
 } from "./crmStore";
 
-/** The value written on a deal is free text ("12.000 €"); this is the one reading of it. */
-export const dealAmount = (deal: Deal): number =>
-  Number(String(deal.value ?? "").replace(/[^0-9,.-]/g, "").replace(/\.(?=\d{3}\b)/g, "").replace(",", ".")) || 0;
+/** The value written on a deal is free text ("12.000 €"); the one reading of it lives
+ *  in the store (§crmStore.dealAmount) and is re-exported here, so a report and a board
+ *  column cannot drift apart into two different amounts for the same deal. */
+export { dealAmount } from "./crmStore";
 
 /** `forwardOpen` marks the backward-looking PRESETS ("last 90 days"). A deal is dated
  *  by something that has happened, so its end is real; an ACTIVITY is dated by a plan,

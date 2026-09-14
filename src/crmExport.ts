@@ -21,7 +21,7 @@
  *  INCLUDING deleted records — because a backup that silently drops the trash is not a
  *  backup. Every other scope exports live records only. */
 import {
-  activityState, customers, daysInStage, dealProbability, isCustomer, live, LEAD_STATE_LABELS,
+  activityState, customers, daysInStage, dealAmount, dealProbability, isCustomer, live, LEAD_STATE_LABELS,
   type Activity, type CrmData, type CrmFile, type Deal, type Organization,
 } from "./crmStore";
 
@@ -203,7 +203,8 @@ export const deStamp = (value: string | null | undefined): string => {
 };
 /** Decimal comma, because a German Excel reads "1200.5" as text and "1200,5" as money. */
 export const deNumber = (value: number) => String(value).replace(".", ",");
-const amountOf = (deal: Deal) => Number(String(deal.value ?? "").replace(/[^0-9,.-]/g, "").replace(",", ".")) || 0;
+/** The exported amount is the SAME number the board and the reports show (§dealAmount). */
+const amountOf = dealAmount;
 
 const orgStatus = (data: CrmData, org: Organization) =>
   isCustomer(data, org.id) ? "Kunde" : LEAD_STATE_LABELS[org.leadState];

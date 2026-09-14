@@ -153,6 +153,15 @@ export const stageAge = (deal: Deal, at?: Date): StageAge => {
   };
 };
 
+/** ── The value of a deal, read ONCE ─────────────────────────────────────────
+ *  `value` is free text, because a salesperson types "12.500" or "12.000 €", not a
+ *  float. Reading it is therefore a decision, and it is made HERE so that board,
+ *  deal tables, export and insights can never disagree about what a deal is worth:
+ *  a dot in front of exactly three digits is a German thousands separator, a comma is
+ *  the decimal point. A second, simpler copy of this rule read "12.000 €" as twelve. */
+export const dealAmount = (deal: Pick<Deal, "value">): number =>
+  Number(String(deal.value ?? "").replace(/[^0-9,.-]/g, "").replace(/\.(?=\d{3}\b)/g, "").replace(",", ".")) || 0;
+
 export const LABEL_COLORS = ["#00C2A8", "#2F6BFF", "#6B3D8B", "#B2500F", "#0F1B33", "#118C5C", "#8B2E5A", "#5A6473"] as const;
 
 const KEY_V2 = "gaia.crm.prototype.v2";

@@ -10,7 +10,7 @@ import {
   activityState, emptyActivity, filterActivityEntries, setActivityDone,
   archiveLead, archivedLeads, convertLead, leadInbox, restoreLead,
   createDeal, createOrganization, emptyRecordInput,
-  dealProbability, dealsOf, emptyLocation, ensureLabel, id, live, loadCrm,
+  dealAmount, dealProbability, dealsOf, emptyLocation, ensureLabel, id, live, loadCrm,
   moveDeal, notesOf, openDeals, organizationOf, purge, restore, restoreActivity, saveCrm, setPipelineStages, softDeleteActivity, softDeleteDeal, softDeleteOrganization,
   purgeActivity, updateActivity, linkActivity,
   stageAge, stageName, stageProbability, trash,
@@ -28,7 +28,7 @@ import "./CRM.css";
 const split = (value: string) => value.split(/[,\n]/).map(x => x.trim()).filter(Boolean);
 const date = (value: string) => value ? new Intl.DateTimeFormat("de-DE", { dateStyle: "medium" }).format(new Date(`${value}T12:00:00`)) : "Kein Termin";
 const stamp = (value: string) => new Intl.DateTimeFormat("de-DE", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
-const dealAmount = (deal: Deal) => Number(String(deal.value).replace(/[^0-9,.-]/g, "").replace(",", ".")) || 0;
+
 const money = (amount: number, currency: Deal["currency"] = "EUR") => new Intl.NumberFormat("de-DE", { style: "currency", currency, maximumFractionDigits: 0 }).format(amount);
 
 /** The CRM's work views. Each is route state (§router.crmTabs), so the rail can
