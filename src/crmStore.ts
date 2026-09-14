@@ -37,7 +37,7 @@ export type Organization = {
 };
 export type Deal = {
   id: string; organizationId: string; locationId: string | null; title: string; stage: CrmStage; status: DealStatus;
-  owner: string; source: string; value: string; expectedClose: string; labels: string[]; nextStep: string; nextStepDate: string;
+  owner: string; source: string; value: string; currency: "EUR" | "CHF" | "USD"; probability: number; expectedClose: string; labels: string[]; nextStep: string; nextStepDate: string;
   notes: Note[]; activities: Activity[]; files: CrmFile[]; createdAt: string; closedAt: string | null; deletedAt: string | null;
 };
 export type CrmData = { version: 2; organizations: Organization[]; deals: Deal[]; labels: Label[] };
@@ -54,7 +54,7 @@ export const emptyLocation = (name = ""): Location =>
 export const emptyOrganization = (name: string, owner = ""): Organization =>
   ({ id: id("org"), name, website: "", employees: "", decisionMaker: "", software: "", source: "", owner, labels: [], locations: [emptyLocation(name)], createdAt: now(), deletedAt: null });
 export const emptyDeal = (organizationId: string, title: string, owner = ""): Deal =>
-  ({ id: id("deal"), organizationId, locationId: null, title, stage: "Non-Qualified", status: "Offen", owner, source: "", value: "", expectedClose: "", labels: [], nextStep: "", nextStepDate: "", notes: [], activities: [], files: [], createdAt: now(), closedAt: null, deletedAt: null });
+  ({ id: id("deal"), organizationId, locationId: null, title, stage: "Non-Qualified", status: "Offen", owner, source: "", value: "", currency: "EUR", probability: 0, expectedClose: "", labels: [], nextStep: "", nextStepDate: "", notes: [], activities: [], files: [], createdAt: now(), closedAt: null, deletedAt: null });
 
 /** ── Label library ───────────────────────────────────────────────────────── */
 export const labelByName = (data: CrmData, name: string) =>

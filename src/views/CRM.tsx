@@ -14,6 +14,8 @@ import "./CRM.css";
 const split = (value: string) => value.split(/[,\n]/).map(x => x.trim()).filter(Boolean);
 const date = (value: string) => value ? new Intl.DateTimeFormat("de-DE", { dateStyle: "medium" }).format(new Date(`${value}T12:00:00`)) : "Kein Termin";
 const stamp = (value: string) => new Intl.DateTimeFormat("de-DE", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
+const dealAmount = (deal: Deal) => Number(String(deal.value).replace(/[^0-9,.-]/g, "").replace(",", ".")) || 0;
+const money = (amount: number, currency: Deal["currency"] = "EUR") => new Intl.NumberFormat("de-DE", { style: "currency", currency, maximumFractionDigits: 0 }).format(amount);
 
 /** The CRM's work views. Each is route state (§router.crmTabs), so the rail can
  *  highlight one and a link opens the same surface. */
@@ -161,7 +163,7 @@ export default function CRM() {
           <For each={PIPELINE_STAGES}>{stage => {
             const inStage = () => boardDeals().filter(deal => deal.stage === stage);
             return <section class="crm-column" data-crm-stage={stage} classList={{ "is-drop-target": dragOverStage() === stage }}>
-              <header><strong>{stage}</strong><span>{inStage().length}</span></header>
+              <header><strong>{stage}</strong><span>{inStage().length} · {money(inStage().reduce((sum, deal) => sum + dealAmount(deal), 0))}</span></header>
               <div class="crm-column-cards"><For each={inStage()}>{deal => <DealCard deal={deal} org={orgOf(deal)} library={labels()} onPointerDown={startDrag({ kind: "deal", id: deal.id })} onOpen={() => openRecord({ kind: "deal", id: deal.id })} />}</For></div>
             </section>;
           }}</For>
@@ -375,7 +377,9 @@ function DealPanel(props: { dealId: string; data: () => CrmData; onMutate: (fn: 
     <Show when={tab() === "Übersicht"}><div class="crm-detail-body">
       <section class="crm-section"><h2>Deal</h2><div class="crm-fields two">
         <Field label="Titel" value={current().title} onChange={title => patch({ title })} />
-        <Field label="Wert" value={current().value} onChange={value => patch({ value })} />
+        <label>Deal-Wert<input inputmode="decimal" value={current().value} onInput={e => patch({ value: e.currentTarget.value.replace(/[^0-9,.]/g, "") })} placeholder="z. B. 12.500" /></label>
+        <label>Währung<select value={current().currency} onChange={e => patch({ currency: e.currentTarget.value as Deal["currency"] })}><option value="EUR">EUR (€)</option><option value="CHF">CHF</option><option value="USD">USD ($)</option></select></label>
+        <label>Gewinnwahrscheinlichkeit<input type="number" min="0" max="100" value={current().probability} onInput={e => patch({ probability: Math.max(0, Math.min(100, Number(e.currentTarget.value) || 0)) })} /><small>Gewichteter Wert: {money(dealAmount(current()) * current().probability / 100, current().currency)}</small></label>
         <Field label="Quelle" value={current().source} onChange={source => patch({ source })} />
         <Field label="Verantwortliche Person" value={current().owner} onChange={owner => patch({ owner })} />
         <label>Erwarteter Abschluss<input type="date" value={current().expectedClose} onInput={e => patch({ expectedClose: e.currentTarget.value })} /></label>
