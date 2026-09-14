@@ -311,15 +311,20 @@ function DealCard(props: { deal: Deal; org: Organization | undefined; library: L
 }
 
 function DealTable(props: { title: string; deals: () => Deal[]; data: () => CrmData; onOpen: (dealId: string) => void; onOpenOrg: (orgId: string) => void }) {
-  return <section class="crm-directory">
-    <header><div><h2>{props.title}</h2><p>Ein Deal ist die Verkaufschance; die Organisation dahinter bleibt bestehen.</p></div><span>{props.deals().length}</span></header>
-    <div class="crm-directory-table">
-      <div class="crm-directory-head"><span>Deal</span><span>Organisation</span><span>Phase</span><span>Nächster Schritt</span><span>Verantwortlich</span></div>
+  const outcome = () => props.deals()[0]?.status;
+  const total = () => props.deals().reduce((sum, deal) => sum + dealAmount(deal), 0);
+  const outcomeLabel = () => outcome() === "Gewonnen" ? "Gewonnener Deal-Wert" : outcome() === "Verloren" ? "Verlorenes Deal-Volumen" : "Offener Deal-Wert";
+  return <section class="crm-directory crm-deal-directory" classList={{ "is-won": outcome() === "Gewonnen", "is-lost": outcome() === "Verloren" }}>
+    <header><div><h2>{props.title}</h2><p>Ein Deal ist die Verkaufschance; die Organisation dahinter bleibt bestehen.</p></div><span>{props.deals().length} Deal{props.deals().length === 1 ? "" : "s"}</span></header>
+    <Show when={outcome() !== "Offen"}><div class="crm-outcome-summary"><span>{outcome() === "Gewonnen" ? "✓" : "×"} {outcome()}</span><strong>{money(total())}</strong><small>{outcomeLabel()}</small></div></Show>
+    <div class="crm-directory-table crm-deal-table">
+      <div class="crm-directory-head"><span>Deal</span><span>Organisation</span><span>Status</span><span>Deal-Wert</span><span>Abgeschlossen am</span><span>Verantwortlich</span></div>
       <For each={props.deals()}>{deal => <button onClick={() => props.onOpen(deal.id)}>
         <strong>{deal.title}</strong>
         <span class="crm-link" onClick={event => { event.stopPropagation(); const org = organizationOf(props.data(), deal); if (org) props.onOpenOrg(org.id); }}>{organizationOf(props.data(), deal)?.name ?? "—"}</span>
         <span class="crm-stage-chip">{deal.status === "Offen" ? stageName(props.data(), deal.stage) : deal.status}</span>
-        <span>{deal.nextStep || "—"}</span><span>{deal.owner || "—"}</span>
+        <strong class="crm-deal-value">{money(dealAmount(deal), deal.currency)}</strong>
+        <span>{deal.closedAt ? date(deal.closedAt.slice(0, 10)) : "—"}</span><span>{deal.owner || "—"}</span>
       </button>}</For>
     </div>
     <Show when={!props.deals().length}><p class="crm-empty">Keine Einträge in dieser Ansicht.</p></Show>
