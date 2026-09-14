@@ -11,7 +11,7 @@ type CrmView = "Pipeline" | "Kunden" | "Offene Deals" | "Abgeschlossene Deals" |
 const viewForRouteTab = (tab: string | undefined): CrmView => ({ pipeline: "Pipeline", customers: "Kunden", open: "Offene Deals", closed: "Abgeschlossene Deals", calendar: "Kalender" }[tab ?? "pipeline"] ?? "Pipeline");
 const dealStage = (item: { account: Account; location: Location }) => item.account.dealScope === "Betrieb" ? item.account.stage : item.location.stage;
 const dealStatus = (item: { account: Account; location: Location }) => item.account.dealScope === "Betrieb" ? item.account.status : item.location.status;
-function DropZone(props: { label: string; tone: "lost" | "won"; onDrop: (locationId: string) => void }) { return <div class={`crm-drop-zone ${props.tone}`} onDragEnter={e => e.preventDefault()} onDragOver={e => { e.preventDefault(); if (e.dataTransfer) e.dataTransfer.dropEffect = "move"; }} onDrop={e => { e.preventDefault(); const locationId = e.dataTransfer?.getData("text/plain"); if (locationId) props.onDrop(locationId); }}>{props.label}</div> }
+function DropZone(props: { label: string; tone: "lost" | "won"; onDrop: (locationId: string) => void }) { return <div data-crm-terminal={props.tone} class={`crm-drop-zone ${props.tone}`} onDragEnter={e => e.preventDefault()} onDragOver={e => { e.preventDefault(); if (e.dataTransfer) e.dataTransfer.dropEffect = "move"; }} onDrop={e => { e.preventDefault(); const locationId = e.dataTransfer?.getData("text/plain"); if (locationId) props.onDrop(locationId); }}>{props.label}</div> }
 
 export default function CRM() {
   const [accounts, setAccounts] = createSignal<Account[]>(loadCrm());
@@ -42,6 +42,8 @@ export default function CRM() {
   const move = (locationId: string, stage: CrmStage) => mutate(items => { const account = items.find(item => item.locations.some(location => location.id === locationId)); if (!account) return; account.stage = stage; account.status = "Aktiv"; if (account.dealScope === "Betrieb") account.locations.forEach(location => { location.stage = stage; location.status = "Aktiv"; }); else { const location = account.locations.find(item => item.id === locationId); if (location) { location.stage = stage; location.status = "Aktiv"; } } });
   const addAccount = (name: string, owner: string) => { const location = emptyLocation(name); const account: Account = { id: id("account"), name, website: "", locationCount: 1, employees: "", decisionMaker: "", software: "", source: "", owner, stage: "Non-Qualified", status: "Aktiv", dealScope: "Betrieb", locations: [location] }; mutate(items => items.unshift(account)); setSelected(location.id); setNewOpen(false); };
   const owners = () => ["Alle", ...Array.from(new Set(accounts().map(x => x.owner).filter(Boolean)))];
+  const cityOptions = () => Array.from(new Set(accounts().flatMap(account => account.locations.map(location => location.address.match(/\b\d{5}\s+([^\n]+)/)?.[1]?.trim()).filter((city): city is string => !!city)))).sort((a, b) => a.localeCompare(b, "de"));
+  const postalOptions = () => Array.from(new Set(accounts().flatMap(account => account.locations.map(location => location.address.match(/\b(\d{5})\b/)?.[1]).filter((postal): postal is string => !!postal)))).sort();
   onMount(() => {
     const moved = (event: PointerEvent) => {
       const candidate = pointerCandidate;
@@ -54,9 +56,12 @@ export default function CRM() {
     const released = (event: PointerEvent) => {
       const active = pointerDrag();
       if (active) {
-        const target = document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>("[data-crm-stage]");
+        const target = document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>("[data-crm-stage], [data-crm-terminal]");
         const stage = target?.dataset.crmStage as CrmStage | undefined;
+        const terminal = target?.dataset.crmTerminal;
         if (stage) move(active.id, stage);
+        if (terminal === "won") move(active.id, "Gewonnen");
+        if (terminal === "lost") mutate(items => { const account = items.find(item => item.locations.some(location => location.id === active.id)); if (account) { account.status = "Verloren"; account.locations.forEach(location => location.status = "Verloren"); } });
         suppressCardClick = true;
       }
       pointerCandidate = null; setPointerDrag(null); setDragOverStage(null);
@@ -68,8 +73,8 @@ export default function CRM() {
     <PageHeader icon="columns" title="CRM" subline="Betriebe und Standorte im Vertrieb verwalten." chips={<Chip value={visible().length} label={visible().length === 1 ? " Standort" : " Standorte"} />} />
     <nav class="page-actionbar crm-toolbar" aria-label="CRM actions">
       <div class="crm-search"><Icon name="search" size={17}/><input value={query()} onInput={e => setQuery(e.currentTarget.value)} placeholder="Betrieb oder Standort suchen" aria-label="Betrieb oder Standort suchen" /></div>
-      <input class="crm-filter-input" aria-label="Nach Stadt filtern" placeholder="Stadt" value={cityFilter()} onInput={e => setCityFilter(e.currentTarget.value)}/>
-      <input class="crm-filter-input" aria-label="Nach Postleitzahl filtern" placeholder="PLZ" value={postalFilter()} onInput={e => setPostalFilter(e.currentTarget.value)}/>
+      <select class="crm-filter-input" aria-label="Nach Stadt filtern" value={cityFilter()} onChange={e => setCityFilter(e.currentTarget.value)}><option value="">Alle Städte</option><For each={cityOptions()}>{city => <option value={city}>{city}</option>}</For></select>
+      <select class="crm-filter-input" aria-label="Nach Postleitzahl filtern" value={postalFilter()} onChange={e => setPostalFilter(e.currentTarget.value)}><option value="">Alle PLZ</option><For each={postalOptions()}>{postal => <option value={postal}>{postal}</option>}</For></select>
       <select aria-label="Nach verantwortlicher Person filtern" value={filterOwner()} onChange={e => setFilterOwner(e.currentTarget.value)}><For each={owners()}>{owner => <option>{owner}</option>}</For></select>
       <button class="primary" onClick={() => setNewOpen(true)}><Icon name="plus" size={16}/> Betrieb hinzufügen</button>
     </nav>
@@ -84,7 +89,7 @@ export default function CRM() {
           <footer><span>{item.account.owner || "Nicht zugeteilt"}</span><Show when={item.location.contacts.length}><span>{item.location.contacts.length} Kontakt{item.location.contacts.length === 1 ? "" : "e"}</span></Show></footer>
         </div>}</For></div>
       </section>}</For>
-    </div><div class="crm-terminal-zones"><span>Deal abschließen</span><DropZone label="Verloren" tone="lost" onDrop={locationId => updateLocation(locationId, { status: "Verloren" })}/><DropZone label="Gewonnen" tone="won" onDrop={locationId => move(locationId, "Gewonnen")}/></div></section></Show>
+    </div><Show when={pointerDrag()}><div class="crm-terminal-zones"><span>Deal abschließen</span><DropZone label="Verloren" tone="lost" onDrop={locationId => updateLocation(locationId, { status: "Verloren" })}/><DropZone label="Gewonnen" tone="won" onDrop={locationId => move(locationId, "Gewonnen")}/></div></Show></section></Show>
     <Show when={view() === "Kunden"}><CustomerDirectory title="Kundenkarteien" items={visible} onOpen={setSelected}/></Show>
     <Show when={view() === "Offene Deals"}><CustomerDirectory title="Offene Deals" items={() => visible().filter(x => dealStatus(x) === "Aktiv" && dealStage(x) !== "Gewonnen")} onOpen={setSelected}/></Show>
     <Show when={view() === "Abgeschlossene Deals"}><CustomerDirectory title="Abgeschlossene Deals" items={() => visible().filter(x => dealStatus(x) === "Verloren" || dealStage(x) === "Gewonnen")} onOpen={setSelected}/></Show>
