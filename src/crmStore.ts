@@ -410,6 +410,71 @@ export const convertLead = (data: CrmData, organizationId: string, options: { st
     value: options.value?.trim() ?? "", currency: options.currency ?? "EUR",
   });
 };
+/** ── Creating records by hand ───────────────────────────────────────────────
+ *  Typing a record is the SAME write as importing one: an organization owns facts, a
+ *  location owns the address and the people, a deal owns the opportunity. One input
+ *  shape carries every field the three forms can offer; a form fills the subset it
+ *  asks for and leaves the rest empty, so no surface can invent a second storage rule.
+ *  Nothing here decides what a record IS: a hand-typed organization is a lead in the
+ *  inbox until a deal exists (§LEAD_STATES), exactly like an imported one. */
+export type RecordInput = {
+  name: string; website: string; employees: string; decisionMaker: string; software: string;
+  source: string; owner: string; nextStep: string; labels: string[];
+  locationName: string; address: string; email: string; phone: string;
+  contactName: string; contactRole: string;
+};
+export const emptyRecordInput = (values: Partial<RecordInput> = {}): RecordInput => ({
+  name: "", website: "", employees: "", decisionMaker: "", software: "", source: "", owner: "", nextStep: "",
+  labels: [], locationName: "", address: "", email: "", phone: "", contactName: "", contactRole: "", ...values,
+});
+const clean = (value: string | undefined) => String(value ?? "").trim();
+/** The primary contact and the address are LOCATION facts; an organization has no
+ *  address of its own, so one site is always written, named after the record. */
+export const createOrganization = (data: CrmData, input: Partial<RecordInput>): Organization => {
+  const values = emptyRecordInput(input);
+  const org = emptyOrganization(clean(values.name), clean(values.owner));
+  org.website = clean(values.website);
+  org.employees = clean(values.employees);
+  org.decisionMaker = clean(values.decisionMaker) || clean(values.contactName);
+  org.software = clean(values.software);
+  org.source = clean(values.source);
+  org.nextStep = clean(values.nextStep);
+  org.labels = [...values.labels];
+  const location = emptyLocation(clean(values.locationName) || clean(values.name));
+  location.address = clean(values.address);
+  location.employees = clean(values.employees);
+  location.emails = clean(values.email) ? [clean(values.email)] : [];
+  location.phones = clean(values.phone) ? [clean(values.phone)] : [];
+  location.contacts = clean(values.contactName) ? [{
+    id: id("contact"), name: clean(values.contactName), role: clean(values.contactRole),
+    emails: location.emails, phones: location.phones,
+    preferred: location.emails.length ? "E-Mail" : location.phones.length ? "Telefon" : "",
+  }] : [];
+  org.locations = [location];
+  org.leadState = "active";
+  data.organizations.unshift(org);
+  return org;
+};
+
+/** A deal always needs an organization, so the form may name a NEW one: it is created
+ *  first and converted in the same write, never left behind as a phantom lead. */
+export type DealInput = {
+  organizationId: string; newOrganizationName: string; title: string; stage: CrmStage;
+  value: string; currency: Deal["currency"]; owner: string; source: string; expectedClose: string;
+};
+export const createDeal = (data: CrmData, input: Partial<DealInput>): Deal | undefined => {
+  const newName = clean(input.newOrganizationName);
+  const org = data.organizations.find(item => item.id === input.organizationId && !item.deletedAt)
+    ?? (newName ? createOrganization(data, { name: newName, owner: input.owner, source: input.source }) : undefined);
+  if (!org) return undefined;
+  return convertToDeal(data, org.id, input.stage ?? "Qualified", {
+    title: clean(input.title) || org.name,
+    value: clean(input.value), currency: input.currency ?? "EUR",
+    owner: clean(input.owner) || org.owner, source: clean(input.source) || org.source,
+    expectedClose: clean(input.expectedClose),
+  });
+};
+
 /** Archiving is triage, NOT deletion: the record stays live, searchable and restorable;
  *  only the trash removes anything. A converted record has left the inbox already. */
 export const archiveLead = (data: CrmData, organizationId: string) => {

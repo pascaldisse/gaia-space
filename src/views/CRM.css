@@ -277,3 +277,16 @@
 .crm-import-more{padding:9px 12px;border-top:1px solid var(--surface-border)}
 /* Toolbar action: same control geometry as filters and the organization action. */
 .crm-import-trigger{display:inline-flex!important;align-items:center!important;gap:6px;height:38px!important;padding:0 12px!important;border:1px solid var(--surface-border);border-radius:8px;background:var(--canvas);color:var(--text);font:600 12px var(--font-head,inherit);white-space:nowrap;cursor:pointer}.crm-import-trigger:hover{border-color:var(--accent);background:var(--accent-soft);color:var(--accent-text)}.crm-import-trigger .icon{flex:none}
+/* ── Context-specific create forms ─────────────────────────────────────────────
+   Lead, deal and organization are different records, so their forms are different
+   dialogs — but they wear ONE frame, so "what am I creating" is read from the title
+   and the fields, never from a shifting layout. */
+.crm-create-form{width:min(620px,100%);max-height:86vh;overflow:auto}
+.crm-create-form textarea{box-sizing:border-box;width:100%;min-height:58px;resize:vertical;font:inherit;color:var(--text);background:var(--ctl-bg);border:1px solid var(--surface-border);border-radius:var(--ctl-radius-sm);padding:7px 8px}
+.crm-create-form .crm-fields{gap:12px}
+.crm-create-form .crm-label-field{max-width:none}
+.crm-create-form .primary:disabled{opacity:.5;cursor:not-allowed}
+.crm-deal-org-choice{display:flex;gap:16px;font-size:12px;color:var(--text)}
+.crm-deal-org-choice label{display:flex!important;flex-direction:row;align-items:center;gap:6px;color:var(--text)!important;font-size:12px}
+.crm-deal-org-choice input{width:auto!important}
+.crm-create-hint{padding:9px 11px;border-left:3px solid var(--accent);border-radius:0 6px 6px 0;background:var(--accent-soft);color:var(--text)!important}

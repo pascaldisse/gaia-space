@@ -8,11 +8,12 @@ import {
   ACTIVITY_KINDS, CRM_STAGES, PIPELINE_STAGES, WON_PROBABILITY, activitiesOf, activityEntries, closeDeal, convertToDeal, customers as customerOrgs,
   activityState, emptyActivity, filterActivityEntries, setActivityDone,
   archiveLead, archivedLeads, convertLead, leadInbox, restoreLead,
-  dealProbability, dealsOf, emptyDeal, emptyLocation, emptyOrganization, ensureLabel, id, live, loadCrm,
+  createDeal, createOrganization, emptyRecordInput,
+  dealProbability, dealsOf, emptyLocation, ensureLabel, id, live, loadCrm,
   moveDeal, notesOf, openDeals, organizationOf, purge, restore, saveCrm, setPipelineStages, softDeleteDeal, softDeleteOrganization,
   stageAge, stageName, stageProbability, trash,
   type Activity, type ActivityKind, type Contact, type CrmData, type CrmStage, type Deal, type Label, type Location,
-  type Organization, type PipelineStage,
+  type Organization, type PipelineStage, type RecordInput, type DealInput,
   LEAD_STATE_LABELS,
 } from "../crmStore";
 import { importLeads, type ImportRow } from "../crmImport";
@@ -91,17 +92,41 @@ export default function CRM() {
   let candidate: (DragTarget & { x: number; y: number }) | null = null;
   let suppressClick = false;
 
-  const addOrganization = (name: string, owner: string, withDeal: boolean) => {
-    const org = emptyOrganization(name, owner);
-    mutate(draft => {
-      // Starting with a deal means the record was qualified on the spot: it must leave
-      // the inbox in the SAME write, or the board and the inbox would both claim it.
-      draft.organizations.unshift({ ...org, leadState: withDeal ? "converted" : "active" });
-      if (withDeal) draft.deals.unshift({ ...emptyDeal(org.id, name, owner), stage: "Non-Qualified" });
-    });
-    setSelected({ kind: "org", id: org.id });
+  /** Creating is CONTEXT-SPECIFIC: the toolbar offers the record the current tab is
+   *  about, and each form asks for that record's facts. All three write through the
+   *  store's creation functions (§createOrganization/§createDeal), so a typed record is
+   *  indistinguishable from an imported one and the lead invariant holds either way. */
+  const addLead = (input: RecordInput) => {
+    let created: string | undefined;
+    mutate(draft => { created = createOrganization(draft, input).id; });
     setNewOpen(false);
+    setLeadScope("inbox");
+    navigate({ view: "CRM", tab: "leads" });
+    if (created) setSelected({ kind: "org", id: created });
   };
+  /** A hand-typed organization is not a customer: nothing has been won yet, so it goes
+   *  where untriaged records live and the view SAYS so rather than filing it silently
+   *  into a list it does not belong in. */
+  const addOrganization = (input: RecordInput) => {
+    let created: string | undefined;
+    mutate(draft => { created = createOrganization(draft, input).id; });
+    setNewOpen(false);
+    setLeadScope("inbox");
+    navigate({ view: "CRM", tab: "leads" });
+    if (created) setSelected({ kind: "org", id: created });
+  };
+  const addDeal = (input: DealInput) => {
+    let created: string | undefined;
+    mutate(draft => { created = createDeal(draft, input)?.id; });
+    setNewOpen(false);
+    if (created) setSelected({ kind: "deal", id: created });
+  };
+  /** One name for "what does + mean here", read by the button and by the form. */
+  const createKind = (): "lead" | "deal" | "organization" | null =>
+    tab() === "leads" ? "lead"
+      : tab() === "pipeline" || tab() === "open" || tab() === "won" || tab() === "lost" ? "deal"
+        : tab() === "customers" ? "organization" : null;
+  const createLabel = () => ({ lead: "Neuer Lead", deal: "Neuer Deal", organization: "Neue Organisation" })[createKind() as "lead"] ?? "";
   /** Import writes through the SAME draft mutation as every other CRM change, so the
    *  imported records are persisted, filtered and searched exactly like typed ones. */
   const runImport = (rows: ImportRow[]) => {
@@ -202,10 +227,16 @@ export default function CRM() {
       <Show when={tab() === "leads"}>
         <button class="crm-import-trigger" onClick={() => setImportOpen(true)}><Icon name="upload" size={16} /> Importieren</button>
       </Show>
-      <button class="primary" onClick={() => setNewOpen(true)}><Icon name="plus" size={16} /> Organisation</button>
+      {/* Trash, activities and insights create nothing: an action that cannot mean
+          anything in the current view is not offered. */}
+      <Show when={createKind()}>
+        <button class="primary" onClick={() => setNewOpen(true)}><Icon name="plus" size={16} /> {createLabel()}</button>
+      </Show>
     </nav>
     <Show when={importOpen()}><CrmImportDialog data={data} onImport={runImport} onClose={() => setImportOpen(false)} /></Show>
-    <Show when={newOpen()}><NewOrganization onClose={() => setNewOpen(false)} onSave={addOrganization} /></Show>
+    <Show when={newOpen() && createKind() === "lead"}><NewLead data={data} owners={CRM_OWNERS} onClose={() => setNewOpen(false)} onSave={addLead} onCreateLabel={name => { let labelId = ""; mutate(draft => { labelId = ensureLabel(draft, name); }); return labelId; }} /></Show>
+    <Show when={newOpen() && createKind() === "deal"}><NewDeal data={data} owners={CRM_OWNERS} onClose={() => setNewOpen(false)} onSave={addDeal} /></Show>
+    <Show when={newOpen() && createKind() === "organization"}><NewOrganization owners={CRM_OWNERS} onClose={() => setNewOpen(false)} onSave={addOrganization} /></Show>
     <Show when={stageSettingsOpen()}><PipelineSettings stages={data().pipelineStages} onClose={() => setStageSettingsOpen(false)} onSave={stages => { mutate(draft => setPipelineStages(draft, stages)); setStageSettingsOpen(false); }} /></Show>
     <Show when={drag()}>{active => <>
       <div class="crm-drag-ghost" style={{ left: `${active().x + 14}px`, top: `${active().y + 14}px` }}>{active().kind === "deal" ? "Deal verschieben" : "Lead umwandeln"}</div>
@@ -449,15 +480,115 @@ function ConvertLead(props: { org: Organization; data: () => CrmData; onClose: (
   </form></div>;
 }
 
-function NewOrganization(props: { onClose: () => void; onSave: (name: string, owner: string, withDeal: boolean) => void }) {
-  const [name, setName] = createSignal(""); const [owner, setOwner] = createSignal("Jannes"); const [withDeal, setWithDeal] = createSignal(true);
-  return <div class="crm-overlay" role="presentation"><form class="crm-modal" onSubmit={e => { e.preventDefault(); if (name().trim()) props.onSave(name().trim(), owner(), withDeal()); }}>
+/** ── Creating a LEAD ─────────────────────────────────────────────────────────
+ *  An enquiry arrives with a company name and, if we are lucky, a person, a number and
+ *  an address. Exactly one field is required, because demanding more is how enquiries
+ *  end up unrecorded; everything else is offered and stored where it belongs — the
+ *  address and the person on the record's location, not loose on the organization. */
+function NewLead(props: { data: () => CrmData; owners: readonly string[]; onClose: () => void; onSave: (input: RecordInput) => void; onCreateLabel: (name: string) => string }) {
+  const [form, setForm] = createSignal<RecordInput>(emptyRecordInput({ owner: "", source: "" }));
+  const patch = (values: Partial<RecordInput>) => setForm(current => ({ ...current, ...values }));
+  const valid = () => !!form().name.trim();
+  return <div class="crm-overlay" role="presentation"><form class="crm-modal crm-create-form" onSubmit={e => { e.preventDefault(); if (valid()) props.onSave(form()); }}>
+    <header><h2>Neuen Lead anlegen</h2><button type="button" class="icon-button" onClick={props.onClose}><Icon name="close" /></button></header>
+    <p>Ein Lead ist eine Anfrage, noch kein Vorgang: Er steht im Posteingang, in keiner Pipeline und in keiner Auswertung — bis er umgewandelt wird.</p>
+    <label>Organisation / Firma<input autofocus required value={form().name} onInput={e => patch({ name: e.currentTarget.value })} placeholder="z. B. Optik Musterstadt" /></label>
+    <div class="crm-fields two">
+      <label>Quelle<input value={form().source} onInput={e => patch({ source: e.currentTarget.value })} placeholder="z. B. Website-Formular, Messe, Empfehlung" /></label>
+      <label>Verantwortliche Person<select value={form().owner} onChange={e => patch({ owner: e.currentTarget.value })}>
+        <For each={props.owners}>{owner => <option value={owner === "Nicht zugeteilt" ? "" : owner}>{owner}</option>}</For></select></label>
+      <label>Ansprechpartner<input value={form().contactName} onInput={e => patch({ contactName: e.currentTarget.value })} placeholder="Name der Kontaktperson" /></label>
+      <label>Position<input value={form().contactRole} onInput={e => patch({ contactRole: e.currentTarget.value })} placeholder="z. B. Inhaberin" /></label>
+      <label>E-Mail<input type="email" value={form().email} onInput={e => patch({ email: e.currentTarget.value })} placeholder="kontakt@beispiel.de" /></label>
+      <label>Telefon<input value={form().phone} onInput={e => patch({ phone: e.currentTarget.value })} placeholder="030 123456" /></label>
+      <label>Website<input value={form().website} onInput={e => patch({ website: e.currentTarget.value })} placeholder="beispiel-optik.de" /></label>
+      <label>Standortname<input value={form().locationName} onInput={e => patch({ locationName: e.currentTarget.value })} placeholder="Leer = Name der Organisation" /></label>
+    </div>
+    <label>Adresse<textarea value={form().address} onInput={e => patch({ address: e.currentTarget.value })} placeholder="Straße, Hausnummer&#10;PLZ Ort" /></label>
+    <label>Nächster Schritt<input value={form().nextStep} onInput={e => patch({ nextStep: e.currentTarget.value })} placeholder="z. B. Rückruf vereinbaren" /></label>
+    <div class="crm-label-field"><span>Labels</span>
+      <LabelPicker label="Labels wählen" selected={form().labels} library={props.data().labels} onChange={labels => patch({ labels })}
+        onCreate={name => { const labelId = props.onCreateLabel(name); if (labelId) patch({ labels: [...form().labels, labelId] }); }} />
+      <LabelChips ids={form().labels} library={props.data().labels} />
+    </div>
+    <footer><button type="button" class="ghost" onClick={props.onClose}>Abbrechen</button><button class="primary" disabled={!valid()}>Lead anlegen</button></footer>
+  </form></div>;
+}
+
+/** ── Creating a DEAL ─────────────────────────────────────────────────────────
+ *  A deal is always ABOUT an organization, so the form either points at an existing
+ *  record or names a new one — never a deal without a counterpart. Probability is not
+ *  asked: it belongs to the phase (§PipelineSettings). */
+function NewDeal(props: { data: () => CrmData; owners: readonly string[]; onClose: () => void; onSave: (input: DealInput) => void }) {
+  const orgs = () => live(props.data().organizations);
+  const [form, setForm] = createSignal<DealInput>({
+    organizationId: orgs()[0]?.id ?? "", newOrganizationName: "", title: "", stage: "Qualified",
+    value: "", currency: "EUR", owner: "", source: "", expectedClose: "",
+  });
+  const patch = (values: Partial<DealInput>) => setForm(current => ({ ...current, ...values }));
+  const [mode, setMode] = createSignal<"existing" | "new">(orgs().length ? "existing" : "new");
+  const orgName = () => mode() === "new" ? form().newOrganizationName.trim() : orgs().find(org => org.id === form().organizationId)?.name ?? "";
+  const valid = () => !!orgName();
+  const submit = () => props.onSave(mode() === "new"
+    ? { ...form(), organizationId: "" }
+    : { ...form(), newOrganizationName: "" });
+  return <div class="crm-overlay" role="presentation"><form class="crm-modal crm-create-form" onSubmit={e => { e.preventDefault(); if (valid()) submit(); }}>
+    <header><h2>Neuen Deal anlegen</h2><button type="button" class="icon-button" onClick={props.onClose}><Icon name="close" /></button></header>
+    <label>Titel<input autofocus value={form().title} onInput={e => patch({ title: e.currentTarget.value })} placeholder={orgName() ? `Leer = „${orgName()}“` : "z. B. Filialausstattung 2027"} /></label>
+    <div class="crm-deal-org-choice" role="radiogroup" aria-label="Organisation des Deals">
+      <label><input type="radio" name="crm-deal-org" checked={mode() === "existing"} disabled={!orgs().length} onChange={() => setMode("existing")} />Bestehende Organisation</label>
+      <label><input type="radio" name="crm-deal-org" checked={mode() === "new"} onChange={() => setMode("new")} />Neue Organisation anlegen</label>
+    </div>
+    <Show when={mode() === "existing"} fallback={
+      <label>Name der neuen Organisation<input value={form().newOrganizationName} onInput={e => patch({ newOrganizationName: e.currentTarget.value })} placeholder="z. B. Optik Musterstadt" /></label>}>
+      <label>Organisation<select aria-label="Organisation" value={form().organizationId} onChange={e => patch({ organizationId: e.currentTarget.value })}>
+        <For each={orgs()}>{org => <option value={org.id}>{org.name}</option>}</For></select></label>
+    </Show>
+    <div class="crm-fields two">
+      <label>Pipeline-Phase<select aria-label="Pipeline-Phase" value={form().stage} onChange={e => patch({ stage: e.currentTarget.value as CrmStage })}>
+        <For each={CRM_STAGES}>{stage => <option value={stage}>{stageName(props.data(), stage)} · {stageProbability(props.data(), stage)}%</option>}</For></select></label>
+      <label>Verantwortliche Person<select value={form().owner} onChange={e => patch({ owner: e.currentTarget.value })}>
+        <For each={props.owners}>{owner => <option value={owner === "Nicht zugeteilt" ? "" : owner}>{owner}</option>}</For></select></label>
+      <label>Deal-Wert<input inputmode="decimal" aria-label="Deal-Wert" value={form().value} onInput={e => patch({ value: e.currentTarget.value.replace(/[^0-9,.]/g, "") })} placeholder="z. B. 12.500" /></label>
+      <label>Währung<select aria-label="Währung" value={form().currency} onChange={e => patch({ currency: e.currentTarget.value as Deal["currency"] })}>
+        <option value="EUR">EUR (€)</option><option value="CHF">CHF</option><option value="USD">USD ($)</option></select></label>
+      <label>Quelle<input value={form().source} onInput={e => patch({ source: e.currentTarget.value })} placeholder="z. B. Empfehlung" /></label>
+      <label>Erwarteter Abschluss<DateField label="Erwarteter Abschluss" value={form().expectedClose} onChange={expectedClose => patch({ expectedClose })} placeholder="Datum wählen" /></label>
+    </div>
+    <p>Der Deal erscheint sofort in der Pipeline; die Organisation verlässt damit den Lead-Posteingang.</p>
+    <footer><button type="button" class="ghost" onClick={props.onClose}>Abbrechen</button><button class="primary" disabled={!valid()}>Deal anlegen</button></footer>
+  </form></div>;
+}
+
+/** ── Creating an ORGANIZATION ────────────────────────────────────────────────
+ *  Typed from the customer list, but a customer it is NOT: nothing has been won yet.
+ *  The form says which record it is really making and where to find it afterwards,
+ *  instead of filing it into a list whose definition it does not meet. */
+function NewOrganization(props: { owners: readonly string[]; onClose: () => void; onSave: (input: RecordInput) => void }) {
+  const [form, setForm] = createSignal<RecordInput>(emptyRecordInput({ owner: "", source: "" }));
+  const patch = (values: Partial<RecordInput>) => setForm(current => ({ ...current, ...values }));
+  const valid = () => !!form().name.trim();
+  return <div class="crm-overlay" role="presentation"><form class="crm-modal crm-create-form" onSubmit={e => { e.preventDefault(); if (valid()) props.onSave(form()); }}>
     <header><h2>Neue Organisation anlegen</h2><button type="button" class="icon-button" onClick={props.onClose}><Icon name="close" /></button></header>
-    <label>Name<input autofocus value={name()} onInput={e => setName(e.currentTarget.value)} placeholder="z. B. Optik Musterstadt" /></label>
-    <label>Verantwortliche Person<select value={owner()} onChange={e => setOwner(e.currentTarget.value)}><For each={["Jannes", "Bjarne", "Charles", "Pascal"]}>{x => <option>{x}</option>}</For></select></label>
-    <label class="crm-check"><input type="checkbox" checked={withDeal()} onChange={e => setWithDeal(e.currentTarget.checked)} />Direkt einen Deal in der Pipeline starten</label>
-    <p>Ohne Deal steht die Organisation als Lead im Posteingang und taucht in keiner Pipeline und keiner Auswertung auf.</p>
-    <footer><button type="button" class="ghost" onClick={props.onClose}>Abbrechen</button><button class="primary">Anlegen</button></footer>
+    <label>Name<input autofocus required value={form().name} onInput={e => patch({ name: e.currentTarget.value })} placeholder="z. B. Optik Musterstadt" /></label>
+    <div class="crm-fields two">
+      <label>Website<input value={form().website} onInput={e => patch({ website: e.currentTarget.value })} placeholder="beispiel-optik.de" /></label>
+      <label>Mitarbeitende<input value={form().employees} onInput={e => patch({ employees: e.currentTarget.value })} placeholder="z. B. 12" /></label>
+      <label>Entscheider<input value={form().decisionMaker} onInput={e => patch({ decisionMaker: e.currentTarget.value })} placeholder="Name" /></label>
+      <label>Branchensoftware<input value={form().software} onInput={e => patch({ software: e.currentTarget.value })} /></label>
+      <label>Quelle<input value={form().source} onInput={e => patch({ source: e.currentTarget.value })} placeholder="z. B. Empfehlung" /></label>
+      <label>Verantwortliche Person<select value={form().owner} onChange={e => patch({ owner: e.currentTarget.value })}>
+        <For each={props.owners}>{owner => <option value={owner === "Nicht zugeteilt" ? "" : owner}>{owner}</option>}</For></select></label>
+      <label>Ansprechpartner<input value={form().contactName} onInput={e => patch({ contactName: e.currentTarget.value })} placeholder="Name der Kontaktperson" /></label>
+      <label>Position<input value={form().contactRole} onInput={e => patch({ contactRole: e.currentTarget.value })} placeholder="z. B. Inhaberin" /></label>
+      <label>E-Mail<input type="email" value={form().email} onInput={e => patch({ email: e.currentTarget.value })} placeholder="kontakt@beispiel.de" /></label>
+      <label>Telefon<input value={form().phone} onInput={e => patch({ phone: e.currentTarget.value })} placeholder="030 123456" /></label>
+      <label>Standortname<input value={form().locationName} onInput={e => patch({ locationName: e.currentTarget.value })} placeholder="Leer = Name der Organisation" /></label>
+      <label>Nächster Schritt<input value={form().nextStep} onInput={e => patch({ nextStep: e.currentTarget.value })} placeholder="z. B. Bedarf klären" /></label>
+    </div>
+    <label>Adresse<textarea value={form().address} onInput={e => patch({ address: e.currentTarget.value })} placeholder="Straße, Hausnummer&#10;PLZ Ort" /></label>
+    <p class="crm-create-hint">Kunde wird diese Organisation erst mit einem <strong>gewonnenen Deal</strong>. Bis dahin steht sie als Lead im Posteingang — dort „In Deal umwandeln“ wählen, um eine Verkaufschance zu starten.</p>
+    <footer><button type="button" class="ghost" onClick={props.onClose}>Abbrechen</button><button class="primary" disabled={!valid()}>Organisation anlegen</button></footer>
   </form></div>;
 }
 
