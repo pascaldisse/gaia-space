@@ -364,7 +364,7 @@ function DealPanel(props: { dealId: string; data: () => CrmData; onMutate: (fn: 
   return <Show when={deal()}>{current => <aside ref={panel} class="crm-detail" aria-label={`Deal ${current().title}`}>
     <header class="crm-detail-head"><div>
       <button class="crm-back" onClick={props.onClose}><Icon name="chevron-left" size={17} /> Zurück</button>
-      <p><button class="crm-link" onClick={() => org() && props.onOpenOrg(org()!.id)}>{org()?.name ?? "Ohne Organisation"}</button></p>
+      <Show when={org() && org()!.name !== current().title}><p><button class="crm-link" onClick={() => org() && props.onOpenOrg(org()!.id)}>Organisation: {org()!.name}</button></p></Show>
       <h1>{current().title}</h1><span class="crm-record-kind">Deal</span>
     </div><button class="icon-button" onClick={props.onClose} aria-label="Deal schließen"><Icon name="close" /></button></header>
     <div class="crm-stage-row">
@@ -391,10 +391,10 @@ function DealPanel(props: { dealId: string; data: () => CrmData; onMutate: (fn: 
         <LabelPicker label="Labels wählen" selected={current().labels} library={props.data().labels} onChange={labels => patch({ labels })} onCreate={name => withDeal((draft, data) => { draft.labels = [...draft.labels, ensureLabel(data, name)]; })} />
         <LabelChips ids={current().labels} library={props.data().labels} />
       </div></section>
-      <section class="crm-section"><h2>Nächster Schritt</h2>
+      <section class="crm-section"><h2>Nächster Schritt</h2><div class="crm-next-fields">
         <Field label="Aufgabe / nächster Kontakt" value={current().nextStep} onChange={nextStep => patch({ nextStep })} />
         <label>Fällig am<input type="date" value={current().nextStepDate} onInput={e => patch({ nextStepDate: e.currentTarget.value })} /></label>
-      </section>
+      </div></section>
       <Notes notes={current().notes} onAdd={(title, body) => withDeal(draft => { if (body.trim()) draft.notes.unshift({ id: id("note"), title: title.trim() || "Notiz", body: body.trim(), author: "Team paloptic", createdAt: new Date().toISOString() }); })} />
     </div></Show>
     <Show when={tab() === "Aktivitäten"}>

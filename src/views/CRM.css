@@ -41,3 +41,20 @@
 .crm-check{display:flex!important;align-items:center;gap:7px;color:var(--text)!important;font-size:12px}
 .crm-check input{width:auto!important}
 .crm-calendar-row.is-done strong{color:var(--text-muted);text-decoration:line-through}
+
+/* Detail panel — calm, uniform information hierarchy. */
+.crm-detail{width:min(680px,92vw);background:#fff}
+.crm-detail-head{padding:18px 24px 16px;min-height:104px;box-sizing:border-box}
+.crm-detail-head h1{font-size:23px;letter-spacing:-.025em;margin-top:8px}
+.crm-detail-head p{margin:7px 0 0;font-size:12px}.crm-record-kind{margin-top:8px}
+.crm-stage-row{padding:11px 24px;gap:9px;background:#fff}.crm-stage-row select{height:38px}
+.crm-detail .ghost{height:38px;padding:0 12px;border-radius:8px;font-size:12px;font-weight:650}
+.crm-status-line{padding:9px 24px;background:#fafbfc}
+.crm-tabs{padding:0 24px;gap:24px}.crm-tabs button{font-size:12px;padding:12px 2px 10px}
+.crm-detail-body{padding:22px 24px 38px;gap:26px}.crm-section{gap:12px}.crm-section h2{font-size:15px}
+.crm-fields{gap:12px}.crm-fields.two{column-gap:14px}.crm-detail label{gap:6px;font-size:11px;font-weight:600;color:var(--text-muted)}
+.crm-detail input,.crm-detail textarea,.crm-detail select{min-height:38px;padding:8px 10px;border-radius:8px;background:#fff;font-size:13px}.crm-detail select{height:38px}
+.crm-detail label small{font-size:10px;font-weight:400;color:var(--text-muted)}
+.crm-label-field{padding-top:2px}.crm-label-field>span{font-weight:600}.crm-next-fields{display:grid;grid-template-columns:minmax(0,1fr) 170px;gap:14px;align-items:end}
+.crm-add-note-card{min-height:72px;padding:14px;border-radius:8px}.crm-add-note-card strong{font-size:13px}
+@media(max-width:720px){.crm-detail-head,.crm-stage-row,.crm-detail-body{padding-left:18px;padding-right:18px}.crm-next-fields{grid-template-columns:1fr}.crm-stage-row{flex-wrap:wrap}.crm-stage-row select{flex-basis:100%}}
