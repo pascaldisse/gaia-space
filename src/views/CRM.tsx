@@ -1,7 +1,7 @@
 import { createEffect, createSignal, For, Show, onCleanup, onMount } from "solid-js";
 import PageHeader, { Chip } from "../components/PageHeader";
 import { Icon } from "../components/Icon";
-import { route } from "../router";
+import { navigate, route } from "../router";
 import {
   ACTIVITY_KINDS, CRM_STAGES, PIPELINE_STAGES, activitiesOf, closeDeal, convertToDeal, customers as customerOrgs,
   dealsOf, emptyDeal, emptyLocation, emptyOrganization, ensureLabel, id, leads as leadOrgs, live, loadCrm,
@@ -368,8 +368,8 @@ function DealPanel(props: { dealId: string; data: () => CrmData; onMutate: (fn: 
     </div><button class="icon-button" onClick={props.onClose} aria-label="Deal schließen"><Icon name="close" /></button></header>
     <div class="crm-stage-row">
       <select aria-label="Phase" value={current().stage} onChange={e => props.onMutate(draft => moveDeal(draft, props.dealId, e.currentTarget.value as CrmStage))}><For each={CRM_STAGES}>{stage => <option>{stage}</option>}</For></select>
-      <button class="ghost" onClick={() => props.onMutate(draft => closeDeal(draft, props.dealId, "Gewonnen"))}>Gewonnen</button>
-      <button class="ghost danger" onClick={() => props.onMutate(draft => closeDeal(draft, props.dealId, "Verloren"))}>Verloren</button>
+      <button class="ghost success" onClick={() => { props.onMutate(draft => closeDeal(draft, props.dealId, "Gewonnen")); props.onClose(); navigate({ view: "CRM", tab: "won" }); }}>Gewonnen</button>
+      <button class="ghost danger" onClick={() => { props.onMutate(draft => closeDeal(draft, props.dealId, "Verloren")); props.onClose(); navigate({ view: "CRM", tab: "lost" }); }}>Verloren</button>
       <button class="ghost danger" onClick={() => { props.onMutate(draft => softDeleteDeal(draft, props.dealId)); props.onClose(); }} aria-label="Deal in den Papierkorb"><Icon name="trash" size={15} /></button>
     </div>
     <p class="crm-status-line">Status: <strong>{current().status}</strong><Show when={current().closedAt}> · {stamp(current().closedAt!)}</Show></p>
