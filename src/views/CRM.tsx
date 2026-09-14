@@ -14,7 +14,7 @@ import {
   moveDeal, notesOf, openDeals, organizationOf, purge, restore, restoreActivity, saveCrm, setPipelineStages, softDeleteActivity, softDeleteDeal, softDeleteOrganization,
   purgeActivity, updateActivity, linkActivity,
   stageAge, stageName, stageProbability, trash,
-  type Activity, type ActivityKind, type Contact, type CrmData, type CrmStage, type Deal, type Label, type Location,
+  type Activity, type ActivityKind, type Contact, type CrmData, type CrmStage, type Deal, type DealStatus, type Label, type Location,
   type Organization, type PipelineStage, type RecordInput, type DealInput,
   LEAD_STATE_LABELS,
 } from "../crmStore";
@@ -211,7 +211,9 @@ export default function CRM() {
   const count = () => tab() === "pipeline" ? boardDeals().length
     : tab() === "leads" ? visibleLeads().length
       : tab() === "customers" ? customerOrgs(data()).filter(orgMatches).length
-        : tab() === "trash" ? trash(data()).deals.length + trash(data()).organizations.length
+        // The trash counts what the trash LISTS — a deleted activity is a deleted record,
+        // so the header cannot say "0" over a list with a row in it.
+        : tab() === "trash" ? trash(data()).deals.length + trash(data()).organizations.length + trash(data()).activities.length
           : tab() === "activities" ? filterActivityEntries(activityEntries(data()), "todo").length
             : tab() === "insights" ? live(data().deals).length : listFor(tab()).length;
   /** Insights carries its OWN filters (date range, owner), so the record-search toolbar
@@ -713,9 +715,19 @@ function DealPanel(props: { dealId: string; data: () => CrmData; onMutate: (fn: 
   const [savedAt, setSavedAt] = createSignal<string | null>(null);
   const [confirmDelete, setConfirmDelete] = createSignal(false);
   const [confirmClose, setConfirmClose] = createSignal(false);
-  createEffect(on(() => props.dealId, () => { setForm(stored()); setSavedAt(null); }));
+  /** Won and lost CLOSE the panel too, so they fall under the same law as the back
+   *  button: a draft is never thrown away without being named. Deciding the outcome is
+   *  exactly the moment the last typed figure — the agreed price — is still unsaved. */
+  const [confirmOutcome, setConfirmOutcome] = createSignal<Exclude<DealStatus, "Offen"> | null>(null);
+  createEffect(on(() => props.dealId, () => { setForm(stored()); setSavedAt(null); setConfirmOutcome(null); }));
   /** No silent loss: leaving with a dirty draft is a QUESTION, never a quiet discard. */
   const requestClose = () => dirty() ? setConfirmClose(true) : props.onClose();
+  const finishDeal = (status: Exclude<DealStatus, "Offen">) => {
+    props.onMutate(draft => closeDeal(draft, props.dealId, status));
+    props.onClose();
+    navigate({ view: "CRM", tab: status === "Gewonnen" ? "won" : "lost" });
+  };
+  const requestOutcome = (status: Exclude<DealStatus, "Offen">) => dirty() ? setConfirmOutcome(status) : finishDeal(status);
   const patch = (values: Partial<DealDraft>) => setForm(current => ({ ...current, ...values }));
   const dirty = () => JSON.stringify(stored()) !== JSON.stringify(form());
   const save = () => { const values = form(); props.onMutate(draft => { const found = draft.deals.find(item => item.id === props.dealId); if (found) Object.assign(found, values); }); setSavedAt(new Date().toISOString()); };
@@ -747,9 +759,14 @@ function DealPanel(props: { dealId: string; data: () => CrmData; onMutate: (fn: 
     <StageProgress data={props.data} deal={current()} />
     <div class="crm-stage-row">
       <PillMenu class="crm-field-menu crm-stage-menu" label="Pipeline-Phase" value={current().stage} options={CRM_STAGES.map(stage => ({ value: stage, label: `${stageName(props.data(), stage)} · ${stageProbability(props.data(), stage)}%` }))} onChange={stage => props.onMutate(draft => moveDeal(draft, props.dealId, stage as CrmStage))} />
-      <button class="ghost success" style={{ background: "#e6f6e8", color: "#118c5c", "border-color": "#118c5c" }} onClick={() => { props.onMutate(draft => closeDeal(draft, props.dealId, "Gewonnen")); props.onClose(); navigate({ view: "CRM", tab: "won" }); }}>Gewonnen</button>
-      <button class="ghost danger" onClick={() => { props.onMutate(draft => closeDeal(draft, props.dealId, "Verloren")); props.onClose(); navigate({ view: "CRM", tab: "lost" }); }}>Verloren</button>
+      <button class="ghost success" style={{ background: "#e6f6e8", color: "#118c5c", "border-color": "#118c5c" }} onClick={() => requestOutcome("Gewonnen")}>Gewonnen</button>
+      <button class="ghost danger" onClick={() => requestOutcome("Verloren")}>Verloren</button>
     </div>
+    <ConfirmDialog open={!!confirmOutcome()} title={`Deal als ${confirmOutcome() ?? ""} markieren?`}
+      body={<>Am Deal <strong>{current().title}</strong> stehen nicht gespeicherte Änderungen. Sie werden mit dem Abschluss gespeichert.</>}
+      confirmLabel="Speichern und abschließen" cancelLabel="Weiter bearbeiten"
+      onCancel={() => setConfirmOutcome(null)}
+      onConfirm={() => { const status = confirmOutcome(); setConfirmOutcome(null); if (!status) return; save(); finishDeal(status); }} />
     <p class="crm-status-line">Status: <strong>{current().status}</strong><Show when={current().closedAt}> · {stamp(current().closedAt!)}</Show></p>
     <SaveBar dirty={dirty()} savedAt={savedAt()} recordLabel="Deal" onSave={save} onDiscard={discard} onDelete={() => setConfirmDelete(true)} />
     <ConfirmDialog open={confirmDelete()} title="Deal in den Papierkorb?"
@@ -915,7 +932,9 @@ function OrganizationPanel(props: { orgId: string; data: () => CrmData; onMutate
       <h2>Deals dieser Organisation</h2>
       <For each={deals()}>{deal => <button class="crm-linked-row" onClick={() => props.onOpenDeal(deal.id)}>
         <span><strong>{deal.title}</strong><small>{deal.status === "Offen" ? stageName(props.data(), deal.stage) : deal.status} · {deal.owner || "Nicht zugeteilt"}</small></span>
-        <span class="crm-stage-chip">{deal.notes.length} Notiz(en) · {deal.activities.length} Aktivität(en)</span>
+        {/* Live work only: an activity in the trash has left every worklist, so counting
+            it here would promise a plan that no list can show. */}
+        <span class="crm-stage-chip">{deal.notes.length} Notiz(en) · {live(deal.activities).length} Aktivität(en)</span>
       </button>}</For>
       <Show when={!deals().length}><p class="crm-empty">Noch kein Deal. „Deal anlegen“ startet eine Verkaufschance, ohne diesen Datensatz zu verändern.</p></Show>
     </section></div></Show>

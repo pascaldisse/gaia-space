@@ -132,6 +132,63 @@ test("closing a panel with unsaved changes asks instead of dropping them", async
   expect(stored().deals[0].title).toBe("Halb getippt");
 });
 
+// Regression: "Gewonnen" and "Verloren" close the panel exactly like the back button,
+// but they used to do it without asking — and the moment a deal is decided is the moment
+// the last typed figure, the agreed price, is still an unsaved draft. It was written
+// nowhere and the record closed as won with the old value.
+test("deciding the outcome with unsaved changes saves them instead of dropping them", async () => {
+  navigate({ view: "CRM", tab: "pipeline" });
+  const host = mount();
+  await settle();
+  await openDeal(host);
+  const outcome = (label: string) =>
+    [...host.querySelectorAll(".crm-detail .crm-stage-row button")].find(node => node.textContent?.trim() === label) as HTMLElement;
+
+  type(field(host, "Deal-Wert"), "18.400");
+  await settle();
+  outcome("Gewonnen").click();
+  await settle();
+  // Nothing has been decided yet: the question is asked first, and the deal stays open.
+  expect(document.querySelector(".confirm-panel")?.textContent).toContain("nicht gespeicherte Änderungen");
+  expect(stored().deals[0].status).toBe("Offen");
+  (document.querySelector(".confirm-cancel") as HTMLElement).click();
+  await settle();
+  expect(field(host, "Deal-Wert").value).toBe("18.400");
+
+  outcome("Gewonnen").click();
+  await settle();
+  (document.querySelector(".confirm-danger") as HTMLElement).click();
+  await settle();
+  // Both halves of the one click: the typed price is stored AND the deal is won.
+  expect(stored().deals[0].value).toBe("18.400");
+  expect(stored().deals[0].status).toBe("Gewonnen");
+  expect(host.querySelector(".crm-detail")).toBeNull();
+});
+
+// Regression: a deleted activity is a deleted record. The header chip counted only
+// organizations and deals, so the trash announced "0" over a list with a row in it.
+test("the trash header counts the activities the trash lists", async () => {
+  navigate({ view: "CRM", tab: "trash" });
+  const host = mount();
+  await settle();
+  expect(host.querySelectorAll(".crm-trash-row").length).toBe(0);
+  expect(host.querySelector(".metric-pill")?.textContent).toContain("0");
+
+  navigate({ view: "CRM", tab: "activities" });
+  await settle();
+  const actions = host.querySelectorAll(".crm-activity-row .crm-activity-actions .crm-row-action");
+  (actions[1] as HTMLElement).click();
+  await settle();
+  (document.querySelector(".confirm-danger") as HTMLElement).click();
+  await settle();
+  expect(stored().deals[0].activities[0].deletedAt).toBeTruthy();
+
+  navigate({ view: "CRM", tab: "trash" });
+  await settle();
+  expect(host.querySelectorAll(".crm-trash-row").length).toBe(1);
+  expect(host.querySelector(".metric-pill")?.textContent).toContain("1");
+});
+
 test("the organization panel carries the same bar, and In Papierkorb asks in the product's own dialog", async () => {
   navigate({ view: "CRM", tab: "pipeline" });
   const host = mount();
