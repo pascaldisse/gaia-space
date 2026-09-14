@@ -190,3 +190,27 @@ test("the composer plans work with a deal, and without one it lands in the inbox
   const planned = stored().deals[0].activities.find((item: any) => item.title === "Nachfassen");
   expect(planned.dueDate).toBe(at(2));
 });
+
+// Regression: an inbox activity has no deal, and the month grid's click handler only
+// knew how to open a deal — so its entry was a button that did nothing whatsoever.
+// The entry now opens the record it is about: the activity itself.
+test("an inbox activity in the calendar opens itself instead of doing nothing", async () => {
+  const doc = JSON.parse(JSON.stringify(V2));
+  doc.activities = [{ id: "act-inbox", kind: "Aufgabe", title: "Liste recherchieren", dueDate: at(0), dueTime: "", duration: 0, priority: "Normal", owner: "", outcome: "", done: false, doneAt: null, createdAt: "2026-09-01T10:00:00.000Z", deletedAt: null }];
+  localStorage.setItem("gaia.crm.prototype.v2", JSON.stringify(doc));
+  navigate({ view: "CRM", tab: "activities" });
+  const host = mount();
+  await settle();
+  ([...host.querySelectorAll(".crm-mode-toggle button")].find(node => node.textContent?.includes("Kalender")) as HTMLElement).click();
+  await settle();
+
+  const todayCell = host.querySelector(`.crm-month-cell[data-day="${at(0)}"]`)!;
+  const entry = [...todayCell.querySelectorAll(".crm-month-entry")].find(node => node.textContent?.includes("Liste recherchieren")) as HTMLElement;
+  expect(entry).toBeDefined();
+  entry.click();
+  await settle();
+  const composer = host.querySelector(".crm-activity-composer")!;
+  expect(composer).not.toBeNull();
+  expect(composer.querySelector("h2")?.textContent).toBe("Aktivität bearbeiten");
+  expect((composer.querySelector("input") as HTMLInputElement).value).toBe("Liste recherchieren");
+});

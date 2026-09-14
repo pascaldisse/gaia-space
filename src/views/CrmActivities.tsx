@@ -166,9 +166,12 @@ export default function CrmActivities(props: {
                   <time>{day.getDate()}</time>
                   <button class="crm-month-add" aria-label={`Aktivität am ${dateLabel(dayKey(day))} planen`} onClick={event => { event.stopPropagation(); setSelectedDay(day); openOn(day); }}>+</button>
                 </div>
+                {/* Every entry opens the record it is ABOUT: a deal-owned activity opens its
+                    deal, an inbox activity has none, so it opens itself in the editor. Neither
+                    may be a click that does nothing at all. */}
                 <For each={onDay().slice(0, 3)}>{entry =>
                   <button class="crm-month-entry" data-state={activityState(entry.activity)} title={`${entry.activity.kind} · ${entry.activity.title}`}
-                    onClick={event => { event.stopPropagation(); setSelectedDay(day); if (entry.deal) props.onOpenDeal(entry.deal.id); }}>
+                    onClick={event => { event.stopPropagation(); setSelectedDay(day); if (entry.deal) props.onOpenDeal(entry.deal.id); else editEntry(entry); }}>
                     <Icon name={ACTIVITY_ICONS[entry.activity.kind]} size={11} />
                     <Show when={entry.activity.dueTime}><i>{entry.activity.dueTime}</i></Show>
                     <span>{entry.activity.title || entry.activity.kind}</span>
