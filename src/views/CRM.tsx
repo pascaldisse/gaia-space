@@ -20,6 +20,7 @@ import {
 } from "../crmStore";
 import { importLeads, type ImportRow } from "../crmImport";
 import CrmImportDialog from "./CrmImportDialog";
+import CrmExportDialog from "./CrmExportDialog";
 import CrmActivities, { ActivityEditor, draftOfActivity, type ActivityDraft } from "./CrmActivities";
 import CrmInsights from "./CrmInsights";
 import "./CRM.css";
@@ -57,6 +58,10 @@ export default function CRM() {
   const [leadScope, setLeadScope] = createSignal<"inbox" | "archive">("inbox");
   const [convertTarget, setConvertTarget] = createSignal<string | null>(null);
   const [importOpen, setImportOpen] = createSignal(false);
+  /** Export is a GLOBAL right, not a view: the data belongs to the person wherever they
+   *  stand in the CRM, so the action is offered on every tab and the scope is chosen in
+   *  the dialog rather than implied by the list that happens to be open. */
+  const [exportOpen, setExportOpen] = createSignal(false);
   const [stageSettingsOpen, setStageSettingsOpen] = createSignal(false);
   const [tab, setTab] = createSignal<CrmTab>(tabOf(route().tab));
   createEffect(() => setTab(tabOf(route().tab)));
@@ -229,6 +234,9 @@ export default function CRM() {
       <Show when={tab() === "leads"}>
         <button class="crm-import-trigger" onClick={() => setImportOpen(true)}><Icon name="upload" size={16} /> Importieren</button>
       </Show>
+      {/* Exporting is offered EVERYWHERE, including insights and trash: "how do I get my
+          customer data out" must never depend on which tab is open. */}
+      <button class="crm-export-trigger" onClick={() => setExportOpen(true)}><Icon name="download" size={16} /> Exportieren</button>
       {/* Trash, activities and insights create nothing: an action that cannot mean
           anything in the current view is not offered. */}
       <Show when={createKind()}>
@@ -236,6 +244,7 @@ export default function CRM() {
       </Show>
     </nav>
     <Show when={importOpen()}><CrmImportDialog data={data} onImport={runImport} onClose={() => setImportOpen(false)} /></Show>
+    <Show when={exportOpen()}><CrmExportDialog data={data} onClose={() => setExportOpen(false)} /></Show>
     <Show when={newOpen() && createKind() === "lead"}><NewLead data={data} owners={CRM_OWNERS} onClose={() => setNewOpen(false)} onSave={addLead} onCreateLabel={name => { let labelId = ""; mutate(draft => { labelId = ensureLabel(draft, name); }); return labelId; }} /></Show>
     <Show when={newOpen() && createKind() === "deal"}><NewDeal data={data} owners={CRM_OWNERS} onClose={() => setNewOpen(false)} onSave={addDeal} /></Show>
     <Show when={newOpen() && createKind() === "organization"}><NewOrganization owners={CRM_OWNERS} onClose={() => setNewOpen(false)} onSave={addOrganization} /></Show>

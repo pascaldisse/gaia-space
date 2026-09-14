@@ -318,3 +318,20 @@
 .crm-deal-org-choice input{width:auto!important}
 .crm-create-hint{padding:9px 11px;border-left:3px solid var(--accent);border-radius:0 6px 6px 0;background:var(--accent-soft);color:var(--text)!important}
 .crm-activity-link{display:inline-flex!important;align-items:center!important;max-width:190px;height:30px!important;border:1px dashed var(--surface-border)!important;border-radius:7px!important;background:transparent!important}.crm-activity-link .pill-menu-trigger{display:flex!important;align-items:center!important;width:100%;height:28px!important;padding:0 8px!important;border:0!important;background:transparent!important;color:var(--text-muted)!important;font:inherit!important;font-size:11px!important;text-align:left}.crm-activity-link .pill-menu-chevron{color:var(--text-muted)!important}
+
+/* Export: the same toolbar weight as Import — one takes data in, one takes it out. */
+.crm-export-trigger{display:inline-flex!important;align-items:center!important;gap:6px;height:38px!important;padding:0 12px!important;border:1px solid var(--surface-border);border-radius:8px;background:var(--canvas);color:var(--text);font:600 12px var(--font-head,inherit);white-space:nowrap;cursor:pointer}.crm-export-trigger:hover{border-color:var(--accent);background:var(--accent-soft);color:var(--accent-text)}.crm-export-trigger .icon{flex:none}
+.crm-export{width:min(680px,100%);max-height:88vh;overflow:auto;gap:13px}
+.crm-export fieldset{margin:0;padding:0;border:0;display:grid;gap:6px}
+.crm-export legend{padding:0 0 4px;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted)}
+.crm-export-scope,.crm-export-format,.crm-export-toggle{display:grid!important;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:start;padding:10px 12px;border:1px solid var(--surface-border);border-radius:8px;background:var(--surface);color:var(--text)!important;font-size:12px;cursor:pointer}
+.crm-export-scope[data-active=true]{border-color:var(--accent);background:var(--accent-soft)}
+.crm-export-format[data-empty=true]{opacity:.55;cursor:default}
+.crm-export-scope input,.crm-export-format input,.crm-export-toggle input{width:auto!important;margin:2px 0 0}
+.crm-export-scope span,.crm-export-format span,.crm-export-toggle span{display:grid;gap:3px;min-width:0}
+.crm-export-scope small,.crm-export-format small,.crm-export-toggle small{color:var(--text-muted);font-size:11px;line-height:1.45}
+.crm-export-count{font-style:normal;font-size:11px;color:var(--text-muted);white-space:nowrap}
+.crm-export-summary{margin:0;font-size:12px;color:var(--text)!important}
+.crm-export-result{display:grid;gap:5px;padding:10px 12px;border-radius:6px;background:var(--status-success-bg,#e6f6e8);border:1px solid var(--status-success-ink,#118c5c);color:var(--status-success-ink,#118c5c);font-size:12px}
+.crm-export-result ul{margin:0;padding-left:17px;display:grid;gap:2px}
+.crm-export footer .primary{display:inline-flex;align-items:center;gap:6px}

@@ -117,6 +117,8 @@ const PATHS = {
   folder: () => <path d="M4 6h5l2 2h9v11H4z" />,
   /* An uploaded file: a page with an arrow into it. */
   upload: () => <path d="M6 3h8l4 4v14H6zM14 3v4h4M12 17v-6M9.5 13.5 12 11l2.5 2.5" />,
+  /** The mirror of `upload`: the same document, the arrow pointing out of the app. */
+  download: () => <path d="M6 3h8l4 4v14H6zM14 3v4h4M12 11v6M9.5 14.5 12 17l2.5-2.5" />,
   /* Something still open, asking to be done. Deliberately NOT a tick: a tick on an
      unfinished task reads as "already done" — the exact confusion this replaces. */
   alert: () => (
