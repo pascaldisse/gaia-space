@@ -38,11 +38,11 @@ const isActivityFilter = (value: string): value is typeof activityFilters[number
  * address makes the CRM rail truthful and lets a shared link open the same workspace.
  * The views follow the v2 model: leads are ORGANIZATIONS without a win, the pipeline
  * and the open/won/lost lists are DEALS, trash is the restorable graveyard of both. */
-export const crmTabs = ["leads", "pipeline", "open", "won", "lost", "trash", "activities", "customers"] as const;
+export const crmTabs = ["leads", "pipeline", "open", "won", "lost", "trash", "activities", "customers", "insights"] as const;
 const isCrmTab = (value: string): value is typeof crmTabs[number] => crmTabs.includes(value as typeof crmTabs[number]);
 /** Shipped links keep working: the v1 spellings resolve to their v2 successor rather
  * than degrading to the pipeline, which would silently change what the link showed. */
-const crmTabAliases: Record<string, typeof crmTabs[number]> = { closed: "won", calendar: "activities" };
+const crmTabAliases: Record<string, typeof crmTabs[number]> = { closed: "won", calendar: "activities", reports: "insights", berichte: "insights" };
 export const canonicalCrmTab = (value: string) => isCrmTab(value) ? value : crmTabAliases[value];
 
 /** Channel workspace tabs (communication-first shell). `messages` is the default surface;

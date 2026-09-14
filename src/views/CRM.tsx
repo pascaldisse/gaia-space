@@ -14,6 +14,7 @@ import {
   type Organization, type PipelineStage,
 } from "../crmStore";
 import CrmActivities from "./CrmActivities";
+import CrmInsights from "./CrmInsights";
 import "./CRM.css";
 
 const split = (value: string) => value.split(/[,\n]/).map(x => x.trim()).filter(Boolean);
@@ -24,13 +25,13 @@ const money = (amount: number, currency: Deal["currency"] = "EUR") => new Intl.N
 
 /** The CRM's work views. Each is route state (§router.crmTabs), so the rail can
  *  highlight one and a link opens the same surface. */
-type CrmTab = "leads" | "pipeline" | "open" | "won" | "lost" | "trash" | "activities" | "customers";
+type CrmTab = "leads" | "pipeline" | "open" | "won" | "lost" | "trash" | "activities" | "customers" | "insights";
 const tabOf = (tab: string | undefined): CrmTab =>
-  (["leads", "pipeline", "open", "won", "lost", "trash", "activities", "customers"] as CrmTab[]).includes(tab as CrmTab) ? tab as CrmTab : "pipeline";
+  (["leads", "pipeline", "open", "won", "lost", "trash", "activities", "customers", "insights"] as CrmTab[]).includes(tab as CrmTab) ? tab as CrmTab : "pipeline";
 const CRM_OWNERS = ["Nicht zugeteilt", "Jannes", "Bjarne", "Charles", "Pascal"] as const;
 const TAB_TITLE: Record<CrmTab, string> = {
   leads: "Leads", pipeline: "Pipeline", open: "Offene Deals", won: "Gewonnene Deals", lost: "Verlorene Deals",
-  trash: "Papierkorb", activities: "Aktivitäten", customers: "Kunden",
+  trash: "Papierkorb", activities: "Aktivitäten", customers: "Kunden", insights: "Einblicke",
 };
 /** What is being dragged is a RECORD, not a card: a deal moves through stages or to an
  *  outcome, an organization converts into a deal. One model, so the drop zones can say
@@ -145,17 +146,23 @@ export default function CRM() {
     : tab() === "leads" ? leadOrgs(data()).filter(orgMatches).length
       : tab() === "customers" ? customerOrgs(data()).filter(orgMatches).length
         : tab() === "trash" ? trash(data()).deals.length + trash(data()).organizations.length
-          : tab() === "activities" ? filterActivityEntries(activityEntries(data()), "todo").length : listFor(tab()).length;
+          : tab() === "activities" ? filterActivityEntries(activityEntries(data()), "todo").length
+            : tab() === "insights" ? live(data().deals).length : listFor(tab()).length;
+  /** Insights carries its OWN filters (date range, owner), so the record-search toolbar
+   *  would be a second, contradicting set of controls over the same numbers. */
+  const chipLabel = () => tab() === "insights" ? " ausgewertete Deals" : ` ${TAB_TITLE[tab()]}`;
   /** Weighting reads the stage, never the deal: one source of truth for the forecast. */
   const probabilityOf = (stage: CrmStage) => stageProbability(data(), stage);
   const weighted = (deal: Deal) => dealAmount(deal) * dealProbability(data(), deal) / 100;
 
   return <section class="crm-view">
-    <PageHeader icon="columns" title="CRM" subline="Organisationen, Deals und Aktivitäten im Vertrieb." chips={<Chip value={count()} label={` ${TAB_TITLE[tab()]}`} />} />
+    <PageHeader icon="columns" title="CRM" subline="Organisationen, Deals und Aktivitäten im Vertrieb." chips={<Chip value={count()} label={chipLabel()} />} />
     <nav class="page-actionbar crm-toolbar" aria-label="CRM actions">
-      <div class="crm-search"><Icon name="search" size={17} /><input value={query()} onInput={e => setQuery(e.currentTarget.value)} placeholder="Organisation, Standort oder Adresse suchen" aria-label="CRM durchsuchen" /></div>
-      <LabelPicker label="Labels" selected={labelFilter()} library={labels()} onChange={setLabelFilter} />
-      <select aria-label="Nach verantwortlicher Person filtern" value={filterOwner()} onChange={e => setFilterOwner(e.currentTarget.value)}><For each={owners()}>{owner => <option>{owner}</option>}</For></select>
+      <Show when={tab() !== "insights"}>
+        <div class="crm-search"><Icon name="search" size={17} /><input value={query()} onInput={e => setQuery(e.currentTarget.value)} placeholder="Organisation, Standort oder Adresse suchen" aria-label="CRM durchsuchen" /></div>
+        <LabelPicker label="Labels" selected={labelFilter()} library={labels()} onChange={setLabelFilter} />
+        <select aria-label="Nach verantwortlicher Person filtern" value={filterOwner()} onChange={e => setFilterOwner(e.currentTarget.value)}><For each={owners()}>{owner => <option>{owner}</option>}</For></select>
+      </Show>
       <button class="primary" onClick={() => setNewOpen(true)}><Icon name="plus" size={16} /> Organisation</button>
     </nav>
     <Show when={newOpen()}><NewOrganization onClose={() => setNewOpen(false)} onSave={addOrganization} /></Show>
@@ -201,6 +208,10 @@ export default function CRM() {
 
     <Show when={tab() === "customers"}>
       <OrganizationTable title="Kunden" hint="Organisationen mit mindestens einem gewonnenen Deal." orgs={() => customerOrgs(data()).filter(orgMatches)} data={data} onOpen={orgId => setSelected({ kind: "org", id: orgId })} />
+    </Show>
+
+    <Show when={tab() === "insights"}>
+      <CrmInsights data={data} onOpen={target => navigate({ view: "CRM", tab: target })} />
     </Show>
 
     <Show when={tab() === "activities"}>

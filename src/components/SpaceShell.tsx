@@ -131,6 +131,10 @@ const MODE_LINKS: Record<RailMode, SideEntry[]> = {
     { label: "Papierkorb", view: "CRM", icon: "trash", tab: "trash" },
     { label: "Aktivitäten", view: "CRM", icon: "calendar", tab: "activities" },
     { label: "Kunden", view: "CRM", icon: "users", tab: "customers" },
+    /* Einblicke are the READING of the CRM document (won value, weighted pipeline,
+       win rate, activity load). They stay inside the CRM and never merge into the
+       global dashboard, whose subject is the whole workspace, not the sales data. */
+    { label: "Einblicke", view: "CRM", icon: "chart", tab: "insights" },
   ],
   more: [],
 };

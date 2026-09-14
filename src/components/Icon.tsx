@@ -82,6 +82,8 @@ const PATHS = {
   grid: () => <path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z" />,
   columns: () => <path d="M4 4h4v16H4zM10 4h4v16h-4zM16 4h4v16h-4z" />,
   layers: () => <path d="M12 3 3 8l9 5 9-5zM3 13l9 5 9-5M3 8v0" />,
+  // Reports: bars standing on an axis — the shape of a counted result, not a trend line.
+  chart: () => <path d="M4 20V4M4 20h16M8 20v-6M13 20v-10M18 20v-4" />,
   calendar: () => <path d="M4 6h16v14H4zM4 10h16M8 3v4M16 3v4" />,
   // `*-nav` aliases are retained only for existing call sites; with factory
   // glyphs the original shared-node problem they worked around is gone.
