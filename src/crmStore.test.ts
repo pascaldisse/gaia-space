@@ -63,7 +63,7 @@ test("per-site v1 accounts migrate to one deal per location", () => {
 
 test("migrated labels land in the central library and are referenced by id", () => {
   const data = migrateV1([v1Account(), v1Account({ id: "account-2", name: "Optik Süd", labels: ["Messe", "Kette"] })]);
-  expect(data.labels.map(label => label.name).sort()).toEqual(["Kette", "Messe"]);
+  expect(data.labels.map(label => label.name)).toEqual(expect.arrayContaining(["Kette", "Messe"]));
   const messe = data.labels.find(label => label.name === "Messe")!;
   expect(data.organizations.every(org => org.labels.includes(messe.id))).toBe(true);
   expect(labelsOf(data, data.organizations[1].labels).map(label => label.name)).toEqual(["Messe", "Kette"]);

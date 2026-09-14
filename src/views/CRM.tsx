@@ -399,7 +399,7 @@ function DealPanel(props: { dealId: string; data: () => CrmData; onMutate: (fn: 
   return <Show when={deal()}>{current => <aside ref={panel} class="crm-detail" aria-label={`Deal ${current().title}`}>
     <header class="crm-detail-head"><div>
       <button class="crm-back" onClick={props.onClose}><Icon name="chevron-left" size={17} /> Zurück</button>
-      <Show when={org() && org()!.name !== current().title}><p><button class="crm-link" onClick={() => org() && props.onOpenOrg(org()!.id)}>Organisation: {org()!.name}</button></p></Show>
+      <Show when={org()}><p><button class="crm-link" onClick={() => props.onOpenOrg(org()!.id)}>{org()!.name === current().title ? "Organisation öffnen" : `Organisation: ${org()!.name}`}</button></p></Show>
       <h1>{current().title}</h1><span class="crm-record-kind">Deal</span>
     </div><button class="icon-button" onClick={props.onClose} aria-label="Deal schließen"><Icon name="close" /></button></header>
     <div class="crm-stage-row">

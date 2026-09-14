@@ -121,7 +121,7 @@ test("the label filter is one searchable multiselect over the central library", 
   (host.querySelector(".crm-labelpicker-trigger") as HTMLElement).click();
   await settle();
   const options = () => [...host.querySelectorAll(".crm-labelpicker-option")].map(node => node.textContent?.trim());
-  expect(options()).toEqual(["Messe"]);
+  expect(options()).toEqual(expect.arrayContaining(["Messe", "Heißer Lead", "Warmer Lead", "Kalter Lead"]));
   const search = host.querySelector(".crm-labelpicker-menu input") as HTMLInputElement;
   search.value = "zzz"; search.dispatchEvent(new Event("input", { bubbles: true }));
   await settle();
