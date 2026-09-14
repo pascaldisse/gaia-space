@@ -2965,7 +2965,11 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         "get_issue" | "get_issue_detail" | "list_issues" => CommandPolicy::IssueRead,
         "list_issue_assignees" | "set_issue_assignees" => CommandPolicy::IssueAssign,
         "add_project_member" | "remove_project_member" => CommandPolicy::ProjectMemberAdmin,
-        "get_document" | "get_document_publication" | "list_doc_versions" | "read_document_file" => CommandPolicy::DocumentRead,
+        "get_document"
+        | "get_document_publication"
+        | "list_doc_versions"
+        | "read_document_file"
+        | "get_document_file" => CommandPolicy::DocumentRead,
         // Favourites are caller-scoped: `bind_session_identity` forces `profile_id` to
         // the session, and the read scope inside the query does the rest.
         "list_favorite_documents" | "set_document_favorite" | "move_favorite_document" => {
@@ -3397,6 +3401,7 @@ fn document_id(body: &Value, name: &str) -> Option<String> {
             | "budget_export_statement"
             | "list_doc_versions"
             | "read_document_file"
+            | "get_document_file"
             | "get_document_publication"
             | "publish_document"
             | "list_document_access"
@@ -5839,6 +5844,7 @@ async fn cmd(
     "list_deployments_for_target" => pipelines::list_deployments_for_target(target_id: String),
     "list_doc_versions" => documents::list_doc_versions_scoped(document_id: String, profile_id: String),
     "read_document_file" => documents::read_document_file(document_id: String, max_bytes: Option<u64>),
+    "get_document_file" => documents::get_document_file(document_id: String),
     "list_document_access" => documents::list_document_access(document_id: String),
     "update_document_access" => documents::update_document_access(document_id: String, permissions: Vec<documents::DocumentAccessRecipient>),
     "list_document_folders" => documents::list_document_folders_scoped(profile_id: String),
@@ -6520,7 +6526,11 @@ mod tests {
 
     #[test]
     fn document_detail_commands_have_scoped_policies_and_ids() {
-        for name in ["get_document_publication", "read_document_file"] {
+        for name in [
+            "get_document_publication",
+            "read_document_file",
+            "get_document_file",
+        ] {
             assert!(matches!(command_policy(name), Some(CommandPolicy::DocumentRead)), "{name}");
             assert_eq!(document_id(&json!({"documentId": "doc-preview", "maxBytes": null}), name), Some("doc-preview".into()));
         }
@@ -12109,6 +12119,54 @@ mod tests {
             StatusCode::BAD_REQUEST,
             "plain http off localhost stays out: {value}"
         );
+    }
+
+    #[tokio::test]
+    async fn get_document_file_is_acl_scoped_and_id_strict_over_http() {
+        let _serial = test_lock();
+        setup();
+        let c = db::conn().unwrap();
+        c.execute("INSERT INTO documents(id,container_type,container_id,doc_type,title,body,version,archived,created_by) VALUES('file-acl','my-docs','pa','file','Spec','',1,0,'pa')", []).unwrap();
+        c.execute("INSERT INTO document_files(document_id,filename,mime,size,stored_path,uploaded_by) VALUES('file-acl','spec.pdf','application/pdf',7,'/var/space/blobs/file-acl.pdf','pa')", []).unwrap();
+        drop(c);
+
+        let (status, value) = call(
+            cookie("ta"),
+            "get_document_file",
+            json!({"document_id":"file-acl"}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        assert_eq!(value["value"]["filename"], json!("spec.pdf"));
+        assert_eq!(value["value"]["mime"], json!("application/pdf"));
+        let rendered = value.to_string();
+        assert!(
+            !rendered.contains("stored_path") && !rendered.contains("/var/space/blobs"),
+            "the on-disk location never leaves the server: {rendered}"
+        );
+
+        let (status, _) = call(cookie("ta"), "get_document_file", json!({"id":"file-acl"})).await;
+        assert_eq!(
+            status,
+            StatusCode::BAD_REQUEST,
+            "a generic `id` is not an accepted document id"
+        );
+
+        let (status, _) = call(
+            cookie("tb"),
+            "get_document_file",
+            json!({"documentId":"file-acl"}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "a stranger cannot read it");
+
+        let (status, _) = call(
+            HeaderMap::new(),
+            "get_document_file",
+            json!({"document_id":"file-acl"}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED, "no session, no read");
     }
 
     /// Without a session there is no resource owner to consent.
