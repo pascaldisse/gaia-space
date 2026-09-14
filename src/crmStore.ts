@@ -62,6 +62,10 @@ export type Note = { id: string; title: string; body: string; author: string; cr
 export type Activity = {
   id: string; kind: ActivityKind; title: string; dueDate: string; dueTime: string; duration: number;
   priority: ActivityPriority; owner: string; outcome: string; done: boolean; doneAt: string | null; createdAt: string;
+  /** Deleting an activity is RECOVERABLE, exactly like deleting a deal: the record keeps
+   *  its home (deal or inbox), leaves every worklist, calendar and rollup, and is put
+   *  back from the trash unchanged. Nothing about planned work is destroyed by a click. */
+  deletedAt: string | null;
 };
 export type CrmFile = { id: string; name: string; type: string; data: string; createdAt: string };
 export type Location = { id: string; name: string; address: string; employees: string; emails: string[]; phones: string[]; contacts: Contact[] };
@@ -158,7 +162,7 @@ const now = () => new Date().toISOString();
 
 export const emptyActivity = (values: Partial<Activity> = {}): Activity => ({
   id: id("activity"), kind: "Anruf", title: "", dueDate: "", dueTime: "", duration: 0, priority: "Normal",
-  owner: "", outcome: "", done: false, doneAt: null, createdAt: now(), ...values,
+  owner: "", outcome: "", done: false, doneAt: null, createdAt: now(), deletedAt: null, ...values,
 });
 /** Any stored shape (v1 record, early v2, junk) read back as a complete activity. */
 export const normalizeActivity = (raw: any): Activity => emptyActivity({
@@ -174,6 +178,9 @@ export const normalizeActivity = (raw: any): Activity => emptyActivity({
   done: !!raw?.done,
   doneAt: raw?.doneAt ?? (raw?.done ? raw?.createdAt ?? null : null),
   createdAt: raw?.createdAt ?? now(),
+  // Additive field: a document written before the activity trash existed reads back as
+  // "not deleted", never as a missing key that would hide live work.
+  deletedAt: typeof raw?.deletedAt === "string" && raw.deletedAt ? raw.deletedAt : null,
 });
 
 export const emptyLocation = (name = ""): Location =>
@@ -230,14 +237,17 @@ export const leadInvariantViolations = (data: CrmData): Organization[] =>
 export const trash = (data: CrmData) => ({
   organizations: data.organizations.filter(org => org.deletedAt),
   deals: data.deals.filter(deal => deal.deletedAt),
+  // Deleted activities of a deleted deal are already covered by the deal's own row; the
+  // trash lists the ones a person deleted ON PURPOSE, wherever they live.
+  activities: deletedActivityEntries(data),
 });
 /** Activities stay deal-owned; an organization only ever shows a rollup of its deals'. */
 export const activitiesOf = (data: CrmData, organizationId: string) =>
-  dealsOf(data, organizationId).flatMap(deal => deal.activities.map(activity => ({ deal, activity })));
+  dealsOf(data, organizationId).flatMap(deal => live(deal.activities).map(activity => ({ deal, activity })));
 export const notesOf = (data: CrmData, organizationId: string) =>
   dealsOf(data, organizationId).flatMap(deal => deal.notes.map(note => ({ deal, note })));
 export const allActivities = (data: CrmData) =>
-  live(data.deals).flatMap(deal => deal.activities.map(activity => ({ deal, activity })))
+  live(data.deals).flatMap(deal => live(deal.activities).map(activity => ({ deal, activity })))
     .sort((a, b) => (a.activity.dueDate || "9999").localeCompare(b.activity.dueDate || "9999"));
 
 /** ── The activity worklist ──────────────────────────────────────────────
@@ -250,9 +260,15 @@ const entryOrder = (a: ActivityEntry, b: ActivityEntry) =>
   || (a.activity.dueTime || "99:99").localeCompare(b.activity.dueTime || "99:99")
   || a.activity.title.localeCompare(b.activity.title, "de");
 export const activityEntries = (data: CrmData): ActivityEntry[] => [
-  ...live(data.deals).flatMap(deal => deal.activities.map(activity => ({ activity, deal, org: organizationOf(data, deal) ?? null }))),
-  ...(data.activities ?? []).map(activity => ({ activity, deal: null, org: null })),
+  ...live(data.deals).flatMap(deal => live(deal.activities).map(activity => ({ activity, deal, org: organizationOf(data, deal) ?? null }))),
+  ...live(data.activities ?? []).map(activity => ({ activity, deal: null, org: null })),
 ].sort(entryOrder);
+/** The deleted worklist, with the home each activity will return to. Same shape as the
+ *  live list, so the trash can name "Anruf · Rückruf (Deal X)" instead of an id. */
+export const deletedActivityEntries = (data: CrmData): ActivityEntry[] => [
+  ...data.deals.flatMap(deal => deal.activities.filter(activity => activity.deletedAt).map(activity => ({ activity, deal, org: organizationOf(data, deal) ?? null }))),
+  ...(data.activities ?? []).filter(activity => activity.deletedAt).map(activity => ({ activity, deal: null, org: null })),
+].sort((a, b) => (b.activity.deletedAt ?? "").localeCompare(a.activity.deletedAt ?? ""));
 export const findActivity = (data: CrmData, activityId: string): ActivityEntry | undefined =>
   activityEntries(data).find(entry => entry.activity.id === activityId);
 
@@ -338,6 +354,24 @@ export const removeActivity = (data: CrmData, activityId: string) => {
   }
   return undefined;
 };
+/** The DELETE a person performs: the activity leaves every list but keeps its home, so
+ *  restoring is a single field write and nothing has to be reconstructed. */
+export const softDeleteActivity = (data: CrmData, activityId: string) => {
+  for (const bucket of activityBuckets(data)) {
+    const found = bucket.find(item => item.id === activityId);
+    if (found) { found.deletedAt = now(); return found; }
+  }
+  return undefined;
+};
+export const restoreActivity = (data: CrmData, activityId: string) => {
+  for (const bucket of activityBuckets(data)) {
+    const found = bucket.find(item => item.id === activityId);
+    if (found) { found.deletedAt = null; return found; }
+  }
+  return undefined;
+};
+/** Only the trash destroys — one place, after a named confirmation. */
+export const purgeActivity = (data: CrmData, activityId: string) => removeActivity(data, activityId);
 /** Linking is a MOVE, never a copy: the activity leaves its old home in the same write,
  *  so an activity can never be outstanding twice. `null` sends it back to the inbox. */
 export const linkActivity = (data: CrmData, activityId: string, dealId: string | null) => {

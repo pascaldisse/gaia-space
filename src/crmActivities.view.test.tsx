@@ -43,6 +43,16 @@ function mount() {
 }
 
 const rows = (host: HTMLElement) => [...host.querySelectorAll(".crm-activity-row")];
+/** The kind filter and the deal link are PillMenus (the product's own list, never the
+ *  system popup), so a test drives them the way a person does: open, then choose. */
+const pick = async (trigger: Element, label: string) => {
+  (trigger.querySelector(".pill-menu-trigger") ?? trigger).dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  await settle();
+  const option = [...document.querySelectorAll(".pill-menu-option")].find(node => node.textContent?.includes(label));
+  // The menu commits on mousedown (it keeps the focus story its own), not on click.
+  option?.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+  await settle();
+};
 const chip = (host: HTMLElement, filter: string) => host.querySelector(`.crm-filter-chip[data-filter="${filter}"]`) as HTMLElement;
 
 test("the list is the default view and states deal, organization, owner, due date, duration and priority", async () => {
@@ -83,9 +93,7 @@ test("the filters narrow the one list and each carries its own count", async () 
   expect(rows(host)).toHaveLength(3);
 
   // The type filter cuts across every state filter.
-  const kinds = host.querySelector(".crm-kind-filter") as HTMLSelectElement;
-  kinds.value = "E-Mail"; kinds.dispatchEvent(new Event("change", { bubbles: true }));
-  await settle();
+  await pick(host.querySelector(".crm-kind-filter")!, "E-Mail");
   expect(rows(host).map(row => row.querySelector("strong")?.textContent)).toEqual(["Angebot senden"]);
 });
 
@@ -160,10 +168,9 @@ test("the composer plans work with a deal, and without one it lands in the inbox
   expect(stored().deals[0].activities).toHaveLength(3);
 
   const row = rows(host).find(node => node.textContent?.includes("Demo-Termin"))!;
-  const link = row.querySelector(".crm-activity-link") as HTMLSelectElement;
+  const link = row.querySelector(".crm-activity-link")!;
   expect(link).not.toBeNull();
-  link.value = "deal-1"; link.dispatchEvent(new Event("change", { bubbles: true }));
-  await settle();
+  await pick(link, "Optik Nord · Ausstattung");
   expect(stored().activities).toHaveLength(0);                      // moved, not copied
   expect(stored().deals[0].activities.map((item: any) => item.title)).toContain("Demo-Termin");
 

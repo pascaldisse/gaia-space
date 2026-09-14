@@ -171,8 +171,13 @@ test("deleting a deal moves it to trash, where it is restorable", async () => {
   await settle();
   (host.querySelector(".crm-board .crm-card") as HTMLElement).click();
   await settle();
-  const trashButton = host.querySelector("[aria-label='Deal in den Papierkorb']") as HTMLElement;
-  trashButton.click();
+  // Deleting is asked in the product's own dialog, never a browser box, and only the
+  // confirmation writes: the card is still on the board while the question is open.
+  (host.querySelector(".crm-save-bar .crm-trash-action") as HTMLElement).click();
+  await settle();
+  expect(document.querySelector(".confirm-panel")?.textContent).toContain("Papierkorb");
+  expect(host.querySelectorAll(".crm-board .crm-card")).toHaveLength(1);
+  (document.querySelector(".confirm-danger") as HTMLElement).click();
   await settle();
   expect(host.querySelectorAll(".crm-board .crm-card")).toHaveLength(0);
   navigate({ view: "CRM", tab: "trash" });

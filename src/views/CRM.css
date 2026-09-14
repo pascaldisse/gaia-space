@@ -134,7 +134,7 @@
 .crm-filter-chip[data-filter="overdue"].active span{color:var(--status-danger-ink)}
 .crm-kind-filter{height:30px;margin-left:auto;padding:0 9px;border:1px solid var(--surface-border);border-radius:8px;background:var(--canvas);color:var(--text);font:inherit;font-size:11px}
 .crm-activity-table{border:1px solid var(--surface-border);border-radius:9px;overflow:hidden;background:var(--surface)}
-.crm-activity-head,.crm-activity-row{display:grid;grid-template-columns:44px 118px minmax(180px,1.5fr) minmax(120px,1fr) minmax(120px,1fr) 110px 140px 80px 88px;gap:10px;align-items:center;padding:10px 14px}
+.crm-activity-head,.crm-activity-row{display:grid;grid-template-columns:44px 112px minmax(170px,1.5fr) minmax(112px,1fr) minmax(112px,1fr) 104px 134px 76px 84px 72px;gap:10px;align-items:center;padding:10px 14px}
 .crm-activity-head{font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);background:var(--ctl-bg)}
 .crm-activity-row{border-top:1px solid var(--surface-border);border-left:3px solid transparent;font-size:12px;color:var(--text-muted)}
 .crm-activity-row:hover{background:var(--ctl-bg)}
@@ -206,9 +206,36 @@
 .crm-activity-composer .primary:disabled{opacity:.5;cursor:not-allowed}
 .crm-activity[data-state="overdue"]{border-left:3px solid var(--status-danger-ink)}
 .crm-activity.is-done strong{color:var(--text-muted);text-decoration:line-through}
+/* ── Explicit save / delete affordances ─────────────────────────────────────
+   The bar is part of the record, not a floating toast: it sits under the actions and
+   states, permanently, whether what is on screen is stored. */
+.crm-save-bar{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:10px;padding:10px 25px;border-bottom:1px solid var(--surface-border);background:var(--ctl-bg)}
+.crm-save-bar[data-state="dirty"]{background:#fff6e6;border-bottom-color:#e6c489}
+.crm-save-state{display:flex;align-items:flex-start;gap:8px;min-width:0;color:var(--text-muted)}
+.crm-save-state>span{display:grid;gap:2px;min-width:0}
+.crm-save-state strong{font-size:12px;color:var(--text)}
+.crm-save-state small{font-size:10px;color:var(--text-muted)}
+.crm-save-bar[data-state="dirty"] .crm-save-state .icon{color:#925719}
+.crm-save-bar[data-state="saved"] .crm-save-state .icon{color:var(--status-success-ink,#118c5c)}
+.crm-save-actions{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.crm-save-actions .primary{display:inline-flex;align-items:center;gap:5px;height:30px;padding:0 11px;font-size:12px}
+.crm-save-actions .ghost{height:30px;display:inline-flex;align-items:center;gap:5px;font-size:12px}
+.crm-save-actions button:disabled{opacity:.45;cursor:not-allowed}
+.crm-save-actions .crm-trash-action{font-weight:600}
+/* Row-level edit/delete: quiet until the row is read, never hidden behind a menu. */
+.crm-row-action{display:inline-grid;place-items:center;width:26px;height:26px;padding:0;border:1px solid transparent;border-radius:6px;background:transparent;color:var(--text-muted);cursor:pointer}
+.crm-row-action:hover{border-color:var(--surface-border);background:var(--surface);color:var(--text)}
+.crm-row-action.danger:hover{border-color:var(--status-danger-ink);color:var(--status-danger-ink);background:var(--status-danger-bg)}
+.crm-activity-actions{display:flex!important;gap:4px;overflow:visible!important}
+.crm-agenda-row .crm-row-action{grid-column:2;justify-self:end}
+.crm-activity{position:relative}
+.crm-activity-edit{position:absolute;right:9px;top:9px}
+.crm-editor-footer{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.crm-editor-footer .crm-editor-footer-right{display:flex;gap:8px;margin-left:auto}
+.crm-trash-activity small{display:block}
 @media(max-width:1100px){.crm-month{grid-template-columns:minmax(0,1fr)}.crm-month-agenda{grid-column:1;grid-row:auto;border-left:0;border-top:1px solid var(--surface-border)}
-.crm-activity-head,.crm-activity-row{grid-template-columns:40px minmax(160px,1.6fr) minmax(110px,1fr) 130px 84px}
-.crm-activity-head span:nth-child(2),.crm-activity-head span:nth-child(5),.crm-activity-head span:nth-child(6),.crm-activity-head span:nth-child(8),.crm-activity-row>span:nth-child(2),.crm-activity-row>span:nth-child(5),.crm-activity-row>span:nth-child(6),.crm-activity-row>span:nth-child(8){display:none}}
+.crm-activity-head,.crm-activity-row{grid-template-columns:40px minmax(160px,1.6fr) minmax(110px,1fr) 130px 72px}
+.crm-activity-head span:nth-child(2),.crm-activity-head span:nth-child(5),.crm-activity-head span:nth-child(6),.crm-activity-head span:nth-child(8),.crm-activity-head span:nth-child(9),.crm-activity-row>span:nth-child(2),.crm-activity-row>span:nth-child(5),.crm-activity-row>span:nth-child(6),.crm-activity-row>span:nth-child(8),.crm-activity-row>span:nth-child(9){display:none}}
 @media(max-width:720px){.crm-composer-grid{grid-template-columns:1fr}.crm-activity-filters{gap:5px}.crm-kind-filter{margin-left:0}}
 /* Activity workspace controls share one clear horizontal control language. */
 .crm-mode-toggle button{display:inline-flex!important;align-items:center!important;justify-content:center!important;white-space:nowrap!important;width:auto!important;min-width:74px;height:30px!important;padding:0 10px!important;font-size:11px!important;line-height:1!important}.crm-mode-toggle button .icon{flex:none!important}.crm-kind-filter{display:inline-flex!important;align-items:center!important;margin-left:auto;height:34px!important;min-width:132px;border:1px solid var(--surface-border)!important;border-radius:8px!important;background:var(--surface)!important}.crm-kind-filter .pill-menu-trigger{display:flex!important;align-items:center!important;width:100%;height:32px!important;padding:0 9px!important;border:0!important;background:transparent!important;color:var(--text)!important;font:inherit!important;font-size:11px!important}.crm-kind-filter .pill-menu-chevron{color:var(--text-muted)!important}

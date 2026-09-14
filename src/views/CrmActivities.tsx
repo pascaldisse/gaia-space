@@ -1,13 +1,14 @@
 import { For, Show, createMemo, createSignal } from "solid-js";
 import { Icon } from "../components/Icon";
+import ConfirmDialog from "../components/ConfirmDialog";
 import DateField from "../components/DateField";
 import { PillMenu } from "../components/controls";
 import { monthCells, startOfLocalDay } from "../calendar";
 import {
   ACTIVITY_DURATIONS, ACTIVITY_ICONS, ACTIVITY_KINDS, ACTIVITY_PRIORITIES, ACTIVITY_VIEWS, ACTIVITY_VIEW_LABELS,
   activitiesOnDay, activityEntries, activityState, addActivity, dayKey, filterActivityEntries, linkActivity, live,
-  organizationOf, toggleActivity,
-  type ActivityEntry, type ActivityKind, type ActivityPriority, type ActivityView, type CrmData, type Deal,
+  organizationOf, softDeleteActivity, toggleActivity, updateActivity,
+  type Activity, type ActivityEntry, type ActivityKind, type ActivityPriority, type ActivityView, type CrmData, type Deal,
 } from "../crmStore";
 
 /** ── The activity workspace ──────────────────────────────────────────────────
@@ -45,6 +46,14 @@ export type ActivityDraft = {
   kind: ActivityKind; title: string; dueDate: string; dueTime: string; duration: number;
   priority: ActivityPriority; owner: string; outcome: string; dealId: string;
 };
+/** A stored activity read as a form value — the one conversion, so every surface that
+ *  edits an activity (workspace list, calendar agenda, deal feed) edits the same shape. */
+export const draftOfActivity = (activity: Activity, dealId: string): ActivityDraft => ({
+  kind: activity.kind, title: activity.title, dueDate: activity.dueDate, dueTime: activity.dueTime,
+  duration: activity.duration, priority: activity.priority, owner: activity.owner, outcome: activity.outcome,
+  dealId,
+});
+type EditorState = { mode: "create" | "edit"; id: string | null; initial: ActivityDraft };
 
 export default function CrmActivities(props: {
   data: () => CrmData;
@@ -56,7 +65,8 @@ export default function CrmActivities(props: {
   const [mode, setMode] = createSignal<"list" | "calendar">("list");
   const [view, setView] = createSignal<ActivityView>("todo");
   const [kind, setKind] = createSignal<ActivityKind | "Alle">("Alle");
-  const [composer, setComposer] = createSignal<{ dealId: string; dueDate: string } | null>(null);
+  const [editor, setEditor] = createSignal<EditorState | null>(null);
+  const [pendingDelete, setPendingDelete] = createSignal<ActivityEntry | null>(null);
   const [cursor, setCursor] = createSignal(startOfLocalDay(new Date()));
   const [selectedDay, setSelectedDay] = createSignal(startOfLocalDay(new Date()));
 
@@ -68,17 +78,30 @@ export default function CrmActivities(props: {
 
   const toggle = (activityId: string) => props.mutate(draft => { toggleActivity(draft, activityId); });
   const link = (activityId: string, dealId: string) => props.mutate(draft => { linkActivity(draft, activityId, dealId || null); });
-  const save = (draft: ActivityDraft) => {
+  /** ONE write path for planned work: creating adds, editing re-links and then patches.
+   *  Re-linking runs first because the activity may have moved deal or gone to the
+   *  inbox, and the field write must find it where it now lives (§linkActivity). */
+  const save = (values: ActivityDraft) => {
+    const state = editor();
+    const fields = {
+      kind: values.kind, title: values.title.trim(), dueDate: values.dueDate, dueTime: values.dueTime,
+      duration: values.duration, priority: values.priority, owner: values.owner, outcome: values.outcome.trim(),
+    };
     props.mutate(data => {
-      addActivity(data, draft.dealId || null, {
-        kind: draft.kind, title: draft.title.trim(), dueDate: draft.dueDate, dueTime: draft.dueTime,
-        duration: draft.duration, priority: draft.priority, owner: draft.owner, outcome: draft.outcome.trim(),
-      });
+      if (state?.mode === "edit" && state.id) {
+        linkActivity(data, state.id, values.dealId || null);
+        updateActivity(data, state.id, fields);
+      } else addActivity(data, values.dealId || null, fields);
     });
-    setComposer(null);
+    setEditor(null);
   };
+  /** Deleting is recoverable and NAMED: the activity goes to the CRM trash, never into
+   *  nothing, and the question is asked in the product's own dialog. */
+  const remove = (entry: ActivityEntry) => { props.mutate(draft => { softDeleteActivity(draft, entry.activity.id); }); setPendingDelete(null); setEditor(null); };
+  const editEntry = (entry: ActivityEntry) => setEditor({ mode: "edit", id: entry.activity.id, initial: draftOfActivity(entry.activity, entry.deal?.id ?? "") });
+  const createWith = (dueDate: string) => setEditor({ mode: "create", id: null, initial: { kind: "Anruf", title: "", dueDate, dueTime: "", duration: 30, priority: "Normal", owner: props.owners[0] ?? "", outcome: "", dealId: "" } });
 
-  const openOn = (day: Date) => setComposer({ dealId: "", dueDate: dayKey(day) });
+  const openOn = (day: Date) => createWith(dayKey(day));
 
   return <section class="crm-directory crm-activities">
     <header>
@@ -88,7 +111,7 @@ export default function CrmActivities(props: {
           <button type="button" classList={{ active: mode() === "list" }} aria-pressed={mode() === "list"} onClick={() => setMode("list")}><Icon name="menu" size={14} /> Liste</button>
           <button type="button" classList={{ active: mode() === "calendar" }} aria-pressed={mode() === "calendar"} onClick={() => setMode("calendar")}><Icon name="calendar" size={14} /> Kalender</button>
         </div>
-        <button class="primary crm-new-activity" onClick={() => setComposer({ dealId: "", dueDate: mode() === "calendar" ? dayKey(selectedDay()) : "" })}>
+        <button class="primary crm-new-activity" onClick={() => createWith(mode() === "calendar" ? dayKey(selectedDay()) : "")}>
           <Icon name="plus" size={15} /> Neue Aktivität
         </button>
       </div>
@@ -109,8 +132,9 @@ export default function CrmActivities(props: {
           <span role="columnheader">Erledigt</span><span role="columnheader">Art</span><span role="columnheader">Betreff</span>
           <span role="columnheader">Deal</span><span role="columnheader">Organisation</span><span role="columnheader">Verantwortlich</span>
           <span role="columnheader">Fällig</span><span role="columnheader">Dauer</span><span role="columnheader">Priorität</span>
+          <span role="columnheader">Aktionen</span>
         </div>
-        <For each={shown()}>{entry => <ActivityRow entry={entry} deals={linkable} onLink={link} onToggle={toggle} onOpenDeal={props.onOpenDeal} onOpenOrg={props.onOpenOrg} />}</For>
+        <For each={shown()}>{entry => <ActivityRow entry={entry} deals={linkable} onLink={link} onToggle={toggle} onOpenDeal={props.onOpenDeal} onOpenOrg={props.onOpenOrg} onEdit={editEntry} onDelete={setPendingDelete} />}</For>
       </div>
       <Show when={!shown().length}>
         <p class="crm-empty">Keine Aktivitäten in diesem Filter. „Neue Aktivität“ plant die nächste – mit oder ohne Deal.</p>
@@ -164,6 +188,7 @@ export default function CrmActivities(props: {
               <Show when={entry.deal} fallback={<LinkPicker deals={linkable()} onLink={dealId => link(entry.activity.id, dealId)} />}>
                 {deal => <button class="crm-link" onClick={() => props.onOpenDeal(deal().id)}>{deal().title}</button>}
               </Show>
+              <button type="button" class="crm-row-action" aria-label={`Aktivität ${entry.activity.title || entry.activity.kind} bearbeiten`} onClick={() => editEntry(entry)}><Icon name="edit" size={14} /></button>
             </div>}</For>
             <Show when={!dayEntries().length}>
               <p class="crm-empty">Für diesen Tag ist nichts geplant.</p>
@@ -174,8 +199,17 @@ export default function CrmActivities(props: {
       </section>
     </Show>
 
-    <Show when={composer()}>{draft =>
-      <ActivityComposer data={props.data()} owners={props.owners} initial={draft()} onClose={() => setComposer(null)} onSave={save} />}</Show>
+    <Show when={editor()}>{state =>
+      <ActivityEditor data={props.data()} owners={props.owners} mode={state().mode} initial={state().initial}
+        onClose={() => setEditor(null)} onSave={save}
+        onDelete={state().mode === "edit" && state().id
+          ? () => { const found = entries().find(entry => entry.activity.id === state().id); if (found) remove(found); }
+          : undefined} />}</Show>
+    <ConfirmDialog open={!!pendingDelete()} title="Aktivität löschen?"
+      body={<>Die Aktivität <strong>{pendingDelete()?.activity.title || pendingDelete()?.activity.kind}</strong> verschwindet aus Liste, Kalender und Deal-Verlauf. Sie bleibt im Papierkorb und lässt sich von dort wiederherstellen.</>}
+      confirmLabel="In Papierkorb" cancelLabel="Abbrechen"
+      onCancel={() => setPendingDelete(null)}
+      onConfirm={() => { const entry = pendingDelete(); if (entry) remove(entry); }} />
   </section>;
 }
 
@@ -187,7 +221,7 @@ function LinkPicker(props: { deals: Deal[]; onLink: (dealId: string) => void }) 
     onChange={dealId => { if (dealId) props.onLink(dealId); }} />;
 }
 
-function ActivityRow(props: { entry: ActivityEntry; deals: () => Deal[]; onLink: (activityId: string, dealId: string) => void; onToggle: (id: string) => void; onOpenDeal: (id: string) => void; onOpenOrg: (id: string) => void }) {
+function ActivityRow(props: { entry: ActivityEntry; deals: () => Deal[]; onLink: (activityId: string, dealId: string) => void; onToggle: (id: string) => void; onOpenDeal: (id: string) => void; onOpenOrg: (id: string) => void; onEdit: (entry: ActivityEntry) => void; onDelete: (entry: ActivityEntry) => void }) {
   const activity = () => props.entry.activity;
   const state = () => activityState(activity());
   return <div class="crm-activity-row" role="row" data-state={state()} classList={{ "is-done": activity().done }}>
@@ -216,19 +250,27 @@ function ActivityRow(props: { entry: ActivityEntry; deals: () => Deal[]; onLink:
     </span>
     <span role="cell">{durationLabel(activity().duration)}</span>
     <span role="cell"><i class="crm-priority" data-priority={activity().priority}>{activity().priority}</i></span>
+    {/* Edit and delete sit ON the row, where the activity is read: the editor opens with
+        this activity's values, the delete asks first and is recoverable. */}
+    <span role="cell" class="crm-activity-actions">
+      <button type="button" class="crm-row-action" aria-label={`Aktivität ${activity().title || activity().kind} bearbeiten`} onClick={() => props.onEdit(props.entry)}><Icon name="edit" size={14} /></button>
+      <button type="button" class="crm-row-action danger" aria-label={`Aktivität ${activity().title || activity().kind} löschen`} onClick={() => props.onDelete(props.entry)}><Icon name="trash" size={14} /></button>
+    </span>
   </div>;
 }
 
-/** The composer: one form for planned work, linked or not. A deal is OPTIONAL, so the
- *  first activity of a working day never has to wait for an opportunity to exist. */
-function ActivityComposer(props: {
-  data: CrmData; owners: readonly string[]; initial: { dealId: string; dueDate: string };
-  onClose: () => void; onSave: (draft: ActivityDraft) => void;
+/** The editor: ONE form for planned work, used to create and to change. A deal is
+ *  OPTIONAL, so the first activity of a working day never has to wait for an
+ *  opportunity to exist. Editing is explicit on both ends — the fields are a draft,
+ *  „Speichern“ commits them, „Löschen“ asks first and moves the activity to the trash. */
+export function ActivityEditor(props: {
+  data: CrmData; owners: readonly string[]; mode?: "create" | "edit"; initial: ActivityDraft;
+  onClose: () => void; onSave: (draft: ActivityDraft) => void; onDelete?: () => void;
 }) {
-  const [draft, setDraft] = createSignal<ActivityDraft>({
-    kind: "Anruf", title: "", dueDate: props.initial.dueDate, dueTime: "", duration: 30,
-    priority: "Normal", owner: props.owners[0] ?? "", outcome: "", dealId: props.initial.dealId,
-  });
+  const [draft, setDraft] = createSignal<ActivityDraft>({ ...props.initial });
+  const [confirming, setConfirming] = createSignal(false);
+  const editing = () => props.mode === "edit";
+  const dirty = () => JSON.stringify(draft()) !== JSON.stringify(props.initial);
   const patch = (values: Partial<ActivityDraft>) => setDraft(current => ({ ...current, ...values }));
   const deals = () => live(props.data.deals).filter(deal => deal.status === "Offen" || deal.id === draft().dealId);
   const orgName = (dealId: string) => {
@@ -237,7 +279,7 @@ function ActivityComposer(props: {
   };
   return <div class="crm-overlay" role="presentation">
     <form class="crm-modal crm-activity-composer" onSubmit={event => { event.preventDefault(); if (draft().title.trim()) props.onSave(draft()); }}>
-      <header><h2>Neue Aktivität</h2><button type="button" class="icon-button" onClick={props.onClose}><Icon name="close" /></button></header>
+      <header><h2>{editing() ? "Aktivität bearbeiten" : "Neue Aktivität"}</h2><button type="button" class="icon-button" onClick={props.onClose}><Icon name="close" /></button></header>
       <div class="crm-composer-kinds" role="group" aria-label="Art der Aktivität">
         <For each={ACTIVITY_KINDS}>{value =>
           <button type="button" classList={{ active: draft().kind === value }} aria-pressed={draft().kind === value} onClick={() => patch({ kind: value })}>
@@ -276,8 +318,23 @@ function ActivityComposer(props: {
         </label>
       </div>
       <label>Notiz<textarea value={draft().outcome} onInput={event => patch({ outcome: event.currentTarget.value })} placeholder="Worum geht es? Wird an der Aktivität gespeichert." /></label>
-      <p>Ohne Deal landet die Aktivität im Posteingang und kann später einem Deal zugeordnet werden.</p>
-      <footer><button type="button" class="ghost" onClick={props.onClose}>Abbrechen</button><button class="primary" disabled={!draft().title.trim()}>Aktivität anlegen</button></footer>
+      <p>{editing()
+        ? dirty() ? "Nicht gespeicherte Änderungen — „Speichern“ übernimmt sie in die Aktivität." : "Alle Felder entsprechen dem gespeicherten Stand."
+        : "Ohne Deal landet die Aktivität im Posteingang und kann später einem Deal zugeordnet werden."}</p>
+      <footer class="crm-editor-footer">
+        <Show when={editing() && props.onDelete}>
+          <button type="button" class="ghost danger crm-activity-delete" onClick={() => setConfirming(true)}><Icon name="trash" size={14} /> Löschen</button>
+        </Show>
+        <span class="crm-editor-footer-right">
+          <button type="button" class="ghost" onClick={props.onClose}>Abbrechen</button>
+          <button class="primary" disabled={!draft().title.trim()}>{editing() ? "Speichern" : "Aktivität anlegen"}</button>
+        </span>
+      </footer>
     </form>
+    <ConfirmDialog open={confirming()} title="Aktivität löschen?"
+      body={<>Die Aktivität <strong>{draft().title || draft().kind}</strong> verschwindet aus Liste, Kalender und Deal-Verlauf. Sie bleibt im Papierkorb und lässt sich von dort wiederherstellen.</>}
+      confirmLabel="In Papierkorb" cancelLabel="Abbrechen"
+      onCancel={() => setConfirming(false)}
+      onConfirm={() => { setConfirming(false); props.onDelete?.(); }} />
   </div>;
 }

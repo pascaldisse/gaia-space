@@ -1,5 +1,6 @@
-import { createEffect, createSignal, For, Index, Show, onCleanup, onMount } from "solid-js";
+import { createEffect, createSignal, For, Index, Show, on, onCleanup, onMount } from "solid-js";
 import PageHeader, { Chip } from "../components/PageHeader";
+import ConfirmDialog from "../components/ConfirmDialog";
 import { Icon } from "../components/Icon";
 import DateField from "../components/DateField";
 import { PillMenu } from "../components/controls";
@@ -10,7 +11,8 @@ import {
   archiveLead, archivedLeads, convertLead, leadInbox, restoreLead,
   createDeal, createOrganization, emptyRecordInput,
   dealProbability, dealsOf, emptyLocation, ensureLabel, id, live, loadCrm,
-  moveDeal, notesOf, openDeals, organizationOf, purge, restore, saveCrm, setPipelineStages, softDeleteDeal, softDeleteOrganization,
+  moveDeal, notesOf, openDeals, organizationOf, purge, restore, restoreActivity, saveCrm, setPipelineStages, softDeleteActivity, softDeleteDeal, softDeleteOrganization,
+  purgeActivity, updateActivity, linkActivity,
   stageAge, stageName, stageProbability, trash,
   type Activity, type ActivityKind, type Contact, type CrmData, type CrmStage, type Deal, type Label, type Location,
   type Organization, type PipelineStage, type RecordInput, type DealInput,
@@ -18,7 +20,7 @@ import {
 } from "../crmStore";
 import { importLeads, type ImportRow } from "../crmImport";
 import CrmImportDialog from "./CrmImportDialog";
-import CrmActivities from "./CrmActivities";
+import CrmActivities, { ActivityEditor, draftOfActivity, type ActivityDraft } from "./CrmActivities";
 import CrmInsights from "./CrmInsights";
 import "./CRM.css";
 
@@ -324,7 +326,7 @@ export default function CRM() {
 
     <Show when={tab() === "trash"}>
       <section class="crm-directory">
-        <header><div><h2>Papierkorb</h2><p>Gelöschte Datensätze bleiben auffindbar und lassen sich wiederherstellen.</p></div><span>{trash(data()).deals.length + trash(data()).organizations.length}</span></header>
+        <header><div><h2>Papierkorb</h2><p>Gelöschte Datensätze bleiben auffindbar und lassen sich wiederherstellen — Organisationen, Deals und Aktivitäten.</p></div><span>{trash(data()).deals.length + trash(data()).organizations.length + trash(data()).activities.length}</span></header>
         <div class="crm-trash-list">
           <For each={trash(data()).organizations}>{org => <div class="crm-trash-row"><span><strong>{org.name}</strong><small>Organisation · gelöscht {stamp(org.deletedAt!)}</small></span>
             <button class="ghost small" onClick={() => mutate(draft => restore(draft, org.id))}>Wiederherstellen</button>
@@ -332,8 +334,13 @@ export default function CRM() {
           <For each={trash(data()).deals.filter(deal => !trash(data()).organizations.some(org => org.id === deal.organizationId))}>{deal => <div class="crm-trash-row"><span><strong>{deal.title}</strong><small>Deal · {stageName(data(), deal.stage)} · gelöscht {stamp(deal.deletedAt!)}</small></span>
             <button class="ghost small" onClick={() => mutate(draft => restore(draft, deal.id))}>Wiederherstellen</button>
             <button class="ghost small danger" onClick={() => mutate(draft => purge(draft, deal.id))}>Endgültig löschen</button></div>}</For>
+          {/* A deleted activity keeps its home, so the row can say where it goes back to. */}
+          <For each={trash(data()).activities}>{entry => <div class="crm-trash-row crm-trash-activity"><span><strong>{entry.activity.title || entry.activity.kind}</strong>
+            <small>Aktivität · {entry.activity.kind} · {entry.deal ? entry.deal.title : "Posteingang"} · gelöscht {stamp(entry.activity.deletedAt!)}</small></span>
+            <button class="ghost small" onClick={() => mutate(draft => { restoreActivity(draft, entry.activity.id); })}>Wiederherstellen</button>
+            <button class="ghost small danger" onClick={() => mutate(draft => { purgeActivity(draft, entry.activity.id); })}>Endgültig löschen</button></div>}</For>
         </div>
-        <Show when={!trash(data()).deals.length && !trash(data()).organizations.length}><p class="crm-empty">Der Papierkorb ist leer.</p></Show>
+        <Show when={!trash(data()).deals.length && !trash(data()).organizations.length && !trash(data()).activities.length}><p class="crm-empty">Der Papierkorb ist leer.</p></Show>
       </section>
     </Show>
 
@@ -643,93 +650,207 @@ function StageProgress(props: { data: () => CrmData; deal: Deal }) {
 const Field = (props: { label: string; value: string; onChange: (value: string) => void }) =>
   <label>{props.label}<input value={props.value} onInput={e => props.onChange(e.currentTarget.value)} /></label>;
 
-/** ── The deal panel: the opportunity and everything that happened inside it ──── */
+/** ── The save bar ────────────────────────────────────────────────────────────
+ *  A record's fields are a DRAFT, so the panel must say, permanently and in one place,
+ *  what is true right now: stored, or changed and not yet stored. It offers exactly the
+ *  three answers to that state — commit everything, put the stored values back, or put
+ *  the record in the trash (recoverable, named, never a browser box). */
+function SaveBar(props: {
+  dirty: boolean; savedAt: string | null; recordLabel: string;
+  onSave: () => void; onDiscard: () => void; onDelete: () => void;
+}) {
+  return <div class="crm-save-bar" data-state={props.dirty ? "dirty" : "saved"} role="status" aria-live="polite">
+    <span class="crm-save-state">
+      <Icon name={props.dirty ? "alert" : "check"} size={15} />
+      <span>
+        <strong>{props.dirty ? "Nicht gespeicherte Änderungen" : props.savedAt ? "Änderungen gespeichert" : "Gespeichert"}</strong>
+        <small>{props.dirty
+          ? `Änderungen am ${props.recordLabel} werden erst mit „Speichern“ übernommen.`
+          : props.savedAt ? `Zuletzt gespeichert um ${new Intl.DateTimeFormat("de-DE", { timeStyle: "medium" }).format(new Date(props.savedAt))}`
+            : "Alle Felder entsprechen dem gespeicherten Stand."}</small>
+      </span>
+    </span>
+    <span class="crm-save-actions">
+      <button type="button" class="ghost" disabled={!props.dirty} onClick={props.onDiscard}>Änderungen verwerfen</button>
+      <button type="button" class="primary" disabled={!props.dirty} onClick={props.onSave}><Icon name="check" size={14} /> Speichern</button>
+      <button type="button" class="ghost danger crm-trash-action" onClick={props.onDelete}><Icon name="trash" size={14} /> In Papierkorb</button>
+    </span>
+  </div>;
+}
+
+/** The editable fields of a deal, as a form value. Stage, status and deletion are NOT
+ *  here: they are decisions with their own buttons, not text being typed. */
+type DealDraft = Pick<Deal, "organizationId" | "locationId" | "title" | "value" | "currency" | "source" | "owner" | "expectedClose" | "labels" | "nextStep" | "nextStepDate">;
+const EMPTY_DEAL_DRAFT = (): DealDraft => ({
+  organizationId: "", locationId: null, title: "", value: "", currency: "EUR", source: "", owner: "",
+  expectedClose: "", labels: [], nextStep: "", nextStepDate: "",
+});
+const dealDraftOf = (deal: Deal): DealDraft => ({
+  organizationId: deal.organizationId, locationId: deal.locationId, title: deal.title, value: deal.value,
+  currency: deal.currency, source: deal.source, owner: deal.owner, expectedClose: deal.expectedClose,
+  labels: [...deal.labels], nextStep: deal.nextStep, nextStepDate: deal.nextStepDate,
+});
+
+/** ── The deal panel: the opportunity and everything that happened inside it ────
+ *  Typing edits a LOCAL draft; nothing reaches the document until „Speichern“. */
 function DealPanel(props: { dealId: string; data: () => CrmData; onMutate: (fn: (draft: CrmData) => void) => void; onClose: () => void; onOpenOrg: (orgId: string) => void }) {
   const [tab, setTab] = createSignal<"Übersicht" | "Aktivitäten" | "Dokumente">("Übersicht");
   const deal = () => props.data().deals.find(item => item.id === props.dealId);
-  const org = () => { const current = deal(); return current ? organizationOf(props.data(), current) : undefined; };
-  const patch = (values: Partial<Deal>) => props.onMutate(draft => { const found = draft.deals.find(item => item.id === props.dealId); if (found) Object.assign(found, values); });
+  // The panel follows the DRAFT's organization, so re-pointing a deal shows that
+  // organization's locations immediately — while still being an unsaved change.
+  const org = () => props.data().organizations.find(item => item.id === form().organizationId);
+  const stored = () => { const current = deal(); return current ? dealDraftOf(current) : EMPTY_DEAL_DRAFT(); };
+  const [form, setForm] = createSignal<DealDraft>(stored());
+  const [savedAt, setSavedAt] = createSignal<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = createSignal(false);
+  const [confirmClose, setConfirmClose] = createSignal(false);
+  createEffect(on(() => props.dealId, () => { setForm(stored()); setSavedAt(null); }));
+  /** No silent loss: leaving with a dirty draft is a QUESTION, never a quiet discard. */
+  const requestClose = () => dirty() ? setConfirmClose(true) : props.onClose();
+  const patch = (values: Partial<DealDraft>) => setForm(current => ({ ...current, ...values }));
+  const dirty = () => JSON.stringify(stored()) !== JSON.stringify(form());
+  const save = () => { const values = form(); props.onMutate(draft => { const found = draft.deals.find(item => item.id === props.dealId); if (found) Object.assign(found, values); }); setSavedAt(new Date().toISOString()); };
+  const discard = () => setForm(stored());
   const withDeal = (fn: (draft: Deal, data: CrmData) => void) => props.onMutate(draft => { const found = draft.deals.find(item => item.id === props.dealId); if (found) fn(found, draft); });
+  const [activityEdit, setActivityEdit] = createSignal<{ id: string; draft: ActivityDraft } | null>(null);
+  /** Re-linking first, then the field write: the activity may have MOVED to another
+   *  deal or to the inbox, and `updateActivity` must find it where it now lives. */
+  const saveActivityEdit = (activityId: string, values: ActivityDraft) => props.onMutate(draft => {
+    linkActivity(draft, activityId, values.dealId || null);
+    updateActivity(draft, activityId, {
+      kind: values.kind, title: values.title.trim(), dueDate: values.dueDate, dueTime: values.dueTime,
+      duration: values.duration, priority: values.priority, owner: values.owner, outcome: values.outcome.trim(),
+    });
+  });
   let panel: HTMLElement | undefined;
   createEffect(() => { props.dealId; requestAnimationFrame(() => panel?.scrollTo({ top: 0 })); });
   return <Show when={deal()}>{current => <aside ref={panel} class="crm-detail" aria-label={`Deal ${current().title}`}>
     <header class="crm-detail-head"><div>
-      <button class="crm-back" onClick={props.onClose}><Icon name="chevron-left" size={17} /> Zurück</button>
+      <button class="crm-back" onClick={requestClose}><Icon name="chevron-left" size={17} /> Zurück</button>
       <Show when={org()}><p><button class="crm-link" onClick={() => props.onOpenOrg(org()!.id)}>{org()!.name === current().title ? "Organisation öffnen" : `Organisation: ${org()!.name}`}</button></p></Show>
       <h1>{current().title}</h1><span class="crm-record-kind">Deal</span>
-    </div><button class="icon-button" onClick={props.onClose} aria-label="Deal schließen"><Icon name="close" /></button></header>
+    </div><button class="icon-button" onClick={requestClose} aria-label="Deal schließen"><Icon name="close" /></button></header>
+    <ConfirmDialog open={confirmClose()} title="Änderungen verwerfen?"
+      body={<>Am Deal <strong>{current().title}</strong> stehen nicht gespeicherte Änderungen. Beim Schließen gehen sie verloren.</>}
+      confirmLabel="Verwerfen und schließen" cancelLabel="Weiter bearbeiten"
+      onCancel={() => setConfirmClose(false)}
+      onConfirm={() => { setConfirmClose(false); discard(); props.onClose(); }} />
     <StageProgress data={props.data} deal={current()} />
     <div class="crm-stage-row">
       <PillMenu class="crm-field-menu crm-stage-menu" label="Pipeline-Phase" value={current().stage} options={CRM_STAGES.map(stage => ({ value: stage, label: `${stageName(props.data(), stage)} · ${stageProbability(props.data(), stage)}%` }))} onChange={stage => props.onMutate(draft => moveDeal(draft, props.dealId, stage as CrmStage))} />
       <button class="ghost success" style={{ background: "#e6f6e8", color: "#118c5c", "border-color": "#118c5c" }} onClick={() => { props.onMutate(draft => closeDeal(draft, props.dealId, "Gewonnen")); props.onClose(); navigate({ view: "CRM", tab: "won" }); }}>Gewonnen</button>
       <button class="ghost danger" onClick={() => { props.onMutate(draft => closeDeal(draft, props.dealId, "Verloren")); props.onClose(); navigate({ view: "CRM", tab: "lost" }); }}>Verloren</button>
-      <button class="ghost danger" onClick={() => { props.onMutate(draft => softDeleteDeal(draft, props.dealId)); props.onClose(); }} aria-label="Deal in den Papierkorb"><Icon name="trash" size={15} /></button>
     </div>
     <p class="crm-status-line">Status: <strong>{current().status}</strong><Show when={current().closedAt}> · {stamp(current().closedAt!)}</Show></p>
+    <SaveBar dirty={dirty()} savedAt={savedAt()} recordLabel="Deal" onSave={save} onDiscard={discard} onDelete={() => setConfirmDelete(true)} />
+    <ConfirmDialog open={confirmDelete()} title="Deal in den Papierkorb?"
+      body={<>Der Deal <strong>{current().title}</strong> verlässt Pipeline und Listen. Er bleibt im Papierkorb auffindbar und lässt sich von dort wiederherstellen.</>}
+      confirmLabel="In Papierkorb" cancelLabel="Abbrechen"
+      onCancel={() => setConfirmDelete(false)}
+      onConfirm={() => { setConfirmDelete(false); props.onMutate(draft => softDeleteDeal(draft, props.dealId)); props.onClose(); }} />
     <nav class="crm-tabs"><For each={["Übersicht", "Aktivitäten", "Dokumente"] as const}>{name => <button classList={{ active: tab() === name }} onClick={() => setTab(name)}>{name}</button>}</For></nav>
     <Show when={tab() === "Übersicht"}><div class="crm-detail-body">
       <section class="crm-section"><h2>Deal</h2><div class="crm-fields two">
-        <label>Verknüpfter Kunde / Organisation<select value={current().organizationId} onChange={e => patch({ organizationId: e.currentTarget.value, locationId: null })}><For each={props.data().organizations.filter(item => !item.deletedAt)}>{item => <option value={item.id}>{item.name}</option>}</For></select></label>
-        <Field label="Titel" value={current().title} onChange={title => patch({ title })} />
-        <label>Deal-Wert<input inputmode="decimal" value={current().value} onInput={e => patch({ value: e.currentTarget.value.replace(/[^0-9,.]/g, "") })} placeholder="z. B. 12.500" /></label>
-        <label>Währung<select value={current().currency} onChange={e => patch({ currency: e.currentTarget.value as Deal["currency"] })}><option value="EUR">EUR (€)</option><option value="CHF">CHF</option><option value="USD">USD ($)</option></select></label>
+        <label>Verknüpfter Kunde / Organisation<select value={form().organizationId} onChange={e => patch({ organizationId: e.currentTarget.value, locationId: null })}><For each={props.data().organizations.filter(item => !item.deletedAt)}>{item => <option value={item.id}>{item.name}</option>}</For></select></label>
+        <Field label="Titel" value={form().title} onChange={title => patch({ title })} />
+        <label>Deal-Wert<input inputmode="decimal" value={form().value} onInput={e => patch({ value: e.currentTarget.value.replace(/[^0-9,.]/g, "") })} placeholder="z. B. 12.500" /></label>
+        <label>Währung<select value={form().currency} onChange={e => patch({ currency: e.currentTarget.value as Deal["currency"] })}><option value="EUR">EUR (€)</option><option value="CHF">CHF</option><option value="USD">USD ($)</option></select></label>
         {/* Probability is not a deal field: it is the phase's, so moving the card is the
             only honest way to change it. Won counts fully, lost not at all. */}
         <label>Gewinnwahrscheinlichkeit<output class="crm-readonly-field">{dealProbability(props.data(), current())}%<small>{current().status === "Offen" ? `aus Phase „${stageName(props.data(), current().stage)}“` : `Status ${current().status}`}</small></output><small>Gewichteter Deal-Wert: {money(dealAmount(current()) * dealProbability(props.data(), current()) / 100, current().currency)}</small></label>
-        <Field label="Quelle" value={current().source} onChange={source => patch({ source })} />
-        <label>Verantwortliche Person<PillMenu class="crm-field-menu" label="Verantwortliche Person" value={current().owner} options={CRM_OWNERS.map(owner => ({ value: owner === "Nicht zugeteilt" ? "" : owner, label: owner }))} onChange={owner => patch({ owner })} /></label>
-        <label>Erwarteter Abschluss<DateField label="Erwarteter Abschluss" value={current().expectedClose} onChange={expectedClose => patch({ expectedClose })} placeholder="Datum wählen" /></label>
-        <label>Standort<select value={current().locationId ?? ""} onChange={e => patch({ locationId: e.currentTarget.value || null })}>
+        <Field label="Quelle" value={form().source} onChange={source => patch({ source })} />
+        <label>Verantwortliche Person<PillMenu class="crm-field-menu" label="Verantwortliche Person" value={form().owner} options={CRM_OWNERS.map(owner => ({ value: owner === "Nicht zugeteilt" ? "" : owner, label: owner }))} onChange={owner => patch({ owner })} /></label>
+        <label>Erwarteter Abschluss<DateField label="Erwarteter Abschluss" value={form().expectedClose} onChange={expectedClose => patch({ expectedClose })} placeholder="Datum wählen" /></label>
+        <label>Standort<select value={form().locationId ?? ""} onChange={e => patch({ locationId: e.currentTarget.value || null })}>
           <option value="">Kein bestimmter Standort</option><For each={org()?.locations ?? []}>{loc => <option value={loc.id}>{loc.name || "Unbenannter Standort"}</option>}</For></select></label>
       </div>
       <div class="crm-label-field"><span>Labels</span>
-        <LabelPicker label="Labels wählen" selected={current().labels} library={props.data().labels} onChange={labels => patch({ labels })} onCreate={name => withDeal((draft, data) => { draft.labels = [...draft.labels, ensureLabel(data, name)]; })} />
-        <LabelChips ids={current().labels} library={props.data().labels} />
+        {/* The label LIBRARY is shared property and is written at once; which labels this
+            deal wears is a field of the draft like any other. */}
+        <LabelPicker label="Labels wählen" selected={form().labels} library={props.data().labels} onChange={labels => patch({ labels })}
+          onCreate={name => { let labelId = ""; props.onMutate(draft => { labelId = ensureLabel(draft, name); }); if (labelId) patch({ labels: [...form().labels, labelId] }); }} />
+        <LabelChips ids={form().labels} library={props.data().labels} />
       </div></section>
       <section class="crm-section"><h2>Nächster Schritt</h2><div class="crm-next-fields">
-        <Field label="Aufgabe / nächster Kontakt" value={current().nextStep} onChange={nextStep => patch({ nextStep })} />
-        <label>Fällig am<DateField label="Fällig am" value={current().nextStepDate} onChange={nextStepDate => patch({ nextStepDate })} placeholder="Datum wählen" /></label>
+        <Field label="Aufgabe / nächster Kontakt" value={form().nextStep} onChange={nextStep => patch({ nextStep })} />
+        <label>Fällig am<DateField label="Fällig am" value={form().nextStepDate} onChange={nextStepDate => patch({ nextStepDate })} placeholder="Datum wählen" /></label>
       </div></section>
       <Notes notes={current().notes} onAdd={(title, body) => withDeal(draft => { if (body.trim()) draft.notes.unshift({ id: id("note"), title: title.trim() || "Notiz", body: body.trim(), author: "Team paloptic", createdAt: new Date().toISOString() }); })} />
     </div></Show>
     <Show when={tab() === "Aktivitäten"}>
-      <Activities activities={current().activities}
+      <Activities activities={live(current().activities)}
         onAdd={(kind, title, due, outcome) => withDeal(draft => {
           if (!title.trim()) return;
           draft.activities.unshift(emptyActivity({ kind, title: title.trim(), dueDate: due, outcome: outcome.trim(), owner: draft.owner }));
           if (outcome.trim()) draft.notes.unshift({ id: id("note"), title: `${kind}: ${title.trim()}`, body: outcome.trim(), author: "Team paloptic", createdAt: new Date().toISOString() });
         })}
+        onEdit={activity => setActivityEdit({ id: activity.id, draft: draftOfActivity(activity, props.dealId) })}
         onToggle={activityId => props.onMutate(draft => { const found = draft.deals.find(item => item.id === props.dealId)?.activities.find(item => item.id === activityId); if (found) setActivityDone(draft, activityId, !found.done); })} />
     </Show>
+    {/* The feed edits the SAME activity with the SAME editor the workspace uses — one
+        form, one set of rules, so a deal-owned activity cannot drift from an inbox one. */}
+    <Show when={activityEdit()}>{editing =>
+      <ActivityEditor data={props.data()} owners={CRM_OWNERS.map(owner => owner === "Nicht zugeteilt" ? "" : owner)} mode="edit" initial={editing().draft}
+        onClose={() => setActivityEdit(null)}
+        onSave={values => { saveActivityEdit(editing().id, values); setActivityEdit(null); }}
+        onDelete={() => { props.onMutate(draft => { softDeleteActivity(draft, editing().id); }); setActivityEdit(null); }} />}</Show>
     <Show when={tab() === "Dokumente"}>
       <Files files={current().files} onAdd={file => withDeal(draft => { draft.files.unshift(file); })} />
     </Show>
   </aside>}</Show>;
 }
 
-/** ── The organization panel: the durable record, with its deals rolled up ────── */
+/** The editable facts of an organization, INCLUDING its locations and their contacts:
+ *  an address and a person are location facts, so they belong to the same draft and are
+ *  committed by the same „Speichern“ — never half saved. */
+type OrgDraft = Pick<Organization, "name" | "website" | "decisionMaker" | "employees" | "software" | "source" | "owner" | "nextStep" | "labels" | "locations">;
+const orgDraftOf = (org: Organization): OrgDraft => structuredClone({
+  name: org.name, website: org.website, decisionMaker: org.decisionMaker, employees: org.employees,
+  software: org.software, source: org.source, owner: org.owner, nextStep: org.nextStep,
+  labels: org.labels, locations: org.locations,
+});
+const EMPTY_ORG_DRAFT = (): OrgDraft => ({ name: "", website: "", decisionMaker: "", employees: "", software: "", source: "", owner: "", nextStep: "", labels: [], locations: [] });
+
+/** ── The organization panel: the durable record, with its deals rolled up ──────
+ *  Same law as the deal panel: fields are a draft, „Speichern“ commits, „Änderungen
+ *  verwerfen“ restores the stored record, „In Papierkorb“ asks first and is undoable. */
 function OrganizationPanel(props: { orgId: string; data: () => CrmData; onMutate: (fn: (draft: CrmData) => void) => void; onClose: () => void; onOpenDeal: (dealId: string) => void; onAddDeal: () => void }) {
   const [tab, setTab] = createSignal<"Stammdaten" | "Deals" | "Verlauf">("Stammdaten");
   const [locationId, setLocationId] = createSignal<string | null>(null);
   const org = () => props.data().organizations.find(item => item.id === props.orgId);
-  const location = () => org()?.locations.find(loc => loc.id === locationId()) ?? org()?.locations[0];
-  const patch = (values: Partial<Organization>) => props.onMutate(draft => { const found = draft.organizations.find(item => item.id === props.orgId); if (found) Object.assign(found, values); });
-  const patchLocation = (values: Partial<Location>) => props.onMutate(draft => {
-    const found = draft.organizations.find(item => item.id === props.orgId)?.locations.find(loc => loc.id === location()?.id);
-    if (found) Object.assign(found, values);
-  });
+  const stored = () => { const current = org(); return current ? orgDraftOf(current) : EMPTY_ORG_DRAFT(); };
+  const [form, setForm] = createSignal<OrgDraft>(stored());
+  const [savedAt, setSavedAt] = createSignal<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = createSignal(false);
+  const [confirmClose, setConfirmClose] = createSignal(false);
+  createEffect(on(() => props.orgId, () => { setForm(stored()); setSavedAt(null); setLocationId(null); }));
+  const requestClose = () => dirty() ? setConfirmClose(true) : props.onClose();
+  const patch = (values: Partial<OrgDraft>) => setForm(current => ({ ...current, ...values }));
+  const dirty = () => JSON.stringify(stored()) !== JSON.stringify(form());
+  const save = () => { const values = structuredClone(form()); props.onMutate(draft => { const found = draft.organizations.find(item => item.id === props.orgId); if (found) Object.assign(found, values); }); setSavedAt(new Date().toISOString()); };
+  const discard = () => setForm(stored());
+  const location = () => form().locations.find(loc => loc.id === locationId()) ?? form().locations[0];
+  const patchLocation = (values: Partial<Location>) => {
+    const target = location();
+    if (target) patch({ locations: form().locations.map(loc => loc.id === target.id ? { ...loc, ...values } : loc) });
+  };
   const deals = () => dealsOf(props.data(), props.orgId);
   const isCustomerNow = () => deals().some(deal => deal.status === "Gewonnen");
   /** ONE line says what this record is right now, and while it is still a lead it also
    *  says WHY — the stored state, not a guess from the absence of a win. */
   return <Show when={org()}>{current => <aside class="crm-detail" aria-label={`Organisation ${current().name}`}>
     <header class="crm-detail-head"><div>
-      <button class="crm-back" onClick={props.onClose}><Icon name="chevron-left" size={17} /> Zurück</button>
+      <button class="crm-back" onClick={requestClose}><Icon name="chevron-left" size={17} /> Zurück</button>
       <p class="crm-record-standing">{isCustomerNow() ? "Kunde"
         : current().leadState === "converted" ? "Organisation mit laufendem Deal"
           : `Lead · ${LEAD_STATE_LABELS[current().leadState]}${current().source ? ` · ${current().source}` : " · Quelle unbekannt"}`}</p>
       <h1>{current().name}</h1><span class="crm-record-kind">Organisation</span>
-    </div><button class="icon-button" onClick={props.onClose} aria-label="Organisation schließen"><Icon name="close" /></button></header>
+    </div><button class="icon-button" onClick={requestClose} aria-label="Organisation schließen"><Icon name="close" /></button></header>
+    <ConfirmDialog open={confirmClose()} title="Änderungen verwerfen?"
+      body={<>An <strong>{current().name}</strong> stehen nicht gespeicherte Änderungen. Beim Schließen gehen sie verloren.</>}
+      confirmLabel="Verwerfen und schließen" cancelLabel="Weiter bearbeiten"
+      onCancel={() => setConfirmClose(false)}
+      onConfirm={() => { setConfirmClose(false); discard(); props.onClose(); }} />
     <div class="crm-stage-row">
       <button class="ghost success" style={{ background: "#e6f6e8", color: "#118c5c", "border-color": "#118c5c" }} onClick={props.onAddDeal}><Icon name="plus" size={14} /> Deal anlegen</button>
       <Show when={current().leadState === "active"}>
@@ -738,31 +859,36 @@ function OrganizationPanel(props: { orgId: string; data: () => CrmData; onMutate
       <Show when={current().leadState === "archived"}>
         <button class="ghost" onClick={() => props.onMutate(draft => restoreLead(draft, props.orgId))}>Aus Archiv holen</button>
       </Show>
-      <button class="ghost danger" onClick={() => { props.onMutate(draft => softDeleteOrganization(draft, props.orgId)); props.onClose(); }}><Icon name="trash" size={15} /> In den Papierkorb</button>
     </div>
+    <SaveBar dirty={dirty()} savedAt={savedAt()} recordLabel="Datensatz" onSave={save} onDiscard={discard} onDelete={() => setConfirmDelete(true)} />
+    <ConfirmDialog open={confirmDelete()} title="Organisation in den Papierkorb?"
+      body={<>Die Organisation <strong>{current().name}</strong> und ihre {deals().length} Deal(s) verlassen alle Listen. Sie bleiben im Papierkorb auffindbar und lassen sich von dort wiederherstellen.</>}
+      confirmLabel="In Papierkorb" cancelLabel="Abbrechen"
+      onCancel={() => setConfirmDelete(false)}
+      onConfirm={() => { setConfirmDelete(false); props.onMutate(draft => softDeleteOrganization(draft, props.orgId)); props.onClose(); }} />
     <nav class="crm-tabs"><For each={["Stammdaten", "Deals", "Verlauf"] as const}>{name => <button classList={{ active: tab() === name }} onClick={() => setTab(name)}>{name}</button>}</For></nav>
     <Show when={tab() === "Stammdaten"}><div class="crm-detail-body">
       <section class="crm-section"><h2>Organisation</h2><div class="crm-fields two">
-        <Field label="Name" value={current().name} onChange={name => patch({ name })} />
-        <Field label="Website" value={current().website} onChange={website => patch({ website })} />
-        <Field label="Entscheider" value={current().decisionMaker} onChange={decisionMaker => patch({ decisionMaker })} />
-        <Field label="Mitarbeitende gesamt" value={current().employees} onChange={employees => patch({ employees })} />
-        <Field label="Branchensoftware" value={current().software} onChange={software => patch({ software })} />
-        <Field label="Quelle" value={current().source} onChange={source => patch({ source })} />
-        <label>Verantwortliche Person<PillMenu class="crm-field-menu" label="Verantwortliche Person" value={current().owner} options={CRM_OWNERS.map(owner => ({ value: owner === "Nicht zugeteilt" ? "" : owner, label: owner }))} onChange={owner => patch({ owner })} /></label>
+        <Field label="Name" value={form().name} onChange={name => patch({ name })} />
+        <Field label="Website" value={form().website} onChange={website => patch({ website })} />
+        <Field label="Entscheider" value={form().decisionMaker} onChange={decisionMaker => patch({ decisionMaker })} />
+        <Field label="Mitarbeitende gesamt" value={form().employees} onChange={employees => patch({ employees })} />
+        <Field label="Branchensoftware" value={form().software} onChange={software => patch({ software })} />
+        <Field label="Quelle" value={form().source} onChange={source => patch({ source })} />
+        <label>Verantwortliche Person<PillMenu class="crm-field-menu" label="Verantwortliche Person" value={form().owner} options={CRM_OWNERS.map(owner => ({ value: owner === "Nicht zugeteilt" ? "" : owner, label: owner }))} onChange={owner => patch({ owner })} /></label>
         {/* The lead's one planned move; it travels into the deal on conversion. */}
-        <Field label="Nächster Schritt" value={current().nextStep} onChange={nextStep => patch({ nextStep })} />
-        <label>Anzahl Standorte<input value={String(current().locations.length)} readOnly /></label>
+        <Field label="Nächster Schritt" value={form().nextStep} onChange={nextStep => patch({ nextStep })} />
+        <label>Anzahl Standorte<input value={String(form().locations.length)} readOnly /></label>
       </div>
       <div class="crm-label-field"><span>Labels</span>
-        <LabelPicker label="Labels wählen" selected={current().labels} library={props.data().labels} onChange={labels => patch({ labels })}
-          onCreate={name => props.onMutate(draft => { const found = draft.organizations.find(item => item.id === props.orgId); if (found) found.labels = [...found.labels, ensureLabel(draft, name)]; })} />
-        <LabelChips ids={current().labels} library={props.data().labels} />
+        <LabelPicker label="Labels wählen" selected={form().labels} library={props.data().labels} onChange={labels => patch({ labels })}
+          onCreate={name => { let labelId = ""; props.onMutate(draft => { labelId = ensureLabel(draft, name); }); if (labelId) patch({ labels: [...form().labels, labelId] }); }} />
+        <LabelChips ids={form().labels} library={props.data().labels} />
       </div></section>
       <section class="crm-section"><div class="crm-section-title"><h2>Standorte</h2><div class="crm-location-actions">
-        <button class="crm-add-location" onClick={() => { const next = emptyLocation(`${current().name} · Neuer Standort`); patch({ locations: [...current().locations, next] }); setLocationId(next.id); }}><Icon name="plus" size={14} /> Standort hinzufügen</button>
-        <Show when={location()}>{loc => <button class="ghost small danger" onClick={() => { const remaining = current().locations.filter(item => item.id !== loc().id); patch({ locations: remaining }); setLocationId(remaining[0]?.id ?? null); }}><Icon name="trash" size={14} /> Standort löschen</button>}</Show></div></div>
-        <div class="crm-location-list"><For each={current().locations}>{loc => <button classList={{ active: loc.id === location()?.id }} onClick={() => setLocationId(loc.id)}>{loc.name || "Unbenannt"}<small>{loc.address.split("\n")[0] || "Keine Adresse"}</small></button>}</For></div>
+        <button class="crm-add-location" onClick={() => { const next = emptyLocation(`${form().name} · Neuer Standort`); patch({ locations: [...form().locations, next] }); setLocationId(next.id); }}><Icon name="plus" size={14} /> Standort hinzufügen</button>
+        <Show when={location()}>{loc => <button class="ghost small danger" onClick={() => { const remaining = form().locations.filter(item => item.id !== loc().id); patch({ locations: remaining }); setLocationId(remaining[0]?.id ?? null); }}><Icon name="trash" size={14} /> Standort löschen</button>}</Show></div></div>
+        <div class="crm-location-list"><For each={form().locations}>{loc => <button classList={{ active: loc.id === location()?.id }} onClick={() => setLocationId(loc.id)}>{loc.name || "Unbenannt"}<small>{loc.address.split("\n")[0] || "Keine Adresse"}</small></button>}</For></div>
         <Show when={location()}>{loc => <>
           <div class="crm-section-title"><h3>Standortdaten</h3></div>
           <Field label="Standortname" value={loc().name} onChange={name => patchLocation({ name })} />
@@ -823,7 +949,7 @@ function Notes(props: { notes: Deal["notes"]; onAdd: (title: string, body: strin
   </section>;
 }
 
-function Activities(props: { activities: Activity[]; onAdd: (kind: ActivityKind, title: string, due: string, outcome: string) => void; onToggle: (id: string) => void }) {
+function Activities(props: { activities: Activity[]; onAdd: (kind: ActivityKind, title: string, due: string, outcome: string) => void; onToggle: (id: string) => void; onEdit: (activity: Activity) => void }) {
   const [kind, setKind] = createSignal<ActivityKind>("Anruf"); const [title, setTitle] = createSignal(""); const [due, setDue] = createSignal(""); const [outcome, setOutcome] = createSignal("");
   return <div class="crm-detail-body">
     <section class="crm-section"><h2>Aktivität planen oder dokumentieren</h2>
@@ -837,12 +963,16 @@ function Activities(props: { activities: Activity[]; onAdd: (kind: ActivityKind,
     <section class="crm-section"><h2>Verlauf</h2>
       {/* The feed states what the worklist states: the same activity, the same tone,
           and — once it is done — WHEN it was completed, not merely that it was. */}
-      <For each={props.activities}>{activity => <label class="crm-activity" data-state={activityState(activity)} classList={{ "is-done": activity.done }}>
-        <input type="checkbox" checked={activity.done} onChange={() => props.onToggle(activity.id)} />
+      <For each={props.activities}>{activity => <div class="crm-activity" data-state={activityState(activity)} classList={{ "is-done": activity.done }}>
+        <input type="checkbox" checked={activity.done} aria-label={`${activity.title || activity.kind} erledigt`} onChange={() => props.onToggle(activity.id)} />
         <span><strong>{activity.kind} · {activity.title}</strong>
           <small>{date(activity.dueDate)}{activity.dueTime ? ` · ${activity.dueTime}` : ""}{activity.duration ? ` · ${activity.duration} Min.` : ""}{activity.priority !== "Normal" ? ` · Priorität ${activity.priority}` : ""}</small>
           <Show when={activity.done && activity.doneAt}><small>Erledigt {stamp(activity.doneAt!)}</small></Show>
-        </span></label>}</For>
+        </span>
+        {/* Editing and deleting live where the activity is READ, so the feed is not a
+            dead end that forces a trip to the workspace. */}
+        <button type="button" class="ghost small crm-activity-edit" aria-label={`Aktivität ${activity.title || activity.kind} bearbeiten`} onClick={() => props.onEdit(activity)}><Icon name="edit" size={14} /> Bearbeiten</button>
+      </div>}</For>
       <Show when={!props.activities.length}><p class="crm-empty">Noch keine Aktivitäten geplant.</p></Show>
     </section>
   </div>;
