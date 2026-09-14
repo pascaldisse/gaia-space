@@ -371,7 +371,7 @@ function DealPanel(props: { dealId: string; data: () => CrmData; onMutate: (fn: 
       <h1>{current().title}</h1><span class="crm-record-kind">Deal</span>
     </div><button class="icon-button" onClick={props.onClose} aria-label="Deal schließen"><Icon name="close" /></button></header>
     <div class="crm-stage-row">
-      <select aria-label="Phase" value={current().stage} onChange={e => props.onMutate(draft => moveDeal(draft, props.dealId, e.currentTarget.value as CrmStage))}><For each={CRM_STAGES}>{stage => <option>{stage}</option>}</For></select>
+      <PillMenu class="crm-field-menu crm-stage-menu" label="Pipeline-Phase" value={current().stage} options={CRM_STAGES.map(stage => ({ value: stage, label: stage }))} onChange={stage => props.onMutate(draft => moveDeal(draft, props.dealId, stage as CrmStage))} />
       <button class="ghost success" style={{ background: "#e6f6e8", color: "#118c5c", "border-color": "#118c5c" }} onClick={() => { props.onMutate(draft => closeDeal(draft, props.dealId, "Gewonnen")); props.onClose(); navigate({ view: "CRM", tab: "won" }); }}>Gewonnen</button>
       <button class="ghost danger" onClick={() => { props.onMutate(draft => closeDeal(draft, props.dealId, "Verloren")); props.onClose(); navigate({ view: "CRM", tab: "lost" }); }}>Verloren</button>
       <button class="ghost danger" onClick={() => { props.onMutate(draft => softDeleteDeal(draft, props.dealId)); props.onClose(); }} aria-label="Deal in den Papierkorb"><Icon name="trash" size={15} /></button>
