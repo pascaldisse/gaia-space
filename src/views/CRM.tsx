@@ -299,7 +299,7 @@ function DealCard(props: { deal: Deal; org: Organization | undefined; library: L
     <span class="crm-card-account">{props.org?.name ?? "Ohne Organisation"}</span>
     <LabelChips ids={[...props.deal.labels, ...(props.org?.labels ?? []).filter(labelId => !props.deal.labels.includes(labelId))]} library={props.library} />
     <Show when={props.deal.nextStep}><span class="crm-card-next"><Icon name="alert" size={14} />{props.deal.nextStep}</span></Show>
-    <footer><span>{props.deal.owner || "Nicht zugeteilt"}</span><Show when={props.deal.value}><span>{money(dealAmount(props.deal), props.deal.currency)}<Show when={props.deal.probability > 0}> · {props.deal.probability}%</Show></span></Show></footer>
+    <footer><span>{props.deal.owner || "Nicht zugeteilt"}</span><span>{money(dealAmount(props.deal), props.deal.currency)}<Show when={props.deal.probability > 0}> · {props.deal.probability}%</Show></span></footer>
   </div>;
 }
 
