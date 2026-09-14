@@ -118,12 +118,19 @@ const MODE_LINKS: Record<RailMode, SideEntry[]> = {
     { label: "Packages", view: "Packages", icon: "package" },
     { label: "Dev environments", view: "Dev Environments", icon: "repo" },
   ],
+  /* The CRM rail names the v2 model out loud: leads are organizations we have not
+     won yet, the pipeline and the three deal lists are opportunities, trash is
+     restorable. Won and lost are separate entries because "abgeschlossen" hid two
+     opposite outcomes behind one word. */
   crm: [
+    { label: "Leads", view: "CRM", icon: "org", tab: "leads" },
     { label: "Pipeline", view: "CRM", icon: "columns", strong: true, tab: "pipeline" },
+    { label: "Offene Deals", view: "CRM", icon: "target", tab: "open" },
+    { label: "Gewonnen", view: "CRM", icon: "check", tab: "won" },
+    { label: "Verloren", view: "CRM", icon: "close", tab: "lost" },
+    { label: "Papierkorb", view: "CRM", icon: "trash", tab: "trash" },
+    { label: "Aktivitäten", view: "CRM", icon: "calendar", tab: "activities" },
     { label: "Kunden", view: "CRM", icon: "users", tab: "customers" },
-    { label: "Offene Deals", view: "CRM", icon: "alert", tab: "open" },
-    { label: "Abgeschlossene Deals", view: "CRM", icon: "check", tab: "closed" },
-    { label: "Kalender", view: "CRM", icon: "calendar", tab: "calendar" },
   ],
   more: [],
 };

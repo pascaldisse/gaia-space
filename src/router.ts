@@ -34,10 +34,16 @@ export type Route = {
 export const activityFilters = ["mentions", "messages", "assigned", "reviews", "updates"] as const;
 const isActivityFilter = (value: string): value is typeof activityFilters[number] =>
   activityFilters.includes(value as typeof activityFilters[number]);
-/** CRM is one destination with five work views; preserving the selected view in the
- * address makes the CRM rail truthful and lets a shared link open the same workspace. */
-export const crmTabs = ["pipeline", "customers", "open", "closed", "calendar"] as const;
+/** CRM is one destination with several work views; preserving the selected view in the
+ * address makes the CRM rail truthful and lets a shared link open the same workspace.
+ * The views follow the v2 model: leads are ORGANIZATIONS without a win, the pipeline
+ * and the open/won/lost lists are DEALS, trash is the restorable graveyard of both. */
+export const crmTabs = ["leads", "pipeline", "open", "won", "lost", "trash", "activities", "customers"] as const;
 const isCrmTab = (value: string): value is typeof crmTabs[number] => crmTabs.includes(value as typeof crmTabs[number]);
+/** Shipped links keep working: the v1 spellings resolve to their v2 successor rather
+ * than degrading to the pipeline, which would silently change what the link showed. */
+const crmTabAliases: Record<string, typeof crmTabs[number]> = { closed: "won", calendar: "activities" };
+export const canonicalCrmTab = (value: string) => isCrmTab(value) ? value : crmTabAliases[value];
 
 /** Channel workspace tabs (communication-first shell). `messages` is the default surface;
  *  the work tabs mount EXISTING views scoped to the channel's project (ChannelWorkspace),
@@ -189,8 +195,8 @@ export function parsePath(path: string): Route {
   }
 
   // /crm/<view> — the CRM's own work views, beneath one top-level destination.
-  if (slugToView[head] === "CRM" && rest.length === 1 && isCrmTab(rest[0]))
-    return norm({ view: "CRM", tab: rest[0] });
+  if (slugToView[head] === "CRM" && rest.length === 1 && canonicalCrmTab(rest[0]))
+    return norm({ view: "CRM", tab: canonicalCrmTab(rest[0]) });
 
   // /inbox/<filter> — Activity's worklist, narrowed. Keyed off the registered slug,
   // not a hardcoded word, so it follows the view's own routing key.
