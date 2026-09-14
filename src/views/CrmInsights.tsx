@@ -119,6 +119,7 @@ export default function CrmInsights(props: { data: () => CrmData; onOpen: (tab: 
       </Show>
     </div>
 
+    <div class="crm-insight-dashboard">
     <div class="crm-insight-cards">
       <Card title="Gewonnener Deal-Wert" tone="won" hint={`${metrics().won.count} gewonnene Deal${metrics().won.count === 1 ? "" : "s"} im Zeitraum`}
         value={metrics().won.count ? money(metrics().won.value) : null} empty="Kein gewonnener Deal in diesem Zeitraum."
@@ -186,6 +187,7 @@ export default function CrmInsights(props: { data: () => CrmData; onOpen: (tab: 
           onSelect={() => props.onOpen("activities")} selectHint={datum => `Aktivitäten öffnen (${datum.label})`} />
       </div>
     </section>
+    </div>
   </section>;
 }
 
