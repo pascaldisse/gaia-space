@@ -73,8 +73,8 @@ export default function CRM() {
     <PageHeader icon="columns" title="CRM" subline="Betriebe und Standorte im Vertrieb verwalten." chips={<Chip value={visible().length} label={visible().length === 1 ? " Standort" : " Standorte"} />} />
     <nav class="page-actionbar crm-toolbar" aria-label="CRM actions">
       <div class="crm-search"><Icon name="search" size={17}/><input value={query()} onInput={e => setQuery(e.currentTarget.value)} placeholder="Betrieb oder Standort suchen" aria-label="Betrieb oder Standort suchen" /></div>
-      <select class="crm-filter-input" aria-label="Nach Stadt filtern" value={cityFilter()} onChange={e => setCityFilter(e.currentTarget.value)}><option value="">Alle Städte</option><For each={cityOptions()}>{city => <option value={city}>{city}</option>}</For></select>
-      <select class="crm-filter-input" aria-label="Nach Postleitzahl filtern" value={postalFilter()} onChange={e => setPostalFilter(e.currentTarget.value)}><option value="">Alle PLZ</option><For each={postalOptions()}>{postal => <option value={postal}>{postal}</option>}</For></select>
+      <input class="crm-filter-input" aria-label="Nach Stadt filtern" list="crm-city-options" placeholder="Stadt" value={cityFilter()} onInput={e => setCityFilter(e.currentTarget.value)}/><datalist id="crm-city-options"><For each={cityOptions()}>{city => <option value={city}/>}</For></datalist>
+      <input class="crm-filter-input" aria-label="Nach Postleitzahl filtern" list="crm-postal-options" placeholder="PLZ" value={postalFilter()} onInput={e => setPostalFilter(e.currentTarget.value)}/><datalist id="crm-postal-options"><For each={postalOptions()}>{postal => <option value={postal}/>}</For></datalist>
       <select aria-label="Nach verantwortlicher Person filtern" value={filterOwner()} onChange={e => setFilterOwner(e.currentTarget.value)}><For each={owners()}>{owner => <option>{owner}</option>}</For></select>
       <button class="primary" onClick={() => setNewOpen(true)}><Icon name="plus" size={16}/> Betrieb hinzufügen</button>
     </nav>
