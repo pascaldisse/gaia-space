@@ -136,14 +136,17 @@ test("the label filter is one searchable multiselect over the central library", 
   expect(host.querySelectorAll(".crm-board .crm-card")).toHaveLength(1);
 });
 
-test("activities stay deal-owned and appear in one dated feed", async () => {
+// The worklist itself is proven in crmActivities.view.test.tsx; what matters HERE is
+// that a v1 activity survives migration deal-owned and is reachable from the list.
+test("activities stay deal-owned and appear in the activity worklist", async () => {
   navigate({ view: "CRM", tab: "activities" });
   const host = mount();
   await settle();
-  const row = host.querySelector(".crm-calendar-row")!;
-  expect(row.textContent).toContain("Anruf · Rückruf");
+  const row = host.querySelector(".crm-activity-row")!;
+  expect(row.textContent).toContain("Anruf");
+  expect(row.textContent).toContain("Rückruf");
   expect(row.textContent).toContain("Optik Nord");
-  row.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  (row.querySelector(".crm-link") as HTMLElement).click();
   await settle();
   expect(host.querySelector(".crm-detail")?.getAttribute("aria-label")).toBe("Deal Optik Nord");
 });

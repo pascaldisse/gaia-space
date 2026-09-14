@@ -99,3 +99,99 @@
 .crm-stage-age strong{color:var(--text)}
 .crm-stage-age[data-stage-age="warn"]{color:var(--status-warning-ink)}
 .crm-stage-age[data-stage-age="stale"]{color:var(--status-danger-ink)}
+
+/* ── Activity workspace ──────────────────────────────────────────────────────
+   A worklist, not a table of records: the state of a row is carried by a quiet
+   left edge and one word under the date, never by a coloured row. */
+.crm-activities{max-width:none}
+.crm-activity-head-actions{display:flex;align-items:center;gap:9px}
+.crm-mode-toggle{display:inline-flex;padding:2px;border:1px solid var(--surface-border);border-radius:9px;background:var(--canvas)}
+.crm-mode-toggle button{display:inline-flex;align-items:center;gap:5px;height:30px;padding:0 11px;border:0;border-radius:7px;background:transparent;color:var(--text-muted);font:inherit;font-size:11px;font-weight:650;cursor:pointer}
+.crm-mode-toggle button.active{background:var(--surface);color:var(--text);box-shadow:0 1px 2px rgba(15,27,51,.12)}
+.crm-new-activity{display:inline-flex!important;align-items:center;gap:6px;height:32px;padding:0 12px;border-radius:8px}
+.crm-activity-filters{display:flex;flex-wrap:wrap;align-items:center;gap:7px;margin:0 0 14px}
+.crm-filter-chip{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 11px;border:1px solid var(--surface-border);border-radius:16px;background:var(--surface);color:var(--text-muted);font:inherit;font-size:11px;font-weight:600;cursor:pointer}
+.crm-filter-chip:hover{border-color:var(--accent);color:var(--accent)}
+.crm-filter-chip.active{border-color:var(--accent);background:var(--accent-soft);color:var(--accent-text)}
+.crm-filter-chip span{font-size:10px;font-weight:700;color:var(--text-faint)}
+.crm-filter-chip.active span{color:var(--accent-text)}
+.crm-filter-chip[data-filter="overdue"].active{border-color:var(--status-danger-ink);background:var(--status-danger-bg);color:var(--status-danger-ink)}
+.crm-filter-chip[data-filter="overdue"].active span{color:var(--status-danger-ink)}
+.crm-kind-filter{height:30px;margin-left:auto;padding:0 9px;border:1px solid var(--surface-border);border-radius:8px;background:var(--canvas);color:var(--text);font:inherit;font-size:11px}
+.crm-activity-table{border:1px solid var(--surface-border);border-radius:9px;overflow:hidden;background:var(--surface)}
+.crm-activity-head,.crm-activity-row{display:grid;grid-template-columns:44px 118px minmax(180px,1.5fr) minmax(120px,1fr) minmax(120px,1fr) 110px 140px 80px 88px;gap:10px;align-items:center;padding:10px 14px}
+.crm-activity-head{font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);background:var(--ctl-bg)}
+.crm-activity-row{border-top:1px solid var(--surface-border);border-left:3px solid transparent;font-size:12px;color:var(--text-muted)}
+.crm-activity-row:hover{background:var(--ctl-bg)}
+.crm-activity-row[data-state="overdue"]{border-left-color:var(--status-danger-ink)}
+.crm-activity-row[data-state="today"]{border-left-color:var(--accent)}
+.crm-activity-row.is-done{opacity:.66}
+.crm-activity-row.is-done .crm-activity-subject strong{text-decoration:line-through;color:var(--text-muted)}
+.crm-activity-row span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.crm-activity-check input{width:16px;height:16px;cursor:pointer}
+.crm-activity-kind{display:inline-flex!important;align-items:center;gap:6px;color:var(--text-muted)}
+.crm-activity-subject{display:grid!important;gap:2px;white-space:normal!important}
+.crm-activity-subject strong{color:var(--text);font-size:12.5px}
+.crm-activity-subject small{color:var(--text-faint);font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.crm-activity-due{display:grid!important;gap:2px;color:var(--text)}
+.crm-activity-due i{font-style:normal;color:var(--text-muted)}
+.crm-activity-due small{font-size:10px;color:var(--text-faint)}
+.crm-activity-due[data-state="overdue"],.crm-activity-due[data-state="overdue"] small{color:var(--status-danger-ink)}
+.crm-activity-due[data-state="today"] small{color:var(--accent-text)}
+.crm-priority{display:inline-block;font-style:normal;font-size:10px;font-weight:650;padding:3px 8px;border-radius:10px;background:var(--ctl-bg);color:var(--text-muted)}
+.crm-priority[data-priority="Hoch"]{background:var(--status-danger-bg);color:var(--status-danger-ink)}
+.crm-priority[data-priority="Niedrig"]{background:var(--ctl-bg);color:var(--text-faint)}
+.crm-activity-link{max-width:100%;height:28px;border:1px dashed var(--surface-border);border-radius:7px;background:transparent;color:var(--text-muted);font:inherit;font-size:11px;cursor:pointer}
+/* ── Activity calendar: the app's own month grid, never a native date surface ── */
+.crm-calendar-month{border:1px solid var(--surface-border);border-radius:9px;background:var(--surface);overflow:hidden}
+.crm-month-head{display:flex;align-items:center;gap:9px;padding:11px 14px;border-bottom:1px solid var(--surface-border);background:var(--ctl-bg)}
+.crm-month-head strong{font-size:14px;min-width:170px}
+.crm-month-nav,.crm-month-today{display:inline-flex;align-items:center;justify-content:center;height:28px;min-width:28px;padding:0 10px;border:1px solid var(--surface-border);border-radius:7px;background:var(--surface);color:var(--text);font:inherit;font-size:11px;font-weight:600;cursor:pointer}
+.crm-month-today{margin-left:auto}
+.crm-month-nav:hover,.crm-month-today:hover{border-color:var(--accent);color:var(--accent)}
+.crm-month{display:grid;grid-template-columns:minmax(0,1fr) 268px}
+.crm-month-weekdays{grid-column:1;display:grid;grid-template-columns:repeat(7,1fr);padding:8px 0;border-bottom:1px solid var(--surface-border)}
+.crm-month-weekdays b{text-align:center;font-size:10px;font-weight:650;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em}
+.crm-month-grid{grid-column:1;grid-row:2;display:grid;grid-template-columns:repeat(7,1fr);grid-auto-rows:minmax(96px,auto)}
+.crm-month-cell{display:flex;flex-direction:column;gap:3px;padding:6px;border-top:1px solid var(--surface-border);border-right:1px solid var(--surface-border);background:var(--surface);cursor:pointer;min-width:0}
+.crm-month-cell:nth-child(7n){border-right:0}
+.crm-month-cell.muted{background:#fafbfc}
+.crm-month-cell.muted time{color:var(--text-faint)}
+.crm-month-cell.selected{background:var(--accent-soft);outline:1px solid var(--accent);outline-offset:-1px}
+.crm-month-cell-head{display:flex;align-items:center;justify-content:space-between}
+.crm-month-cell time{font-size:11px;font-weight:650;color:var(--text)}
+.crm-month-cell.today time{display:inline-grid;place-items:center;min-width:20px;height:20px;border-radius:50%;background:var(--brand-navy,#0F1B33);color:#fff}
+.crm-month-add{opacity:0;width:20px;height:20px;padding:0;border:0;border-radius:5px;background:transparent;color:var(--accent);font:inherit;font-size:14px;line-height:1;cursor:pointer}
+.crm-month-cell:hover .crm-month-add,.crm-month-add:focus{opacity:1;background:var(--ctl-bg)}
+.crm-month-entry{display:flex;align-items:center;gap:4px;width:100%;padding:3px 5px;border:0;border-left:3px solid var(--accent);border-radius:4px;background:var(--accent-soft);color:var(--text);font:inherit;font-size:10px;text-align:left;cursor:pointer;min-width:0}
+.crm-month-entry span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.crm-month-entry i{font-style:normal;font-weight:650;color:var(--text-muted)}
+.crm-month-entry[data-state="overdue"]{border-left-color:var(--status-danger-ink);background:var(--status-danger-bg)}
+.crm-month-entry[data-state="done"]{border-left-color:var(--surface-border);background:var(--ctl-bg);color:var(--text-muted);text-decoration:line-through}
+.crm-month-cell small{font-size:9px;color:var(--text-faint)}
+.crm-month-agenda{grid-column:2;grid-row:1 / span 2;display:flex;flex-direction:column;gap:8px;padding:12px;border-left:1px solid var(--surface-border);background:#fafbfc}
+.crm-month-agenda>header{display:flex;flex-direction:column;gap:3px}
+.crm-month-agenda>header strong{font-size:13px}
+.crm-month-agenda>header span{font-size:10px;color:var(--text-muted)}
+.crm-agenda-row{display:grid;grid-template-columns:auto minmax(0,1fr);gap:8px;align-items:start;padding:9px;border:1px solid var(--surface-border);border-left:3px solid var(--accent);border-radius:7px;background:var(--surface)}
+.crm-agenda-row[data-state="overdue"]{border-left-color:var(--status-danger-ink)}
+.crm-agenda-row[data-state="done"]{border-left-color:var(--surface-border);opacity:.7}
+.crm-agenda-row span{display:grid;gap:2px;min-width:0;font-size:12px}
+.crm-agenda-row small{font-size:10px;color:var(--text-muted)}
+.crm-agenda-row .crm-link,.crm-agenda-row .crm-activity-link{grid-column:2;justify-self:start;font-size:11px}
+.crm-agenda-add{display:flex;align-items:center;justify-content:center;gap:6px;margin-top:auto;padding:9px;border:1px dashed var(--surface-border);border-radius:7px;background:transparent;color:var(--accent);font:inherit;font-size:11px;cursor:pointer}
+/* ── Activity composer ─────────────────────────────────────────────────────── */
+.crm-activity-composer{width:min(540px,100%)}
+.crm-composer-kinds{display:flex;flex-wrap:wrap;gap:6px}
+.crm-composer-kinds button{display:inline-flex;align-items:center;gap:5px;height:30px;padding:0 10px;border:1px solid var(--surface-border);border-radius:16px;background:var(--surface);color:var(--text-muted);font:inherit;font-size:11px;font-weight:600;cursor:pointer}
+.crm-composer-kinds button.active{border-color:var(--accent);background:var(--accent-soft);color:var(--accent-text)}
+.crm-composer-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.crm-activity-composer .date-field,.crm-activity-composer .date-trigger{width:100%}
+.crm-activity-composer .date-trigger{display:flex!important;justify-content:space-between;min-height:34px;padding:0 9px!important;border-radius:var(--ctl-radius-sm)!important;background:var(--ctl-bg)!important;font:inherit!important;font-size:12px!important}
+.crm-activity-composer .primary:disabled{opacity:.5;cursor:not-allowed}
+.crm-activity[data-state="overdue"]{border-left:3px solid var(--status-danger-ink)}
+.crm-activity.is-done strong{color:var(--text-muted);text-decoration:line-through}
+@media(max-width:1100px){.crm-month{grid-template-columns:minmax(0,1fr)}.crm-month-agenda{grid-column:1;grid-row:auto;border-left:0;border-top:1px solid var(--surface-border)}
+.crm-activity-head,.crm-activity-row{grid-template-columns:40px minmax(160px,1.6fr) minmax(110px,1fr) 130px 84px}
+.crm-activity-head span:nth-child(2),.crm-activity-head span:nth-child(5),.crm-activity-head span:nth-child(6),.crm-activity-head span:nth-child(8),.crm-activity-row>span:nth-child(2),.crm-activity-row>span:nth-child(5),.crm-activity-row>span:nth-child(6),.crm-activity-row>span:nth-child(8){display:none}}
+@media(max-width:720px){.crm-composer-grid{grid-template-columns:1fr}.crm-activity-filters{gap:5px}.crm-kind-filter{margin-left:0}}

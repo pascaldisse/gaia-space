@@ -5,13 +5,15 @@ import DateField from "../components/DateField";
 import { PillMenu } from "../components/controls";
 import { navigate, route } from "../router";
 import {
-  ACTIVITY_KINDS, CRM_STAGES, PIPELINE_STAGES, WON_PROBABILITY, activitiesOf, closeDeal, convertToDeal, customers as customerOrgs,
+  ACTIVITY_KINDS, CRM_STAGES, PIPELINE_STAGES, WON_PROBABILITY, activitiesOf, activityEntries, closeDeal, convertToDeal, customers as customerOrgs,
+  activityState, emptyActivity, filterActivityEntries, setActivityDone,
   dealProbability, dealsOf, emptyDeal, emptyLocation, emptyOrganization, ensureLabel, id, leads as leadOrgs, live, loadCrm,
   moveDeal, notesOf, openDeals, organizationOf, purge, restore, saveCrm, setPipelineStages, softDeleteDeal, softDeleteOrganization,
   stageAge, stageName, stageProbability, trash,
   type Activity, type ActivityKind, type Contact, type CrmData, type CrmStage, type Deal, type Label, type Location,
   type Organization, type PipelineStage,
 } from "../crmStore";
+import CrmActivities from "./CrmActivities";
 import "./CRM.css";
 
 const split = (value: string) => value.split(/[,\n]/).map(x => x.trim()).filter(Boolean);
@@ -143,13 +145,10 @@ export default function CRM() {
     : tab() === "leads" ? leadOrgs(data()).filter(orgMatches).length
       : tab() === "customers" ? customerOrgs(data()).filter(orgMatches).length
         : tab() === "trash" ? trash(data()).deals.length + trash(data()).organizations.length
-          : tab() === "activities" ? activityFeed().length : listFor(tab()).length;
+          : tab() === "activities" ? filterActivityEntries(activityEntries(data()), "todo").length : listFor(tab()).length;
   /** Weighting reads the stage, never the deal: one source of truth for the forecast. */
   const probabilityOf = (stage: CrmStage) => stageProbability(data(), stage);
   const weighted = (deal: Deal) => dealAmount(deal) * dealProbability(data(), deal) / 100;
-  const activityFeed = () => live(data().deals).filter(dealMatches)
-    .flatMap(deal => deal.activities.map(activity => ({ deal, activity })))
-    .sort((a, b) => (a.activity.dueDate || "9999").localeCompare(b.activity.dueDate || "9999"));
 
   return <section class="crm-view">
     <PageHeader icon="columns" title="CRM" subline="Organisationen, Deals und Aktivitäten im Vertrieb." chips={<Chip value={count()} label={` ${TAB_TITLE[tab()]}`} />} />
@@ -205,15 +204,8 @@ export default function CRM() {
     </Show>
 
     <Show when={tab() === "activities"}>
-      <section class="crm-directory crm-calendar">
-        <header><div><h2>Aktivitäten</h2><p>Alle geplanten und erledigten Aktivitäten – sie gehören immer zu einem Deal.</p></div><span>{activityFeed().length}</span></header>
-        <For each={activityFeed()}>{entry => <button class="crm-calendar-row" classList={{ "is-done": entry.activity.done }} onClick={() => setSelected({ kind: "deal", id: entry.deal.id })}>
-          <time>{date(entry.activity.dueDate)}</time>
-          <span><strong>{entry.activity.kind} · {entry.activity.title}</strong><small>{entry.deal.title} · {orgOf(entry.deal)?.name ?? "Ohne Organisation"}</small></span>
-          <Icon name={entry.activity.done ? "check" : "clock"} size={17} />
-        </button>}</For>
-        <Show when={!activityFeed().length}><p class="crm-empty">Noch keine Aktivitäten erfasst.</p></Show>
-      </section>
+      <CrmActivities data={data} mutate={mutate} owners={CRM_OWNERS.map(owner => owner === "Nicht zugeteilt" ? "" : owner)}
+        onOpenDeal={dealId => setSelected({ kind: "deal", id: dealId })} onOpenOrg={orgId => setSelected({ kind: "org", id: orgId })} />
     </Show>
 
     <Show when={tab() === "trash"}>
@@ -467,10 +459,10 @@ function DealPanel(props: { dealId: string; data: () => CrmData; onMutate: (fn: 
       <Activities activities={current().activities}
         onAdd={(kind, title, due, outcome) => withDeal(draft => {
           if (!title.trim()) return;
-          draft.activities.unshift({ id: id("activity"), kind, title: title.trim(), dueDate: due, outcome: outcome.trim(), done: false });
+          draft.activities.unshift(emptyActivity({ kind, title: title.trim(), dueDate: due, outcome: outcome.trim(), owner: draft.owner }));
           if (outcome.trim()) draft.notes.unshift({ id: id("note"), title: `${kind}: ${title.trim()}`, body: outcome.trim(), author: "Team paloptic", createdAt: new Date().toISOString() });
         })}
-        onToggle={activityId => withDeal(draft => { const found = draft.activities.find(item => item.id === activityId); if (found) found.done = !found.done; })} />
+        onToggle={activityId => props.onMutate(draft => { const found = draft.deals.find(item => item.id === props.dealId)?.activities.find(item => item.id === activityId); if (found) setActivityDone(draft, activityId, !found.done); })} />
     </Show>
     <Show when={tab() === "Dokumente"}>
       <Files files={current().files} onAdd={file => withDeal(draft => { draft.files.unshift(file); })} />
@@ -593,7 +585,14 @@ function Activities(props: { activities: Activity[]; onAdd: (kind: ActivityKind,
         <button class="primary">Hinzufügen</button>
       </form></section>
     <section class="crm-section"><h2>Verlauf</h2>
-      <For each={props.activities}>{activity => <label class="crm-activity"><input type="checkbox" checked={activity.done} onChange={() => props.onToggle(activity.id)} /><span><strong>{activity.kind} · {activity.title}</strong><small>{date(activity.dueDate)}</small></span></label>}</For>
+      {/* The feed states what the worklist states: the same activity, the same tone,
+          and — once it is done — WHEN it was completed, not merely that it was. */}
+      <For each={props.activities}>{activity => <label class="crm-activity" data-state={activityState(activity)} classList={{ "is-done": activity.done }}>
+        <input type="checkbox" checked={activity.done} onChange={() => props.onToggle(activity.id)} />
+        <span><strong>{activity.kind} · {activity.title}</strong>
+          <small>{date(activity.dueDate)}{activity.dueTime ? ` · ${activity.dueTime}` : ""}{activity.duration ? ` · ${activity.duration} Min.` : ""}{activity.priority !== "Normal" ? ` · Priorität ${activity.priority}` : ""}</small>
+          <Show when={activity.done && activity.doneAt}><small>Erledigt {stamp(activity.doneAt!)}</small></Show>
+        </span></label>}</For>
       <Show when={!props.activities.length}><p class="crm-empty">Noch keine Aktivitäten geplant.</p></Show>
     </section>
   </div>;

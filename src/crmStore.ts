@@ -24,11 +24,27 @@ export const DEAL_STATUS = ["Offen", "Gewonnen", "Verloren"] as const;
 export type DealStatus = typeof DEAL_STATUS[number];
 export const ACTIVITY_KINDS = ["Anruf", "E-Mail", "Besuch", "Video-Call", "Aufgabe"] as const;
 export type ActivityKind = typeof ACTIVITY_KINDS[number];
+/** Priority is a plan, not a judgement: three steps, "Normal" the resting value. */
+export const ACTIVITY_PRIORITIES = ["Niedrig", "Normal", "Hoch"] as const;
+export type ActivityPriority = typeof ACTIVITY_PRIORITIES[number];
+/** Minutes, stored as a number so a duration can be summed; 0 means "not stated". */
+export const ACTIVITY_DURATIONS = [0, 15, 30, 45, 60, 90, 120] as const;
+/** Icon vocabulary of the activity type — one mapping, read by list, calendar and feed. */
+export const ACTIVITY_ICONS = {
+  "Anruf": "chat", "E-Mail": "send", "Besuch": "org", "Video-Call": "users", "Aufgabe": "check",
+} as const satisfies Record<ActivityKind, string>;
 
 export type Label = { id: string; name: string; color: string };
 export type Contact = { id: string; name: string; role: string; emails: string[]; phones: string[]; preferred: string };
 export type Note = { id: string; title: string; body: string; author: string; createdAt: string };
-export type Activity = { id: string; kind: ActivityKind; title: string; dueDate: string; outcome: string; done: boolean };
+/** An activity is a piece of PLANNED WORK: what kind, about what, when, how long, how
+ *  urgent, and who owes it. `dueTime` is optional (`HH:MM`) — a day without an hour is
+ *  a perfectly good plan. `doneAt` records when it was actually completed, so the feed
+ *  can say more than a checkbox. */
+export type Activity = {
+  id: string; kind: ActivityKind; title: string; dueDate: string; dueTime: string; duration: number;
+  priority: ActivityPriority; owner: string; outcome: string; done: boolean; doneAt: string | null; createdAt: string;
+};
 export type CrmFile = { id: string; name: string; type: string; data: string; createdAt: string };
 export type Location = { id: string; name: string; address: string; employees: string; emails: string[]; phones: string[]; contacts: Contact[] };
 export type Organization = {
@@ -40,7 +56,11 @@ export type Deal = {
   owner: string; source: string; value: string; currency: "EUR" | "CHF" | "USD"; expectedClose: string; labels: string[]; nextStep: string; nextStepDate: string;
   notes: Note[]; activities: Activity[]; files: CrmFile[]; createdAt: string; stageEnteredAt: string; closedAt: string | null; deletedAt: string | null;
 };
-export type CrmData = { version: 2; organizations: Organization[]; deals: Deal[]; labels: Label[]; pipelineStages: PipelineStage[] };
+/** `activities` at the top level is the INBOX of work that has no opportunity yet — a
+ *  callback from a trade fair, a reminder to research a name. The model stays
+ *  deal-owned: everything that belongs to a deal lives ON the deal, and an inbox
+ *  activity is either linked into one later (§linkActivity) or stays unlinked. */
+export type CrmData = { version: 2; organizations: Organization[]; deals: Deal[]; labels: Label[]; pipelineStages: PipelineStage[]; activities: Activity[] };
 
 /** ── Pipeline configuration ──────────────────────────────────────────────────
  *  The win probability belongs to the STAGE, never to the single deal: a deal in
@@ -114,6 +134,26 @@ const KEY_V1 = "gaia.crm.prototype.v1";
 export const id = (prefix: string) => `${prefix}-${crypto.randomUUID()}`;
 const now = () => new Date().toISOString();
 
+export const emptyActivity = (values: Partial<Activity> = {}): Activity => ({
+  id: id("activity"), kind: "Anruf", title: "", dueDate: "", dueTime: "", duration: 0, priority: "Normal",
+  owner: "", outcome: "", done: false, doneAt: null, createdAt: now(), ...values,
+});
+/** Any stored shape (v1 record, early v2, junk) read back as a complete activity. */
+export const normalizeActivity = (raw: any): Activity => emptyActivity({
+  id: raw?.id ?? id("activity"),
+  kind: ACTIVITY_KINDS.includes(raw?.kind) ? raw.kind : "Aufgabe",
+  title: String(raw?.title ?? ""),
+  dueDate: /^\d{4}-\d{2}-\d{2}$/.test(String(raw?.dueDate ?? "")) ? String(raw.dueDate) : "",
+  dueTime: /^\d{2}:\d{2}$/.test(String(raw?.dueTime ?? "")) ? String(raw.dueTime) : "",
+  duration: Math.max(0, Math.round(Number(raw?.duration) || 0)),
+  priority: ACTIVITY_PRIORITIES.includes(raw?.priority) ? raw.priority : "Normal",
+  owner: String(raw?.owner ?? ""),
+  outcome: String(raw?.outcome ?? ""),
+  done: !!raw?.done,
+  doneAt: raw?.doneAt ?? (raw?.done ? raw?.createdAt ?? null : null),
+  createdAt: raw?.createdAt ?? now(),
+});
+
 export const emptyLocation = (name = ""): Location =>
   ({ id: id("location"), name, address: "", employees: "", emails: [], phones: [], contacts: [] });
 export const emptyOrganization = (name: string, owner = ""): Organization =>
@@ -165,6 +205,115 @@ export const notesOf = (data: CrmData, organizationId: string) =>
 export const allActivities = (data: CrmData) =>
   live(data.deals).flatMap(deal => deal.activities.map(activity => ({ deal, activity })))
     .sort((a, b) => (a.activity.dueDate || "9999").localeCompare(b.activity.dueDate || "9999"));
+
+/** ── The activity worklist ──────────────────────────────────────────────
+ *  ONE list carries both homes of an activity, so list, calendar and rollup can never
+ *  disagree about what is outstanding. `deal`/`org` are null exactly when the activity
+ *  sits in the inbox. Sorted by day, then hour, then title — undated work sorts last. */
+export type ActivityEntry = { activity: Activity; deal: Deal | null; org: Organization | null };
+const entryOrder = (a: ActivityEntry, b: ActivityEntry) =>
+  (a.activity.dueDate || "9999-12-31").localeCompare(b.activity.dueDate || "9999-12-31")
+  || (a.activity.dueTime || "99:99").localeCompare(b.activity.dueTime || "99:99")
+  || a.activity.title.localeCompare(b.activity.title, "de");
+export const activityEntries = (data: CrmData): ActivityEntry[] => [
+  ...live(data.deals).flatMap(deal => deal.activities.map(activity => ({ activity, deal, org: organizationOf(data, deal) ?? null }))),
+  ...(data.activities ?? []).map(activity => ({ activity, deal: null, org: null })),
+].sort(entryOrder);
+export const findActivity = (data: CrmData, activityId: string): ActivityEntry | undefined =>
+  activityEntries(data).find(entry => entry.activity.id === activityId);
+
+/** Local day key — never `toISOString()`, which would shift a date-only plan a day. */
+export const dayKey = (date: Date) =>
+  `${date.getFullYear()}-${`${date.getMonth() + 1}`.padStart(2, "0")}-${`${date.getDate()}`.padStart(2, "0")}`;
+/** Monday–Sunday, the week a German calendar shows. */
+export const weekBounds = (at: Date = new Date()) => {
+  const start = new Date(at.getFullYear(), at.getMonth(), at.getDate());
+  start.setDate(start.getDate() - ((start.getDay() + 6) % 7));
+  const end = new Date(start); end.setDate(start.getDate() + 6);
+  return { start: dayKey(start), end: dayKey(end) };
+};
+
+export type ActivityState = "done" | "overdue" | "today" | "planned" | "unscheduled";
+/** What an activity IS right now. Every badge, tone and filter reads this one function. */
+export const activityState = (activity: Activity, at: Date = new Date()): ActivityState => {
+  if (activity.done) return "done";
+  if (!activity.dueDate) return "unscheduled";
+  const today = dayKey(at);
+  return activity.dueDate < today ? "overdue" : activity.dueDate === today ? "today" : "planned";
+};
+
+export const ACTIVITY_VIEWS = ["todo", "overdue", "today", "week", "done", "all"] as const;
+export type ActivityView = typeof ACTIVITY_VIEWS[number];
+export const ACTIVITY_VIEW_LABELS: Record<ActivityView, string> = {
+  todo: "To-do", overdue: "Überfällig", today: "Heute", week: "Diese Woche", done: "Erledigt", all: "Alle",
+};
+export const isActivityView = (value: unknown): value is ActivityView => ACTIVITY_VIEWS.includes(value as ActivityView);
+/** A filter narrows the SAME worklist; nothing here mutates or re-sorts. */
+export const matchesActivityView = (activity: Activity, view: ActivityView, at: Date = new Date()): boolean => {
+  const state = activityState(activity, at);
+  if (view === "all") return true;
+  if (view === "done") return state === "done";
+  if (view === "todo") return state !== "done";
+  if (state === "done") return false;
+  if (view === "overdue") return state === "overdue";
+  if (view === "today") return state === "today";
+  const { start, end } = weekBounds(at);
+  return !!activity.dueDate && activity.dueDate >= start && activity.dueDate <= end;
+};
+export const filterActivityEntries = (entries: ActivityEntry[], view: ActivityView, kind: ActivityKind | "Alle" = "Alle", at: Date = new Date()) =>
+  entries.filter(entry => matchesActivityView(entry.activity, view, at) && (kind === "Alle" || entry.activity.kind === kind));
+export const activitiesOnDay = (entries: ActivityEntry[], day: Date) =>
+  entries.filter(entry => entry.activity.dueDate === dayKey(day));
+
+/** ── Activity mutations ─────────────────────────────────────────────────
+ *  A deal id routes the activity to its opportunity; no deal id routes it to the inbox.
+ *  One entry point, so a composer cannot invent a second storage rule. */
+export const addActivity = (data: CrmData, dealId: string | null, values: Partial<Activity>): Activity => {
+  const activity = emptyActivity(values);
+  const deal = dealId ? data.deals.find(item => item.id === dealId) : undefined;
+  if (deal) deal.activities.unshift(activity);
+  else (data.activities ??= []).unshift(activity);
+  return activity;
+};
+const activityBuckets = (data: CrmData): Activity[][] => [...data.deals.map(deal => deal.activities), (data.activities ??= [])];
+export const setActivityDone = (data: CrmData, activityId: string, done: boolean) => {
+  for (const bucket of activityBuckets(data)) {
+    const found = bucket.find(item => item.id === activityId);
+    if (found) { found.done = done; found.doneAt = done ? now() : null; return found; }
+  }
+  return undefined;
+};
+export const toggleActivity = (data: CrmData, activityId: string) => {
+  for (const bucket of activityBuckets(data)) {
+    const found = bucket.find(item => item.id === activityId);
+    if (found) return setActivityDone(data, activityId, !found.done);
+  }
+  return undefined;
+};
+export const updateActivity = (data: CrmData, activityId: string, values: Partial<Activity>) => {
+  for (const bucket of activityBuckets(data)) {
+    const found = bucket.find(item => item.id === activityId);
+    if (found) { Object.assign(found, values); return found; }
+  }
+  return undefined;
+};
+export const removeActivity = (data: CrmData, activityId: string) => {
+  for (const bucket of activityBuckets(data)) {
+    const index = bucket.findIndex(item => item.id === activityId);
+    if (index >= 0) return bucket.splice(index, 1)[0];
+  }
+  return undefined;
+};
+/** Linking is a MOVE, never a copy: the activity leaves its old home in the same write,
+ *  so an activity can never be outstanding twice. `null` sends it back to the inbox. */
+export const linkActivity = (data: CrmData, activityId: string, dealId: string | null) => {
+  const activity = removeActivity(data, activityId);
+  if (!activity) return undefined;
+  const deal = dealId ? data.deals.find(item => item.id === dealId) : undefined;
+  if (deal) deal.activities.unshift(activity);
+  else (data.activities ??= []).unshift(activity);
+  return activity;
+};
 
 /** ── Mutations (pure on a draft) ─────────────────────────────────────────── */
 /** Re-dropping a card in the column it already sits in is a no-op for the clock: only
@@ -220,7 +369,7 @@ const stageOf = (value: unknown): CrmStage =>
  *  activities that v1 hung on LOCATIONS move onto the organization's first deal,
  *  because a conversation is about an opportunity, not about an address. */
 export const migrateV1 = (accounts: any[]): CrmData => {
-  const data: CrmData = { version: 2, organizations: [], deals: [], labels: [], pipelineStages: defaultPipelineStages() };
+  const data: CrmData = { version: 2, organizations: [], deals: [], labels: [], pipelineStages: defaultPipelineStages(), activities: [] };
   const label = (name: string) => ensureLabel(data, name);
   for (const account of accounts ?? []) {
     const locations: Location[] = (account.locations ?? []).map((loc: any) => ({
@@ -248,7 +397,7 @@ export const migrateV1 = (accounts: any[]): CrmData => {
         labels: (raw.labels ?? account.labels ?? []).map(label), nextStep: raw.nextStep ?? "", nextStepDate: raw.nextStepDate ?? "",
         notes: [...(raw.notes ?? []), ...(index === 0 ? (account.locations ?? []).flatMap((loc: any) => loc.notes ?? []) : [])]
           .map((note: any) => ({ id: note.id ?? id("note"), title: note.title ?? "Notiz", body: note.body ?? "", author: note.author ?? "", createdAt: note.createdAt ?? now() })),
-        activities: [...(raw.activities ?? []), ...(index === 0 ? (account.locations ?? []).flatMap((loc: any) => loc.activities ?? []) : [])],
+        activities: [...(raw.activities ?? []), ...(index === 0 ? (account.locations ?? []).flatMap((loc: any) => loc.activities ?? []) : [])].map(normalizeActivity),
         files: [...(raw.files ?? []), ...(index === 0 ? (account.locations ?? []).flatMap((loc: any) => loc.files ?? []) : [])],
         createdAt: raw.createdAt ?? now(), stageEnteredAt: raw.stageEnteredAt ?? raw.createdAt ?? now(), closedAt: wasWon || wasLost ? (raw.closedAt ?? now()) : null, deletedAt: null,
       });
@@ -265,7 +414,7 @@ export const seed = (): CrmData => {
     { ...emptyLocation("Beispiel Optik · Mitte"), address: "Musterstraße 12\n10115 Berlin", employees: "7", emails: ["kontakt@beispiel-optik.de"], phones: ["030 123456"], contacts: [{ id: id("contact"), name: "Max Mustermann", role: "Inhaber", emails: ["max@beispiel-optik.de"], phones: ["030 123456"], preferred: "Telefon" }] },
     { ...emptyLocation("Beispiel Optik · Prenzlauer Berg"), address: "Musterallee 4\n10405 Berlin", employees: "5" },
   ];
-  const data: CrmData = { version: 2, organizations: [org], deals: [], labels: withStarterLabels([]), pipelineStages: defaultPipelineStages() };
+  const data: CrmData = { version: 2, organizations: [org], deals: [], labels: withStarterLabels([]), pipelineStages: defaultPipelineStages(), activities: [] };
   org.labels = [ensureLabel(data, "Gründungskunde")];
   const deal = { ...emptyDeal(org.id, "Beispiel Optik GmbH", "Jannes"), stage: "Qualified" as CrmStage, nextStep: "Erstgespräch terminieren", labels: [...org.labels], source: "Beispieldaten" };
   data.deals.push(deal);
@@ -280,11 +429,14 @@ export const normalize = (raw: any): CrmData => {
     return {
       version: 2,
       pipelineStages: normalizePipelineStages(raw.pipelineStages),
+      // The inbox is additive: a document written before unlinked activities existed
+      // reads back as an empty inbox, never as a missing field.
+      activities: (Array.isArray(raw.activities) ? raw.activities : []).map(normalizeActivity),
       labels: withStarterLabels((raw.labels ?? []).map((label: any, index: number) => ({ id: label.id ?? id("label"), name: label.name ?? "", color: label.color ?? LABEL_COLORS[index % LABEL_COLORS.length] }))),
       organizations: raw.organizations.map((org: any) => ({ ...emptyOrganization(org.name ?? ""), ...org, labels: org.labels ?? [], locations: org.locations?.length ? org.locations : [emptyLocation(org.name ?? "")], deletedAt: org.deletedAt ?? null })),
       // `probability` was a manual per-deal field in early v2 documents; the stage owns
       // it now, so it is dropped on read rather than carried as dead weight.
-      deals: raw.deals.map(({ probability: _dropped, ...deal }: any) => ({ ...emptyDeal(deal.organizationId ?? "", deal.title ?? ""), ...deal, stage: stageOf(deal.stage), status: DEAL_STATUS.includes(deal.status) ? deal.status : "Offen", labels: deal.labels ?? [], notes: deal.notes ?? [], activities: deal.activities ?? [], files: deal.files ?? [], deletedAt: deal.deletedAt ?? null, closedAt: deal.closedAt ?? null, stageEnteredAt: typeof deal.stageEnteredAt === "string" && deal.stageEnteredAt ? deal.stageEnteredAt : (deal.createdAt ?? now()) })),
+      deals: raw.deals.map(({ probability: _dropped, ...deal }: any) => ({ ...emptyDeal(deal.organizationId ?? "", deal.title ?? ""), ...deal, stage: stageOf(deal.stage), status: DEAL_STATUS.includes(deal.status) ? deal.status : "Offen", labels: deal.labels ?? [], notes: deal.notes ?? [], files: deal.files ?? [], activities: (deal.activities ?? []).map(normalizeActivity), deletedAt: deal.deletedAt ?? null, closedAt: deal.closedAt ?? null, stageEnteredAt: typeof deal.stageEnteredAt === "string" && deal.stageEnteredAt ? deal.stageEnteredAt : (deal.createdAt ?? now()) })),
     };
   }
   if (raw.accounts) return migrateV1(raw.accounts);

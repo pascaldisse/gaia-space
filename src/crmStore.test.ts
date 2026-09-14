@@ -130,7 +130,7 @@ test("closing and moving a deal flips status without inventing a stage", () => {
 });
 
 test("an organization without a won deal is a lead; converting adds a deal, not a record", () => {
-  const data: CrmData = { version: 2, organizations: [], deals: [], labels: [], pipelineStages: defaultPipelineStages() };
+  const data: CrmData = { version: 2, organizations: [], deals: [], labels: [], pipelineStages: defaultPipelineStages(), activities: [] };
   const fresh = seed();
   data.organizations.push(fresh.organizations[0]);
   expect(leads(data)).toHaveLength(1);
