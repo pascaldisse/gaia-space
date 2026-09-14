@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, For, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, For, Show, onCleanup, onMount } from "solid-js";
 import PageHeader, { Chip } from "../components/PageHeader";
 import { Icon } from "../components/Icon";
 import { route } from "../router";
@@ -15,17 +15,23 @@ export default function CRM() {
   const [accounts, setAccounts] = createSignal<Account[]>(loadCrm());
   const [selected, setSelected] = createSignal<string | null>(null);
   const [query, setQuery] = createSignal("");
+  const [cityFilter, setCityFilter] = createSignal("");
+  const [postalFilter, setPostalFilter] = createSignal("");
   const [newOpen, setNewOpen] = createSignal(false);
   const [filterOwner, setFilterOwner] = createSignal("Alle");
   const [view, setView] = createSignal<CrmView>(viewForRouteTab(route().tab));
   createEffect(() => setView(viewForRouteTab(route().tab)));
   const [dragging, setDragging] = createSignal<string | null>(null);
+  const [pointerDrag, setPointerDrag] = createSignal<{ id: string; x: number; y: number } | null>(null);
   const [dragOverStage, setDragOverStage] = createSignal<CrmStage | null>(null);
+  let pointerCandidate: { id: string; x: number; y: number } | null = null;
+  let suppressCardClick = false;
   createEffect(() => saveCrm(accounts()));
   const locations = createMemo(() => accounts().flatMap(account => account.locations.map(location => ({ account, location }))));
   const visible = () => locations().filter(({ account, location }) => {
     const q = query().trim().toLocaleLowerCase("de");
-    return (!q || `${account.name} ${location.name} ${location.address}`.toLocaleLowerCase("de").includes(q)) && (filterOwner() === "Alle" || account.owner === filterOwner());
+    const address = location.address.toLocaleLowerCase("de");
+    return (!q || `${account.name} ${location.name} ${location.address}`.toLocaleLowerCase("de").includes(q)) && (!cityFilter().trim() || address.includes(cityFilter().trim().toLocaleLowerCase("de"))) && (!postalFilter().trim() || address.includes(postalFilter().trim())) && (filterOwner() === "Alle" || account.owner === filterOwner());
   });
   const selectedItem = () => locations().find(item => item.location.id === selected());
   const mutate = (fn: (draft: Account[]) => void) => setAccounts(current => { const next = structuredClone(current); fn(next); return next; });
@@ -33,18 +39,43 @@ export default function CRM() {
   const move = (locationId: string, stage: CrmStage) => updateLocation(locationId, { stage, status: "Aktiv" });
   const addAccount = (name: string, owner: string) => { const location = emptyLocation(name); const account: Account = { id: id("account"), name, website: "", locationCount: 1, employees: "", software: "", source: "", owner, locations: [location] }; mutate(items => items.unshift(account)); setSelected(location.id); setNewOpen(false); };
   const owners = () => ["Alle", ...Array.from(new Set(accounts().map(x => x.owner).filter(Boolean)))];
+  onMount(() => {
+    const moved = (event: PointerEvent) => {
+      const candidate = pointerCandidate;
+      if (!candidate) return;
+      if (!pointerDrag() && Math.hypot(event.clientX - candidate.x, event.clientY - candidate.y) < 6) return;
+      const target = document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>("[data-crm-stage]");
+      setPointerDrag({ id: candidate.id, x: event.clientX, y: event.clientY });
+      setDragOverStage((target?.dataset.crmStage as CrmStage | undefined) ?? null);
+    };
+    const released = (event: PointerEvent) => {
+      const active = pointerDrag();
+      if (active) {
+        const target = document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>("[data-crm-stage]");
+        const stage = target?.dataset.crmStage as CrmStage | undefined;
+        if (stage) move(active.id, stage);
+        suppressCardClick = true;
+      }
+      pointerCandidate = null; setPointerDrag(null); setDragOverStage(null);
+    };
+    window.addEventListener("pointermove", moved); window.addEventListener("pointerup", released);
+    onCleanup(() => { window.removeEventListener("pointermove", moved); window.removeEventListener("pointerup", released); });
+  });
   return <section class="crm-view">
     <PageHeader icon="columns" title="CRM" subline="Betriebe und Standorte im Vertrieb verwalten." chips={<Chip value={visible().length} label={visible().length === 1 ? " Standort" : " Standorte"} />} />
     <nav class="page-actionbar crm-toolbar" aria-label="CRM actions">
       <div class="crm-search"><Icon name="search" size={17}/><input value={query()} onInput={e => setQuery(e.currentTarget.value)} placeholder="Betrieb oder Standort suchen" aria-label="Betrieb oder Standort suchen" /></div>
+      <input class="crm-filter-input" aria-label="Nach Stadt filtern" placeholder="Stadt" value={cityFilter()} onInput={e => setCityFilter(e.currentTarget.value)}/>
+      <input class="crm-filter-input" aria-label="Nach Postleitzahl filtern" placeholder="PLZ" value={postalFilter()} onInput={e => setPostalFilter(e.currentTarget.value)}/>
       <select aria-label="Nach verantwortlicher Person filtern" value={filterOwner()} onChange={e => setFilterOwner(e.currentTarget.value)}><For each={owners()}>{owner => <option>{owner}</option>}</For></select>
       <button class="primary" onClick={() => setNewOpen(true)}><Icon name="plus" size={16}/> Betrieb hinzufügen</button>
     </nav>
     <Show when={newOpen()}><NewAccount onClose={() => setNewOpen(false)} onSave={addAccount}/></Show>
+    <Show when={pointerDrag()}>{drag => <div class="crm-drag-ghost" style={{ left: `${drag().x + 14}px`, top: `${drag().y + 14}px` }}>Standort verschieben</div>}</Show>
     <Show when={view() === "Pipeline"}><section class="crm-pipeline"><div class="crm-pipeline-summary"><span>{visible().filter(x => x.location.status === "Aktiv" && x.location.stage !== "Gewonnen").length} offene Deals</span><span>Pipeline: Vertrieb</span></div><div class="crm-board" aria-label="Vertriebspipeline">
-      <For each={PIPELINE_STAGES}>{stage => <section class="crm-column" classList={{ "is-drop-target": dragOverStage() === stage }} onDragEnter={e => { e.preventDefault(); setDragOverStage(stage); }} onDragOver={e => { e.preventDefault(); if (e.dataTransfer) e.dataTransfer.dropEffect = "move"; setDragOverStage(stage); }} onDragLeave={() => setDragOverStage(null)} onDrop={e => { e.preventDefault(); const locationId = e.dataTransfer?.getData("text/plain") || dragging(); if (locationId) move(locationId, stage); setDragging(null); setDragOverStage(null); }}>
+      <For each={PIPELINE_STAGES}>{stage => <section class="crm-column" data-crm-stage={stage} classList={{ "is-drop-target": dragOverStage() === stage }} onDragEnter={e => { e.preventDefault(); setDragOverStage(stage); }} onDragOver={e => { e.preventDefault(); if (e.dataTransfer) e.dataTransfer.dropEffect = "move"; setDragOverStage(stage); }} onDragLeave={() => setDragOverStage(null)} onDrop={e => { e.preventDefault(); const locationId = e.dataTransfer?.getData("text/plain") || dragging(); if (locationId) move(locationId, stage); setDragging(null); setDragOverStage(null); }}>
         <header><strong>{stage}</strong><span>{visible().filter(x => x.location.stage === stage && x.location.status === "Aktiv").length}</span></header>
-        <div class="crm-column-cards"><For each={visible().filter(x => x.location.stage === stage && x.location.status === "Aktiv")}>{item => <div class="crm-card" role="button" tabindex="0" draggable="true" onDragStart={e => { setDragging(item.location.id); if (e.dataTransfer) { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", item.location.id); } }} onDragEnd={() => { setDragging(null); setDragOverStage(null); }} onClick={() => setSelected(item.location.id)}>
+        <div class="crm-column-cards"><For each={visible().filter(x => x.location.stage === stage && x.location.status === "Aktiv")}>{item => <div class="crm-card" role="button" tabindex="0" onPointerDown={e => { pointerCandidate = { id: item.location.id, x: e.clientX, y: e.clientY }; }} onClick={() => { if (suppressCardClick) { suppressCardClick = false; return; } setSelected(item.location.id); }}>
           <span class="crm-card-account">{item.account.name}</span><strong>{item.location.name}</strong>
           <Show when={item.location.nextStep}><span class="crm-card-next"><Icon name="alert" size={14}/>{item.location.nextStep}</span></Show>
           <footer><span>{item.account.owner || "Nicht zugeteilt"}</span><Show when={item.location.contacts.length}><span>{item.location.contacts.length} Kontakt{item.location.contacts.length === 1 ? "" : "e"}</span></Show></footer>
