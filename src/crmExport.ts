@@ -21,7 +21,7 @@
  *  INCLUDING deleted records — because a backup that silently drops the trash is not a
  *  backup. Every other scope exports live records only. */
 import {
-  activityState, customers, daysInStage, dealAmount, dealProbability, isCustomer, live, LEAD_STATE_LABELS,
+  activityState, customers, daysInStage, dealAmount, dealProbability, isCustomer, live, stageName, LEAD_STATE_LABELS,
   type Activity, type CrmData, type CrmFile, type Deal, type Organization,
 } from "./crmStore";
 
@@ -258,7 +258,9 @@ export const dealRows = (data: CrmData, selection: ExportSelection, at: Date = n
     const location = data.organizations.find(org => org.id === deal.organizationId)?.locations.find(loc => loc.id === deal.locationId);
     return [
       deal.id, deal.title, orgName(deal.organizationId), deal.organizationId, location?.name ?? "",
-      deal.stage, deal.status, probability,
+      // The phase as the pipeline configuration NAMES it: a renamed phase reads the same
+      // in Excel as on the board, instead of exporting the internal key nobody renamed.
+      stageName(data, deal.stage), deal.status, probability,
       deNumber(amount), deal.currency, deNumber(Math.round(amount * probability) / 100),
       deal.owner, deal.source, deDate(deal.expectedClose), joined(deal.labels.map(labelName)),
       deal.nextStep, deDate(deal.nextStepDate), daysInStage(deal, at),

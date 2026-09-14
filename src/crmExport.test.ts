@@ -269,3 +269,15 @@ test("one run produces one file per chosen format, each self-contained", () => {
   expect(backup.schema).toBe(EXPORT_SCHEMA);
   expect(files[0].mime).toBe("application/json;charset=utf-8");
 });
+
+// Regression: the pipeline configuration exists so a phase can be CALLED what the sales
+// team calls it. Board, deal panel and reports honoured the rename; the CSV — the one
+// artefact a human reads outside the app — still printed the internal key.
+test("a renamed phase is exported under its name, not its internal key", () => {
+  const data = fixture();
+  data.pipelineStages = data.pipelineStages.map(stage =>
+    stage.id === "Angebot erstellt" ? { ...stage, name: "Angebot raus" } : stage);
+  const phase = DEAL_COLUMNS.indexOf("Phase");
+  const row = dealRows(data, selectScope(data, "deals"), AT).find(item => item[1] === "Filialausstattung")!;
+  expect(row[phase]).toBe("Angebot raus");
+});
