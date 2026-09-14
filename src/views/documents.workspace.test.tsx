@@ -4,7 +4,7 @@ mock.module("@tauri-apps/api/core", () => ({ invoke }));
 import { render } from "solid-js/web";
 import Documents, { documentTreeLoading } from "./Documents";
 import { setProfileId, setProjectId } from "../session";
-import { navigate, registerViews, setAvailableViews } from "../router";
+import { createMemoryAdapter, initRouter, navigate, registerViews, setAvailableViews } from "../router";
 
 // The Documents workspace is session-locked in web mode: the personal container is the
 // session's own profile, the UI offers no way to act as anybody else, and a forged
@@ -21,6 +21,7 @@ afterEach(() => {
   // Session state is process-global: hand it back the way you found it.
   setProjectId(""); setProfileId("");
   window.history.replaceState({}, "", "/");
+initRouter(createMemoryAdapter());
 });
 
 // Router state is process-global. Each case begins at the personal library rather
@@ -50,12 +51,39 @@ const mount = async () => {
   return host;
 };
 
+const historyAdapter = (initial: string) => {
+  const stack = [initial]; let index = 0; let listener = () => {};
+  return {
+    adapter: {
+      read: () => stack[index],
+      write: (path: string, replace: boolean) => { if (replace) stack[index] = path; else { stack.splice(index + 1); stack.push(path); index = stack.length - 1; } },
+      href: (path: string) => `/space/${path}`,
+      subscribe: (fn: () => void) => { listener = fn; },
+    },
+    url: () => stack[index],
+    back: () => { if (index > 0) { index--; listener(); } },
+  };
+};
 const folder = (over: Record<string, unknown> = {}) => ({
   id: "f1", container_type: "my-docs", container_id: "me", parent_id: null,
   name: "Mine", description: null, archived: false, created_at: 0, ...over,
 });
 
 describe("documents workspace composition", () => {
+  test("resolving a container-less document link replaces its history entry", async () => {
+    setProfileId("me");
+    const history = historyAdapter("documents");
+    initRouter(history.adapter);
+    navigate({ view: "Documents", entityType: "document", entityId: "doc-1" });
+    serve({
+      list_document_folders: { ok: true, value: [] },
+      list_documents: { ok: true, value: [{ id: "doc-1", container_type: "my-docs", container_id: "me", folder_id: null, doc_type: "text", title: "Plan", body: "", version: 1, archived: false, created_by: "me" }] },
+    });
+    await mount();
+    expect(history.url()).toBe("documents/my-docs/me/doc-1");
+    history.back();
+    expect(history.url()).toBe("documents");
+  });
   test("a refresh keeps the already loaded tree visible", () => {
     expect(documentTreeLoading("refreshing", "ready")).toBe(false);
     expect(documentTreeLoading("pending", "ready")).toBe(true);

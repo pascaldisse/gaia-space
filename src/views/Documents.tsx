@@ -665,16 +665,17 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
     if (!props.container) return;
     applyContainer(props.container, props.containerId);
   });
-  useDeepLink("document", (id) => {
-    setSelectedDocumentId(id);
-    if (route().containerType) return;
-    // container-less link (e.g. Goto hit): resolve the document's own container and
-    // rewrite the URL so address bar and UI agree.
-    const doc = allDocuments()?.find((d) => d.id === id);
+  useDeepLink("document", (id) => setSelectedDocumentId(id), () => setSelectedDocumentId(null));
+  // A resource may still be loading when the URL effect first opens a bare document.
+  // Resolve once its rows arrive, then replace that temporary history entry in place.
+  createEffect(() => {
+    const r = route();
+    if (r.view !== "Documents" || r.entityType !== "document" || !r.entityId || r.containerType) return;
+    const doc = allDocuments()?.find((d) => d.id === r.entityId);
     if (!doc) return;
     applyContainer(doc.container_type, doc.container_id ?? undefined);
-    linkEntity("document", id, { containerType: doc.container_type, containerId: doc.container_id ?? undefined }, true);
-  }, () => setSelectedDocumentId(null));
+    linkEntity("document", r.entityId, { containerType: doc.container_type, containerId: doc.container_id ?? undefined }, true);
+  });
 
   const [editTitle, setEditTitle] = createSignal("");
   const [editBody, setEditBody] = createSignal("");
