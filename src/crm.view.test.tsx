@@ -79,17 +79,90 @@ test("the deal panel owns the conversation and the organization panel only summa
   expect((orgPanel.querySelector("textarea") as HTMLTextAreaElement).value).toContain("Hauptstr. 1");
 });
 
-test("an organization without a win is a lead and can be converted without losing the record", async () => {
+// ── The lead inbox ───────────────────────────────────────────────────────────
+// A migrated v1 account HAS a deal, so it is not an enquiry any more: the inbox must
+// be empty and say so, instead of listing every organization that has not won yet.
+test("a record that already produced a deal is not in the lead inbox", async () => {
   navigate({ view: "CRM", tab: "leads" });
   const host = mount();
   await settle();
-  expect(host.querySelector(".crm-lead-card strong")?.textContent).toBe("Optik Nord");
-  (host.querySelector(".crm-lead-card footer button") as HTMLElement).click();
+  expect(host.querySelectorAll(".crm-lead-row")).toHaveLength(0);
+  expect(host.querySelector(".crm-lead-inbox .crm-empty")?.textContent).toContain("Posteingang ist leer");
+  const stored = JSON.parse(localStorage.getItem("gaia.crm.prototype.v2")!);
+  expect(stored.organizations[0].leadState).toBe("converted");
+});
+
+test("a lead is listed with its reason, converts once into a deal and can be archived", async () => {
+  mount();                                     // one mount only to migrate and write the document
+  await settle();
+  // A fresh enquiry, made the way the view makes it: an organization without a deal.
+  const before = JSON.parse(localStorage.getItem("gaia.crm.prototype.v2")!);
+  before.organizations.push({
+    id: "org-lead", name: "Optik Sonne", website: "", employees: "", decisionMaker: "", software: "",
+    source: "Website-Formular", owner: "Bjarne", labels: [], locations: [], createdAt: "2026-09-02T09:00:00.000Z",
+    deletedAt: null, leadState: "active", nextStep: "Rückruf vereinbaren",
+  });
+  localStorage.setItem("gaia.crm.prototype.v2", JSON.stringify(before));
+  dispose?.(); dispose = undefined; document.body.innerHTML = "";
+  navigate({ view: "CRM", tab: "leads" });
+  const view = mount();
+  await settle();
+
+  const row = view.querySelector(".crm-lead-row")!;
+  expect(row.querySelector("strong")?.textContent).toBe("Optik Sonne");
+  // The reason it is still a lead is ON the row, not hidden in a detail panel.
+  expect(row.textContent).toContain("Website-Formular");
+  expect(row.textContent).toContain("Rückruf vereinbaren");
+
+  // Convert: a dialog asks for the phase and an optional value, then it is a deal —
+  // and only one, no matter that the row offered the action.
+  (row.querySelector(".crm-lead-actions button") as HTMLElement).click();
+  await settle();
+  const dialog = view.querySelector(".crm-modal")!;
+  expect(dialog.textContent).toContain("Lead in Deal umwandeln");
+  (dialog.querySelector("input") as HTMLInputElement).value = "12500";
+  (dialog.querySelector("input") as HTMLInputElement).dispatchEvent(new Event("input", { bubbles: true }));
+  (dialog.querySelector("button.primary") as HTMLElement).click();
   await settle();
   const stored = JSON.parse(localStorage.getItem("gaia.crm.prototype.v2")!);
-  expect(stored.organizations).toHaveLength(1);
-  expect(stored.deals).toHaveLength(2);
-  expect(stored.deals.filter((deal: any) => deal.organizationId === stored.organizations[0].id)).toHaveLength(2);
+  expect(stored.organizations).toHaveLength(2);                       // no second record
+  expect(stored.deals.filter((deal: any) => deal.organizationId === "org-lead")).toHaveLength(1);
+  expect(stored.deals.find((deal: any) => deal.organizationId === "org-lead").value).toBe("12500");
+  expect(stored.deals.find((deal: any) => deal.organizationId === "org-lead").source).toBe("Website-Formular");
+  expect(stored.organizations.find((org: any) => org.id === "org-lead").leadState).toBe("converted");
+  navigate({ view: "CRM", tab: "leads" });
+  await settle();
+  expect(view.querySelectorAll(".crm-lead-row")).toHaveLength(0);     // left the inbox
+});
+
+test("archiving takes a lead out of the inbox onto a counted shelf, and back", async () => {
+  mount();                                     // one mount only to migrate and write the document
+  await settle();
+  const before = JSON.parse(localStorage.getItem("gaia.crm.prototype.v2")!);
+  before.organizations.push({
+    id: "org-lead", name: "Optik Sonne", website: "", employees: "", decisionMaker: "", software: "",
+    source: "Empfehlung", owner: "", labels: [], locations: [], createdAt: "2026-09-02T09:00:00.000Z",
+    deletedAt: null, leadState: "active", nextStep: "",
+  });
+  localStorage.setItem("gaia.crm.prototype.v2", JSON.stringify(before));
+  dispose?.(); dispose = undefined; document.body.innerHTML = "";
+  navigate({ view: "CRM", tab: "leads" });
+  const view = mount();
+  await settle();
+
+  const actions = view.querySelectorAll(".crm-lead-row .crm-lead-actions button");
+  (actions[1] as HTMLElement).click();                                // Archivieren
+  await settle();
+  const shelves = [...view.querySelectorAll(".crm-lead-scope button")];
+  expect(shelves.map(node => node.textContent)).toEqual(["Posteingang 0", "Archiv 1"]);
+  expect(view.querySelectorAll(".crm-lead-row")).toHaveLength(0);
+  // Archiving is not deleting: the record is live, restorable, and out of trash.
+  expect(JSON.parse(localStorage.getItem("gaia.crm.prototype.v2")!).organizations.find((org: any) => org.id === "org-lead").deletedAt).toBeNull();
+  (shelves[1] as HTMLElement).click();
+  await settle();
+  (view.querySelector(".crm-lead-row .crm-lead-actions button") as HTMLElement).click();   // Wiederherstellen
+  await settle();
+  expect(JSON.parse(localStorage.getItem("gaia.crm.prototype.v2")!).organizations.find((org: any) => org.id === "org-lead").leadState).toBe("active");
 });
 
 test("deleting a deal moves it to trash, where it is restorable", async () => {

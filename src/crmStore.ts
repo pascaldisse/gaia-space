@@ -34,7 +34,25 @@ export const ACTIVITY_ICONS = {
   "Anruf": "chat", "E-Mail": "send", "Besuch": "org", "Video-Call": "users", "Aufgabe": "check",
 } as const satisfies Record<ActivityKind, string>;
 
+/** ── Lead state ──────────────────────────────────────────────────────────────
+ *  A lead is NOT a second record type. The organization is the shared record; what
+ *  changes is its position in the triage:
+ *    active    — an unqualified enquiry sitting in the Lead Inbox. Has NO deal, so it
+ *                cannot reach the pipeline, the customer list or the insights.
+ *    archived  — triaged away without a deal. Restorable, never deleted (trash stays
+ *                the only place a record is actually removed).
+ *    converted — qualified exactly once: a deal was created from it. From here on the
+ *                deal carries the opportunity and the organization carries the facts.
+ *  The state is PERSISTED, so "why is this not a deal yet" is a stored answer rather
+ *  than a guess derived from the absence of a win. */
+export const LEAD_STATES = ["active", "archived", "converted"] as const;
+export type LeadState = typeof LEAD_STATES[number];
+export const LEAD_STATE_LABELS: Record<LeadState, string> = {
+  active: "Posteingang", archived: "Archiviert", converted: "In Deal umgewandelt",
+};
+
 export type Label = { id: string; name: string; color: string };
+
 export type Contact = { id: string; name: string; role: string; emails: string[]; phones: string[]; preferred: string };
 export type Note = { id: string; title: string; body: string; author: string; createdAt: string };
 /** An activity is a piece of PLANNED WORK: what kind, about what, when, how long, how
@@ -50,6 +68,10 @@ export type Location = { id: string; name: string; address: string; employees: s
 export type Organization = {
   id: string; name: string; website: string; employees: string; decisionMaker: string; software: string; source: string;
   owner: string; labels: string[]; locations: Location[]; createdAt: string; deletedAt: string | null;
+  /** Where this record stands in the lead triage (§LEAD_STATES). */
+  leadState: LeadState;
+  /** The one planned move while it is still a lead; it travels into the deal on convert. */
+  nextStep: string;
 };
 export type Deal = {
   id: string; organizationId: string; locationId: string | null; title: string; stage: CrmStage; status: DealStatus;
@@ -157,7 +179,7 @@ export const normalizeActivity = (raw: any): Activity => emptyActivity({
 export const emptyLocation = (name = ""): Location =>
   ({ id: id("location"), name, address: "", employees: "", emails: [], phones: [], contacts: [] });
 export const emptyOrganization = (name: string, owner = ""): Organization =>
-  ({ id: id("org"), name, website: "", employees: "", decisionMaker: "", software: "", source: "", owner, labels: [], locations: [emptyLocation(name)], createdAt: now(), deletedAt: null });
+  ({ id: id("org"), name, website: "", employees: "", decisionMaker: "", software: "", source: "", owner, labels: [], locations: [emptyLocation(name)], createdAt: now(), deletedAt: null, leadState: "active", nextStep: "" });
 export const emptyDeal = (organizationId: string, title: string, owner = ""): Deal =>
   ({ id: id("deal"), organizationId, locationId: null, title, stage: "Non-Qualified", status: "Offen", owner, source: "", value: "", currency: "EUR", expectedClose: "", labels: [], nextStep: "", nextStepDate: "", notes: [], activities: [], files: [], createdAt: now(), stageEnteredAt: now(), closedAt: null, deletedAt: null });
 
@@ -192,7 +214,19 @@ export const lostDeals = (data: CrmData) => live(data.deals).filter(deal => deal
 export const isCustomer = (data: CrmData, organizationId: string) =>
   live(data.deals).some(deal => deal.organizationId === organizationId && deal.status === "Gewonnen");
 export const customers = (data: CrmData) => live(data.organizations).filter(org => isCustomer(data, org.id));
-export const leads = (data: CrmData) => live(data.organizations).filter(org => !isCustomer(data, org.id));
+/** ── The Lead Inbox ────────────────────────────────────────────────────────
+ *  Triage reads the STORED state, never the absence of a win: "no won deal" was three
+ *  different situations (untouched enquiry, open deal, lost deal) wearing one word, so
+ *  the inbox showed customers-in-progress and the pipeline could be polluted back. */
+export const leadsByState = (data: CrmData, state: LeadState) =>
+  live(data.organizations).filter(org => org.leadState === state);
+export const leadInbox = (data: CrmData) => leadsByState(data, "active");
+export const archivedLeads = (data: CrmData) => leadsByState(data, "archived");
+/** THE INVARIANT, in one readable place: an active lead owns no deal, so nothing in the
+ *  inbox can appear on the board, in the customer list or in any insight. A violation is
+ *  returned rather than thrown — `normalize` repairs, tests assert emptiness. */
+export const leadInvariantViolations = (data: CrmData): Organization[] =>
+  live(data.organizations).filter(org => org.leadState === "active" && data.deals.some(deal => deal.organizationId === org.id));
 export const trash = (data: CrmData) => ({
   organizations: data.organizations.filter(org => org.deletedAt),
   deals: data.deals.filter(deal => deal.deletedAt),
@@ -350,16 +384,59 @@ export const purge = (data: CrmData, recordId: string) => {
   data.deals = data.deals.filter(deal => deal.id !== recordId && deal.organizationId !== recordId);
   data.organizations = data.organizations.filter(org => org.id !== recordId);
 };
-/** Convert: a lead organization becomes a real opportunity without losing the record. */
-export const convertToDeal = (data: CrmData, organizationId: string, stage: CrmStage = "Qualified"): Deal | undefined => {
+/** Convert: a lead organization becomes a real opportunity without losing the record.
+ *  LOSSLESS by construction — the organization (contacts, locations, files, labels,
+ *  source, owner, next step) is not copied and not touched, only pointed at, and the
+ *  facts a deal needs are carried over rather than retyped. The record LEAVES the
+ *  inbox in the same write (`leadState = "converted"`), so it cannot be triaged twice. */
+export const convertToDeal = (data: CrmData, organizationId: string, stage: CrmStage = "Qualified", values: Partial<Deal> = {}): Deal | undefined => {
   const org = data.organizations.find(item => item.id === organizationId);
   if (!org) return undefined;
-  const deal = { ...emptyDeal(org.id, org.name, org.owner), stage, labels: [...org.labels] };
+  const deal = {
+    ...emptyDeal(org.id, org.name, org.owner), stage, labels: [...org.labels],
+    source: org.source ?? "", nextStep: org.nextStep ?? "", ...values,
+  };
   data.deals.unshift(deal);
+  org.leadState = "converted";
   return deal;
+};
+/** The inbox action. A lead converts ONCE: a record that already produced a deal is
+ *  refused here, so a double click (or a second surface) cannot mint a twin deal.
+ *  Further deals for a customer are made on the organization, not in the inbox. */
+export const convertLead = (data: CrmData, organizationId: string, options: { stage?: CrmStage; value?: string; currency?: Deal["currency"] } = {}): Deal | undefined => {
+  const org = data.organizations.find(item => item.id === organizationId);
+  if (!org || org.leadState === "converted") return undefined;
+  return convertToDeal(data, organizationId, options.stage ?? "Qualified", {
+    value: options.value?.trim() ?? "", currency: options.currency ?? "EUR",
+  });
+};
+/** Archiving is triage, NOT deletion: the record stays live, searchable and restorable;
+ *  only the trash removes anything. A converted record has left the inbox already. */
+export const archiveLead = (data: CrmData, organizationId: string) => {
+  const org = data.organizations.find(item => item.id === organizationId);
+  if (org && org.leadState === "active") org.leadState = "archived";
+};
+export const restoreLead = (data: CrmData, organizationId: string) => {
+  const org = data.organizations.find(item => item.id === organizationId);
+  if (org && org.leadState === "archived") org.leadState = "active";
 };
 
 /** ── Persistence and migration ───────────────────────────────────────────── */
+/** Reading a lead state: an explicitly stored one wins, anything else is decided by the
+ *  document itself — a record that already produced a deal was QUALIFIED at some point,
+ *  everything else is an untouched enquiry. The same pass repairs a stored "active" that
+ *  contradicts its own deals, so §leadInvariantViolations is empty after every read. */
+const leadStateOf = (raw: unknown): LeadState | undefined =>
+  LEAD_STATES.includes(raw as LeadState) ? raw as LeadState : undefined;
+export const applyLeadStates = (data: CrmData): CrmData => {
+  for (const org of data.organizations) {
+    const hasDeal = data.deals.some(deal => deal.organizationId === org.id);
+    const stored = leadStateOf((org as any).leadState);
+    org.leadState = hasDeal ? "converted" : stored ?? "active";
+    org.nextStep = String(org.nextStep ?? "");
+  }
+  return data;
+};
 const stageOf = (value: unknown): CrmStage =>
   value === "Verhandlung" ? "Abgeschlossen" : value === "Gewonnen" ? "Abgeschlossen"
     : CRM_STAGES.includes(value as CrmStage) ? value as CrmStage : "Non-Qualified";
@@ -381,6 +458,8 @@ export const migrateV1 = (accounts: any[]): CrmData => {
       decisionMaker: account.decisionMaker ?? "", software: account.software ?? "", source: account.source ?? "", owner: account.owner ?? "",
       labels: (account.labels ?? []).map(label), locations: locations.length ? locations : [emptyLocation(account.name ?? "")],
       createdAt: account.createdAt ?? now(), deletedAt: null,
+      // v1 knew no triage; the deals written below decide the state in `applyLeadStates`.
+      leadState: "active", nextStep: account.locations?.[0]?.nextStep ?? "",
     };
     data.organizations.push(org);
     const perSite = account.dealScope === "Standorte";
@@ -404,7 +483,7 @@ export const migrateV1 = (accounts: any[]): CrmData => {
     });
   }
   data.labels = withStarterLabels(data.labels);
-  return data;
+  return applyLeadStates(data);
 };
 
 export const seed = (): CrmData => {
@@ -418,7 +497,13 @@ export const seed = (): CrmData => {
   org.labels = [ensureLabel(data, "Gründungskunde")];
   const deal = { ...emptyDeal(org.id, "Beispiel Optik GmbH", "Jannes"), stage: "Qualified" as CrmStage, nextStep: "Erstgespräch terminieren", labels: [...org.labels], source: "Beispieldaten" };
   data.deals.push(deal);
-  return data;
+  // A second organization that never became an opportunity: the inbox has a subject on
+  // an empty install, and the seed states both halves of the model, not only the deal.
+  const lead = emptyOrganization("Optik Sonnenschein", "Bjarne");
+  lead.source = "Website-Formular"; lead.nextStep = "Rückruf vereinbaren";
+  lead.labels = [ensureLabel(data, "Warmer Lead")];
+  data.organizations.push(lead);
+  return applyLeadStates(data);
 };
 
 /** Normalizes any shape (v2, v1, junk) into a valid v2 document. */
@@ -426,7 +511,7 @@ export const normalize = (raw: any): CrmData => {
   if (!raw) return seed();
   if (Array.isArray(raw)) return migrateV1(raw);
   if (raw.version === 2 && Array.isArray(raw.organizations) && Array.isArray(raw.deals)) {
-    return {
+    return applyLeadStates({
       version: 2,
       pipelineStages: normalizePipelineStages(raw.pipelineStages),
       // The inbox is additive: a document written before unlinked activities existed
@@ -437,7 +522,7 @@ export const normalize = (raw: any): CrmData => {
       // `probability` was a manual per-deal field in early v2 documents; the stage owns
       // it now, so it is dropped on read rather than carried as dead weight.
       deals: raw.deals.map(({ probability: _dropped, ...deal }: any) => ({ ...emptyDeal(deal.organizationId ?? "", deal.title ?? ""), ...deal, stage: stageOf(deal.stage), status: DEAL_STATUS.includes(deal.status) ? deal.status : "Offen", labels: deal.labels ?? [], notes: deal.notes ?? [], files: deal.files ?? [], activities: (deal.activities ?? []).map(normalizeActivity), deletedAt: deal.deletedAt ?? null, closedAt: deal.closedAt ?? null, stageEnteredAt: typeof deal.stageEnteredAt === "string" && deal.stageEnteredAt ? deal.stageEnteredAt : (deal.createdAt ?? now()) })),
-    };
+    });
   }
   if (raw.accounts) return migrateV1(raw.accounts);
   return seed();

@@ -7,11 +7,13 @@ import { navigate, route } from "../router";
 import {
   ACTIVITY_KINDS, CRM_STAGES, PIPELINE_STAGES, WON_PROBABILITY, activitiesOf, activityEntries, closeDeal, convertToDeal, customers as customerOrgs,
   activityState, emptyActivity, filterActivityEntries, setActivityDone,
-  dealProbability, dealsOf, emptyDeal, emptyLocation, emptyOrganization, ensureLabel, id, leads as leadOrgs, live, loadCrm,
+  archiveLead, archivedLeads, convertLead, leadInbox, restoreLead,
+  dealProbability, dealsOf, emptyDeal, emptyLocation, emptyOrganization, ensureLabel, id, live, loadCrm,
   moveDeal, notesOf, openDeals, organizationOf, purge, restore, saveCrm, setPipelineStages, softDeleteDeal, softDeleteOrganization,
   stageAge, stageName, stageProbability, trash,
   type Activity, type ActivityKind, type Contact, type CrmData, type CrmStage, type Deal, type Label, type Location,
   type Organization, type PipelineStage,
+  LEAD_STATE_LABELS,
 } from "../crmStore";
 import CrmActivities from "./CrmActivities";
 import CrmInsights from "./CrmInsights";
@@ -46,6 +48,9 @@ export default function CRM() {
   const [labelFilter, setLabelFilter] = createSignal<string[]>([]);
   const [filterOwner, setFilterOwner] = createSignal("Alle");
   const [newOpen, setNewOpen] = createSignal(false);
+  /** The inbox has two shelves, not two views: same table, same filters, one flag. */
+  const [leadScope, setLeadScope] = createSignal<"inbox" | "archive">("inbox");
+  const [convertTarget, setConvertTarget] = createSignal<string | null>(null);
   const [stageSettingsOpen, setStageSettingsOpen] = createSignal(false);
   const [tab, setTab] = createSignal<CrmTab>(tabOf(route().tab));
   createEffect(() => setTab(tabOf(route().tab)));
@@ -86,7 +91,9 @@ export default function CRM() {
   const addOrganization = (name: string, owner: string, withDeal: boolean) => {
     const org = emptyOrganization(name, owner);
     mutate(draft => {
-      draft.organizations.unshift(org);
+      // Starting with a deal means the record was qualified on the spot: it must leave
+      // the inbox in the SAME write, or the board and the inbox would both claim it.
+      draft.organizations.unshift({ ...org, leadState: withDeal ? "converted" : "active" });
       if (withDeal) draft.deals.unshift({ ...emptyDeal(org.id, name, owner), stage: "Non-Qualified" });
     });
     setSelected({ kind: "org", id: org.id });
@@ -142,8 +149,24 @@ export default function CRM() {
   const startDrag = (target: DragTarget) => (event: PointerEvent) => { candidate = { ...target, x: event.clientX, y: event.clientY }; };
   const openRecord = (selection: Selection) => { if (suppressClick) { suppressClick = false; return; } setSelected(selection); };
 
+  /** Leads are the organizations that stand in the triage, NOT "everything unwon": an
+   *  open or lost deal belongs to the pipeline and its lists, never back in the inbox. */
+  const inboxLeads = () => leadInbox(data()).filter(orgMatches);
+  const archiveLeads = () => archivedLeads(data()).filter(orgMatches);
+  const visibleLeads = () => leadScope() === "archive" ? archiveLeads() : inboxLeads();
+  const filtersActive = () => !!query().trim() || !!labelFilter().length || filterOwner() !== "Alle";
+  const convertOrg = () => data().organizations.find(org => org.id === convertTarget());
+  const runConvert = (stage: CrmStage, value: string) => {
+    const orgId = convertTarget();
+    if (!orgId) return;
+    let created: string | undefined;
+    mutate(draft => { created = convertLead(draft, orgId, { stage, value })?.id; });
+    setConvertTarget(null);
+    if (created) setSelected({ kind: "deal", id: created });
+  };
+
   const count = () => tab() === "pipeline" ? boardDeals().length
-    : tab() === "leads" ? leadOrgs(data()).filter(orgMatches).length
+    : tab() === "leads" ? visibleLeads().length
       : tab() === "customers" ? customerOrgs(data()).filter(orgMatches).length
         : tab() === "trash" ? trash(data()).deals.length + trash(data()).organizations.length
           : tab() === "activities" ? filterActivityEntries(activityEntries(data()), "todo").length
@@ -188,19 +211,51 @@ export default function CRM() {
       </section>
     </Show>
 
+    {/* THE LEAD INBOX. A list, deliberately not a board: triage is reading a queue and
+        deciding — open, convert, archive — not dragging a thing through phases. The
+        phases belong to the pipeline, and an unqualified enquiry has none. */}
     <Show when={tab() === "leads"}>
-      <section class="crm-directory">
-        <header><div><h2>Leads</h2><p>Organisationen ohne gewonnenen Deal. Karte auf „In Pipeline“ ziehen, um daraus einen Deal zu machen.</p></div><span>{leadOrgs(data()).filter(orgMatches).length}</span></header>
-        <div class="crm-lead-grid"><For each={leadOrgs(data()).filter(orgMatches)}>{org => <div class="crm-card crm-lead-card" role="button" tabindex="0" onPointerDown={startDrag({ kind: "org", id: org.id })} onClick={() => openRecord({ kind: "org", id: org.id })}>
-          <strong>{org.name}</strong>
-          <span class="crm-card-account">{org.locations.length} Standort{org.locations.length === 1 ? "" : "e"} · {dealsOf(data(), org.id).length} Deal(s)</span>
-          <LabelChips ids={org.labels} library={labels()} />
-          <footer><span>{org.owner || "Nicht zugeteilt"}</span><button class="ghost small" onClick={event => { event.stopPropagation(); addDealFor(org.id); }}>In Deal umwandeln</button></footer>
-        </div>}</For></div>
-        <Show when={!leadOrgs(data()).filter(orgMatches).length}><p class="crm-empty">Keine Leads in dieser Ansicht.</p></Show>
+      <section class="crm-directory crm-lead-inbox">
+        <header><div><h2>Lead-Posteingang</h2>
+          <p>Anfragen, aus denen noch kein Vorgang geworden ist. Sie stehen in keiner Pipeline und in keiner Auswertung — erst das Umwandeln macht daraus einen Deal.</p></div>
+          <span>{visibleLeads().length}</span></header>
+        {/* Archive is a SHELF of this list, not a second place: same columns, same
+            filters, one count each, so "where did it go" is answered on screen. */}
+        <div class="crm-lead-scope" role="tablist" aria-label="Lead-Ablage">
+          <button role="tab" aria-selected={leadScope() === "inbox"} classList={{ active: leadScope() === "inbox" }} onClick={() => setLeadScope("inbox")}>Posteingang <i>{inboxLeads().length}</i></button>
+          <button role="tab" aria-selected={leadScope() === "archive"} classList={{ active: leadScope() === "archive" }} onClick={() => setLeadScope("archive")}>Archiv <i>{archiveLeads().length}</i></button>
+        </div>
+        <div class="crm-directory-table crm-lead-table">
+          <div class="crm-directory-head"><span>Lead · Organisation</span><span>Labels</span><span>Quelle</span><span>Verantwortlich</span><span>Eingegangen</span><span>Nächster Schritt</span><span>Aktionen</span></div>
+          <For each={visibleLeads()}>{org => <div class="crm-lead-row" role="button" tabindex="0" onPointerDown={startDrag({ kind: "org", id: org.id })} onClick={() => openRecord({ kind: "org", id: org.id })}>
+            <strong>{org.name}</strong>
+            <span class="crm-lead-labels"><LabelChips ids={org.labels} library={labels()} /></span>
+            {/* The REASON it is still a lead has to be readable: source first, and an
+                unnamed source says so instead of leaving a blank cell. */}
+            <span classList={{ "crm-lead-unknown": !org.source }}>{org.source || "Quelle unbekannt"}</span>
+            <span>{org.owner || "Nicht zugeteilt"}</span>
+            <span>{date(org.createdAt.slice(0, 10))}</span>
+            <span classList={{ "crm-lead-unknown": !org.nextStep }}>{org.nextStep || "Kein nächster Schritt"}</span>
+            <span class="crm-lead-actions" onClick={event => event.stopPropagation()}>
+              <Show when={org.leadState === "active"} fallback={<button class="ghost small" onClick={() => mutate(draft => restoreLead(draft, org.id))}>Wiederherstellen</button>}>
+                <button class="ghost small" onClick={() => setConvertTarget(org.id)}>In Deal umwandeln</button>
+                <button class="ghost small" onClick={() => mutate(draft => archiveLead(draft, org.id))}>Archivieren</button>
+              </Show>
+              <button class="ghost small danger" aria-label={`Lead ${org.name} in den Papierkorb`} onClick={() => { mutate(draft => softDeleteOrganization(draft, org.id)); }}><Icon name="trash" size={14} /></button>
+            </span>
+          </div>}</For>
+        </div>
+        {/* Three different silences, three different sentences: filtered out, emptied
+            archive, or nothing has ever arrived. */}
+        <Show when={!visibleLeads().length}>
+          <p class="crm-empty">{filtersActive() ? "Kein Lead passt zu Suche und Filtern."
+            : leadScope() === "archive" ? "Das Archiv ist leer. Archivierte Leads bleiben hier auffindbar und lassen sich wiederherstellen."
+              : "Der Posteingang ist leer. Neue Anfragen — Website, Empfehlung, Messe — landen hier und werden von hier aus umgewandelt oder archiviert."}</p>
+        </Show>
         <DropZones active={drag()} hint={dropHint()} />
       </section>
     </Show>
+    <Show when={convertOrg()}>{org => <ConvertLead org={org()} data={data} onClose={() => setConvertTarget(null)} onConvert={runConvert} />}</Show>
 
     <Show when={tab() === "open" || tab() === "won" || tab() === "lost"}>
       <DealTable title={TAB_TITLE[tab()]} deals={() => listFor(tab())} data={data} onOpen={dealId => setSelected({ kind: "deal", id: dealId })} onOpenOrg={orgId => setSelected({ kind: "org", id: orgId })} />
@@ -359,6 +414,24 @@ function OrganizationTable(props: { title: string; hint: string; orgs: () => Org
   </section>;
 }
 
+/** Converting is a DECISION, so it asks the one question the pipeline needs (which
+ *  phase) and offers the one number that is usually known (the value) — nothing else.
+ *  Everything the record already holds travels with it untouched; this dialog says so,
+ *  because "will I lose my notes" is the reason people avoid converting at all. */
+function ConvertLead(props: { org: Organization; data: () => CrmData; onClose: () => void; onConvert: (stage: CrmStage, value: string) => void }) {
+  const [stage, setStage] = createSignal<CrmStage>("Qualified");
+  const [value, setValue] = createSignal("");
+  return <div class="crm-overlay" role="presentation"><form class="crm-modal" onSubmit={e => { e.preventDefault(); props.onConvert(stage(), value()); }}>
+    <header><h2>Lead in Deal umwandeln</h2><button type="button" class="icon-button" onClick={props.onClose}><Icon name="close" /></button></header>
+    <p><strong>{props.org.name}</strong>{props.org.source ? ` · Quelle: ${props.org.source}` : " · Quelle unbekannt"}</p>
+    <label>Pipeline-Phase<select value={stage()} onChange={e => setStage(e.currentTarget.value as CrmStage)}>
+      <For each={CRM_STAGES}>{item => <option value={item}>{stageName(props.data(), item)} · {stageProbability(props.data(), item)}%</option>}</For></select></label>
+    <label>Deal-Wert (optional)<input inputmode="decimal" value={value()} onInput={e => setValue(e.currentTarget.value.replace(/[^0-9,.]/g, ""))} placeholder="z. B. 12.500" /></label>
+    <p>Organisation, Standorte, Ansprechpartner, Dateien, Labels und Quelle bleiben an diesem Datensatz und gehen in den Deal über. Der Lead verlässt den Posteingang und kann nur einmal umgewandelt werden.</p>
+    <footer><button type="button" class="ghost" onClick={props.onClose}>Abbrechen</button><button class="primary">Deal anlegen</button></footer>
+  </form></div>;
+}
+
 function NewOrganization(props: { onClose: () => void; onSave: (name: string, owner: string, withDeal: boolean) => void }) {
   const [name, setName] = createSignal(""); const [owner, setOwner] = createSignal("Jannes"); const [withDeal, setWithDeal] = createSignal(true);
   return <div class="crm-overlay" role="presentation"><form class="crm-modal" onSubmit={e => { e.preventDefault(); if (name().trim()) props.onSave(name().trim(), owner(), withDeal()); }}>
@@ -366,7 +439,7 @@ function NewOrganization(props: { onClose: () => void; onSave: (name: string, ow
     <label>Name<input autofocus value={name()} onInput={e => setName(e.currentTarget.value)} placeholder="z. B. Optik Musterstadt" /></label>
     <label>Verantwortliche Person<select value={owner()} onChange={e => setOwner(e.currentTarget.value)}><For each={["Jannes", "Bjarne", "Charles", "Pascal"]}>{x => <option>{x}</option>}</For></select></label>
     <label class="crm-check"><input type="checkbox" checked={withDeal()} onChange={e => setWithDeal(e.currentTarget.checked)} />Direkt einen Deal in der Pipeline starten</label>
-    <p>Ohne Deal bleibt die Organisation ein Lead und taucht nicht in der Pipeline auf.</p>
+    <p>Ohne Deal steht die Organisation als Lead im Posteingang und taucht in keiner Pipeline und keiner Auswertung auf.</p>
     <footer><button type="button" class="ghost" onClick={props.onClose}>Abbrechen</button><button class="primary">Anlegen</button></footer>
   </form></div>;
 }
@@ -499,13 +572,24 @@ function OrganizationPanel(props: { orgId: string; data: () => CrmData; onMutate
   });
   const deals = () => dealsOf(props.data(), props.orgId);
   const isCustomerNow = () => deals().some(deal => deal.status === "Gewonnen");
+  /** ONE line says what this record is right now, and while it is still a lead it also
+   *  says WHY — the stored state, not a guess from the absence of a win. */
   return <Show when={org()}>{current => <aside class="crm-detail" aria-label={`Organisation ${current().name}`}>
     <header class="crm-detail-head"><div>
       <button class="crm-back" onClick={props.onClose}><Icon name="chevron-left" size={17} /> Zurück</button>
-      <p>{isCustomerNow() ? "Kunde" : "Lead"}</p><h1>{current().name}</h1><span class="crm-record-kind">Organisation</span>
+      <p class="crm-record-standing">{isCustomerNow() ? "Kunde"
+        : current().leadState === "converted" ? "Organisation mit laufendem Deal"
+          : `Lead · ${LEAD_STATE_LABELS[current().leadState]}${current().source ? ` · ${current().source}` : " · Quelle unbekannt"}`}</p>
+      <h1>{current().name}</h1><span class="crm-record-kind">Organisation</span>
     </div><button class="icon-button" onClick={props.onClose} aria-label="Organisation schließen"><Icon name="close" /></button></header>
     <div class="crm-stage-row">
       <button class="ghost success" style={{ background: "#e6f6e8", color: "#118c5c", "border-color": "#118c5c" }} onClick={props.onAddDeal}><Icon name="plus" size={14} /> Deal anlegen</button>
+      <Show when={current().leadState === "active"}>
+        <button class="ghost" onClick={() => props.onMutate(draft => archiveLead(draft, props.orgId))}>Lead archivieren</button>
+      </Show>
+      <Show when={current().leadState === "archived"}>
+        <button class="ghost" onClick={() => props.onMutate(draft => restoreLead(draft, props.orgId))}>Aus Archiv holen</button>
+      </Show>
       <button class="ghost danger" onClick={() => { props.onMutate(draft => softDeleteOrganization(draft, props.orgId)); props.onClose(); }}><Icon name="trash" size={15} /> In den Papierkorb</button>
     </div>
     <nav class="crm-tabs"><For each={["Stammdaten", "Deals", "Verlauf"] as const}>{name => <button classList={{ active: tab() === name }} onClick={() => setTab(name)}>{name}</button>}</For></nav>
@@ -518,6 +602,8 @@ function OrganizationPanel(props: { orgId: string; data: () => CrmData; onMutate
         <Field label="Branchensoftware" value={current().software} onChange={software => patch({ software })} />
         <Field label="Quelle" value={current().source} onChange={source => patch({ source })} />
         <label>Verantwortliche Person<PillMenu class="crm-field-menu" label="Verantwortliche Person" value={current().owner} options={CRM_OWNERS.map(owner => ({ value: owner === "Nicht zugeteilt" ? "" : owner, label: owner }))} onChange={owner => patch({ owner })} /></label>
+        {/* The lead's one planned move; it travels into the deal on conversion. */}
+        <Field label="Nächster Schritt" value={current().nextStep} onChange={nextStep => patch({ nextStep })} />
         <label>Anzahl Standorte<input value={String(current().locations.length)} readOnly /></label>
       </div>
       <div class="crm-label-field"><span>Labels</span>
