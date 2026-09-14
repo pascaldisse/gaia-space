@@ -1,6 +1,7 @@
 import { For, Show, createMemo, createSignal } from "solid-js";
 import { Icon } from "../components/Icon";
 import DateField from "../components/DateField";
+import { PillMenu } from "../components/controls";
 import { monthCells, startOfLocalDay } from "../calendar";
 import {
   ACTIVITY_DURATIONS, ACTIVITY_ICONS, ACTIVITY_KINDS, ACTIVITY_PRIORITIES, ACTIVITY_VIEWS, ACTIVITY_VIEW_LABELS,
@@ -99,10 +100,7 @@ export default function CrmActivities(props: {
           data-filter={candidate} onClick={() => setView(candidate)}>
           {ACTIVITY_VIEW_LABELS[candidate]}<span>{countOf(candidate)}</span>
         </button>}</For>
-      <select class="crm-kind-filter" aria-label="Nach Art filtern" value={kind()} onChange={event => setKind(event.currentTarget.value as ActivityKind | "Alle")}>
-        <option value="Alle">Alle Arten</option>
-        <For each={ACTIVITY_KINDS}>{value => <option value={value}>{value}</option>}</For>
-      </select>
+      <PillMenu class="crm-kind-filter" label="Nach Art filtern" value={kind()} options={[{ value: "Alle", label: "Alle Arten" }, ...ACTIVITY_KINDS.map(value => ({ value, label: value }))]} onChange={value => setKind(value as ActivityKind | "Alle")} />
     </div>
 
     <Show when={mode() === "list"}>
