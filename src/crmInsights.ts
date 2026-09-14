@@ -192,7 +192,5 @@ export const activityKindBreakdown = (data: CrmData, scope: InsightScope): KindS
 /** Organization name of a deal, for the few places a report names a record. */
 export const dealOrgName = (data: CrmData, deal: Deal) => organizationOf(data, deal)?.name ?? "";
 
-/** Bars are drawn from a share of the largest value in the SAME report, never from an
- *  invented axis maximum; an all-zero report yields 0 everywhere (no bar at all). */
-export const share = (value: number, max: number) => max > 0 ? Math.max(0, value) / max : 0;
-export const maxOf = (values: number[]) => values.reduce((top, value) => Math.max(top, value), 0);
+/* Scaling lives in §chartScale: bars are measured against a rounded AXIS, so two
+   reports with different numbers no longer look alike. */

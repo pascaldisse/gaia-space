@@ -1,7 +1,7 @@
 import { expect, test, describe } from "bun:test";
 import {
   ALL_OWNERS, activityKindBreakdown, activityStateBreakdown, dealAmount, dealDay, inRange, insightMetrics,
-  insightOwners, ownerBreakdown, resolveRange, share, stageDistribution, UNASSIGNED,
+  insightOwners, ownerBreakdown, resolveRange, stageDistribution, UNASSIGNED,
 } from "./crmInsights";
 import { dayKey, normalize, type CrmData } from "./crmStore";
 
@@ -147,9 +147,5 @@ describe("reports", () => {
     expect(ownerBreakdown(empty, scope())).toEqual([]);
     expect(stageDistribution(empty, scope()).every(slice => slice.count === 0)).toBe(true);
   });
-  test("bars are a share of the report's own largest value, never of an invented axis", () => {
-    expect(share(5, 10)).toBe(0.5);
-    expect(share(0, 0)).toBe(0);
-    expect(share(7, 7)).toBe(1);
-  });
+  // How a counted value becomes a bar length is the axis's business: §chartScale.test.
 });

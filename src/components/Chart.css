@@ -1,0 +1,72 @@
+/* Charts — drawn in the app's own language: soft surfaces, one hairline, the outcome
+   palette (accent/success/danger) and nothing invented for "charting". */
+.chart { display: grid; gap: 10px; margin: 0; }
+.chart-empty { margin: 0; padding: 18px 14px; border: 1px dashed var(--surface-border); border-radius: 9px; background: var(--wash-2, var(--ctl-bg)); color: var(--text-muted); font-size: 12px; text-align: center; }
+
+.chart-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 0; padding: 0; list-style: none; font-size: 11px; color: var(--text-muted); }
+.chart-legend li { display: flex; align-items: center; gap: 5px; }
+.chart-legend i { width: 12px; height: 8px; border-radius: 3px; background: var(--accent); }
+
+[data-tone="open"], [data-tone="accent"] { --chart-ink: var(--accent); }
+[data-tone="won"], [data-tone="done"] { --chart-ink: var(--status-success-ink); }
+[data-tone="lost"], [data-tone="overdue"] { --chart-ink: var(--status-danger-ink); }
+[data-tone="muted"] { --chart-ink: var(--text-faint); }
+.chart-legend i, .chart-stack i { background: var(--chart-ink, var(--accent)); }
+
+/* ── Vertical columns ─────────────────────────────────────────────────────── */
+.chart-columns-plot { display: grid; grid-template-columns: auto 1fr; gap: 8px; }
+.chart-axis-y { display: grid; align-content: stretch; justify-items: end; height: 168px; font-size: 10px; color: var(--text-faint); }
+.chart-axis-y span { line-height: 1; transform: translateY(-50%); }
+.chart-axis-y span:last-child { transform: translateY(-50%); }
+.chart-canvas { position: relative; }
+.chart-grid { position: absolute; inset: 0 0 auto 0; display: grid; height: 168px; pointer-events: none; }
+.chart-grid i { border-top: 1px solid var(--surface-border); opacity: .55; }
+.chart-grid i:first-child { border-top-style: solid; }
+.chart-columns { display: flex; align-items: flex-end; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.chart-column { flex: 1 1 0; display: grid; gap: 6px; min-width: 0; }
+.chart-column-body { display: flex; flex-direction: column; justify-content: flex-end; align-items: stretch; height: 168px; padding: 0; border: 0; background: transparent; color: var(--text); font: inherit; }
+button.chart-column-body { cursor: pointer; border-radius: 7px; }
+button.chart-column-body:hover .chart-stack i { filter: brightness(1.08); }
+button.chart-column-body:hover .chart-column-total { color: var(--text); }
+.chart-column-total { font-size: 11px; font-weight: 600; color: var(--text-muted); text-align: center; padding-bottom: 3px; }
+.chart-stack { display: flex; flex-direction: column-reverse; min-height: 2px; border-radius: 5px 5px 0 0; overflow: hidden; }
+.chart-stack i { display: block; min-height: 2px; }
+.chart-column[data-empty="true"] .chart-stack { background: repeating-linear-gradient(135deg, var(--ctl-bg) 0 4px, transparent 4px 8px); height: 2px; }
+.chart-column[data-empty="true"] .chart-column-total, .chart-column[data-empty="true"] .chart-column-label { color: var(--text-faint); }
+.chart-column-label { display: grid; justify-items: center; gap: 1px; font-size: 11px; text-align: center; word-break: break-word; }
+.chart-column-label i { font-style: normal; font-size: 10px; color: var(--text-faint); }
+
+/* ── Horizontal stacked bars ──────────────────────────────────────────────── */
+.chart-bars-plot { display: grid; gap: 6px; }
+.chart-bars { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.chart-bar { display: grid; grid-template-columns: minmax(96px, 0.9fr) 3fr; gap: 10px; align-items: center; }
+.chart-bar-label { font-size: 12px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chart-bar-label i { font-style: normal; font-weight: 400; font-size: 10px; color: var(--text-faint); }
+.chart-bar-body { display: grid; gap: 3px; width: 100%; padding: 3px 4px; border: 0; border-radius: 7px; background: transparent; color: var(--text); font: inherit; text-align: left; }
+button.chart-bar-body { cursor: pointer; }
+button.chart-bar-body:hover { background: var(--ctl-bg); }
+.chart-bar-track { display: block; height: 14px; border-radius: 4px; background: var(--ctl-bg); overflow: hidden; }
+.chart-bar-track .chart-stack { flex-direction: row; height: 100%; min-width: 2px; border-radius: 4px; }
+.chart-bar-value { font-size: 11px; color: var(--text-muted); }
+.chart-bar[data-empty="true"] .chart-bar-value { color: var(--text-faint); }
+.chart-axis-x { display: grid; grid-template-columns: minmax(96px, 0.9fr) 3fr; font-size: 10px; color: var(--text-faint); }
+.chart-axis-x span { grid-row: 1; }
+.chart-axis-x span:first-child { grid-column: 2; justify-self: start; }
+.chart-axis-x span:last-child { grid-column: 2; justify-self: end; }
+.chart-axis-caption { margin: 0; font-size: 10px; color: var(--text-faint); text-align: right; }
+
+/* ── The same report, written out ─────────────────────────────────────────── */
+.chart-data { font-size: 11px; color: var(--text-muted); }
+.chart-data > summary { cursor: pointer; padding: 3px 0; color: var(--accent); }
+.chart-data table { width: 100%; margin-top: 6px; border-collapse: collapse; }
+.chart-data caption { padding-bottom: 4px; color: var(--text-faint); font-size: 10px; text-align: left; }
+.chart-data th, .chart-data td { padding: 4px 6px; border-bottom: 1px solid var(--surface-border); text-align: right; white-space: nowrap; }
+.chart-data thead th { color: var(--text-faint); font-weight: 600; }
+.chart-data th:first-child, .chart-data td:first-child { text-align: left; }
+.chart-data tbody th { color: var(--text); font-weight: 600; }
+
+@media (max-width: 720px) {
+  .chart-bar, .chart-axis-x { grid-template-columns: 1fr; }
+  .chart-axis-x span:first-child, .chart-axis-x span:last-child { grid-column: 1; }
+  .chart-column-label { font-size: 10px; }
+}

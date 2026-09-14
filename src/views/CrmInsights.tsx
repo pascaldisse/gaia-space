@@ -1,40 +1,66 @@
-import { For, Show, createMemo, createSignal } from "solid-js";
+import { Show, createMemo, createSignal } from "solid-js";
 import { Icon } from "../components/Icon";
 import DateField from "../components/DateField";
 import { PillMenu } from "../components/controls";
+import { BarChart, ColumnChart, type ChartDatum, type ChartSeries } from "../components/Chart";
 import { ACTIVITY_ICONS, type CrmData } from "../crmStore";
 import {
   ALL_OWNERS, INSIGHT_RANGES, INSIGHT_RANGE_LABELS, activityKindBreakdown, activityStateBreakdown,
-  insightMetrics, insightOwners, maxOf, ownerBreakdown, rangeLabel, resolveRange, share, stageDistribution,
+  insightMetrics, insightOwners, ownerBreakdown, rangeLabel, resolveRange, stageDistribution,
   type InsightRangeKey, type InsightScope,
 } from "../crmInsights";
 
 /** ── Vertriebsberichte ───────────────────────────────────────────────────────
  *
- *  This is a READING of the CRM document, never a second store: every figure comes
+ *  This page is a READING of the CRM document, never a second store: every figure comes
  *  from §crmInsights, which counts what is there and returns `null` where the data
- *  cannot answer (a win rate without a single decided deal). Nothing here is seeded,
+ *  cannot answer (a win rate without a single decided deal). Nothing is seeded,
  *  smoothed or projected.
  *
- *  The bars are drawn by the product — a width in percent of the largest value in the
- *  SAME report — because a charting dependency for four bar lists would buy nothing
- *  and would style itself. Every bar therefore carries its number in text as well, so
- *  the report is readable without seeing the bar at all.
+ *  It is a REPORT PAGE, so the charts carry it and the four headline numbers are a
+ *  strip above them, not the page itself. Three questions, three shapes (§Chart):
+ *    · where the open pipeline sits      → columns per stage, measured in whichever
+ *                                          quantity is chosen (count / value / weighted)
+ *    · how each person's deals ended     → one stacked bar per person, open/won/lost
+ *    · what the worklist looks like      → stacked columns per kind (done vs open),
+ *                                          beside the columns per state.
+ *  Each chart also prints its own numbers as a table and speaks one summary sentence,
+ *  and where the document says nothing, the chart says so in words instead of drawing
+ *  a row of clickable zero-height bars.
  *
- *  Each headline card is a LINK: a number you cannot open is a dead end, so the won
- *  value opens the won deals, the pipeline opens the board, the rate opens the lost
- *  list, the activity count opens the worklist. */
+ *  The cards stay LINKS: a number you cannot open is a dead end, so the won value opens
+ *  the won deals, the pipeline opens the board, the rate opens the lost list. */
 
 const money = (amount: number) => new Intl.NumberFormat("de-DE", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(amount);
+const moneyShort = (amount: number) => amount >= 10000
+  ? `${new Intl.NumberFormat("de-DE", { maximumFractionDigits: amount >= 100000 ? 0 : 1 }).format(amount / 1000)} Tsd. €`
+  : money(amount);
+const count = (value: number) => new Intl.NumberFormat("de-DE", { maximumFractionDigits: 1 }).format(value);
 const percent = (value: number) => `${Math.round(value * 100)} %`;
-const bar = (value: number, max: number) => `${Math.round(share(value, max) * 100)}%`;
 
 export type InsightsTarget = "won" | "pipeline" | "lost" | "activities" | "open";
+
+/** The pipeline chart answers one question at a time — "how many deals" and "how much
+ *  money" are different reports — and the table underneath always prints all three. */
+const STAGE_MEASURES = ["count", "value", "weighted"] as const;
+type StageMeasure = typeof STAGE_MEASURES[number];
+const STAGE_MEASURE_LABELS: Record<StageMeasure, string> = { count: "Anzahl Deals", value: "Deal-Wert", weighted: "Gewichteter Wert" };
+
+const OUTCOME_SERIES: ChartSeries[] = [
+  { key: "open", label: "Offen", tone: "open" },
+  { key: "won", label: "Gewonnen", tone: "won" },
+  { key: "lost", label: "Verloren", tone: "lost" },
+];
+const ACTIVITY_SERIES: ChartSeries[] = [
+  { key: "open", label: "Offen", tone: "open" },
+  { key: "done", label: "Erledigt", tone: "done" },
+];
 
 export default function CrmInsights(props: { data: () => CrmData; onOpen: (tab: InsightsTarget) => void }) {
   const [rangeKey, setRangeKey] = createSignal<InsightRangeKey>("90");
   const [custom, setCustom] = createSignal({ start: "", end: "" });
   const [owner, setOwner] = createSignal(ALL_OWNERS);
+  const [measure, setMeasure] = createSignal<StageMeasure>("count");
 
   const range = createMemo(() => resolveRange(rangeKey(), custom()));
   const scope = createMemo<InsightScope>(() => ({ range: range(), owner: owner() }));
@@ -44,6 +70,28 @@ export default function CrmInsights(props: { data: () => CrmData; onOpen: (tab: 
   const byOwner = createMemo(() => ownerBreakdown(props.data(), scope()));
   const byState = createMemo(() => activityStateBreakdown(props.data(), scope()));
   const byKind = createMemo(() => activityKindBreakdown(props.data(), scope()));
+
+  const stageData = createMemo<ChartDatum[]>(() => stages().map(slice => ({
+    key: slice.stage, label: slice.name, note: `${slice.probability} %`,
+    values: { amount: measure() === "count" ? slice.count : measure() === "value" ? slice.value : slice.weighted },
+    extra: { count: count(slice.count), value: money(slice.value), weighted: money(slice.weighted) },
+  })));
+  const ownerData = createMemo<ChartDatum[]>(() => byOwner().map(slice => ({
+    key: slice.owner, label: slice.owner,
+    values: { open: slice.open, won: slice.won, lost: slice.lost },
+    extra: { openValue: money(slice.openValue), wonValue: money(slice.wonValue) },
+  })));
+  const kindData = createMemo<ChartDatum[]>(() => byKind().map(slice => ({
+    key: slice.kind, label: slice.kind,
+    values: { open: slice.open, done: slice.done },
+    icon: <Icon name={ACTIVITY_ICONS[slice.kind]} size={13} />,
+  })));
+  const stateData = createMemo<ChartDatum[]>(() => byState().map(slice => ({
+    key: slice.state, label: slice.label, values: { count: slice.count },
+  })));
+  const stateSeries = createMemo<ChartSeries[]>(() => [{ key: "count", label: "Aktivitäten", tone: "accent" }]);
+
+  const stageFormat = (value: number) => measure() === "count" ? count(value) : moneyShort(value);
 
   return <section class="crm-directory crm-insights">
     <header>
@@ -90,73 +138,53 @@ export default function CrmInsights(props: { data: () => CrmData; onOpen: (tab: 
         action="Aktivitäten öffnen" onOpen={() => props.onOpen("activities")} />
     </div>
 
-    <section class="crm-insight-report" aria-label="Verteilung der Pipeline nach Phase">
-      <header><h3>Pipeline nach Phase</h3><small>Offene Deals, gewichtet mit der in den Pipeline-Einstellungen hinterlegten Wahrscheinlichkeit.</small></header>
-      <Show when={stages().some(slice => slice.count > 0)} fallback={<p class="crm-empty">Keine offenen Deals in diesem Zeitraum. Die Phasen bleiben leer, bis ein Deal darin liegt.</p>}>
-        {(() => {
-          const max = () => maxOf(stages().map(slice => slice.value));
-          return <div class="crm-insight-bars">
-            <For each={stages()}>{slice =>
-              <button type="button" class="crm-insight-bar" data-empty={slice.count === 0} onClick={() => props.onOpen("pipeline")}>
-                <span class="crm-insight-bar-label">{slice.name}<i>{slice.probability} %</i></span>
-                <span class="crm-insight-bar-track"><i style={{ width: bar(slice.value, max()) }} /></span>
-                <span class="crm-insight-bar-value">
-                  <strong>{slice.count}</strong> Deal{slice.count === 1 ? "" : "s"} · {money(slice.value)}
-                  <small>{money(slice.weighted)} gewichtet</small>
-                </span>
-              </button>}</For>
-          </div>;
-        })()}
-      </Show>
-    </section>
-
-    <section class="crm-insight-report" aria-label="Deal-Status nach verantwortlicher Person">
-      <header><h3>Deals nach verantwortlicher Person</h3><small>Jeder Deal im Zeitraum, aufgeteilt nach Ausgang.</small></header>
-      <Show when={byOwner().length} fallback={<p class="crm-empty">Für diesen Zeitraum und Filter gibt es keine Deals.</p>}>
-        {(() => {
-          const max = () => maxOf(byOwner().map(slice => slice.total));
-          return <div class="crm-insight-owners">
-            <For each={byOwner()}>{slice =>
-              <div class="crm-insight-owner-row">
-                <span class="crm-insight-bar-label">{slice.owner}</span>
-                <span class="crm-insight-stack" style={{ width: bar(slice.total, max()) }}>
-                  <Show when={slice.open}><i class="open" style={{ flex: slice.open }} title={`${slice.open} offen`} /></Show>
-                  <Show when={slice.won}><i class="won" style={{ flex: slice.won }} title={`${slice.won} gewonnen`} /></Show>
-                  <Show when={slice.lost}><i class="lost" style={{ flex: slice.lost }} title={`${slice.lost} verloren`} /></Show>
-                </span>
-                <span class="crm-insight-bar-value">
-                  <strong>{slice.open}</strong> offen · <strong>{slice.won}</strong> gewonnen · <strong>{slice.lost}</strong> verloren
-                  <small>{money(slice.openValue)} offen · {money(slice.wonValue)} gewonnen</small>
-                </span>
-              </div>}</For>
-            <p class="crm-insight-legend"><i class="open" /> Offen <i class="won" /> Gewonnen <i class="lost" /> Verloren</p>
-          </div>;
-        })()}
-      </Show>
-    </section>
-
-    <section class="crm-insight-report" aria-label="Aktivitäten nach Status und Art">
-      <header><h3>Aktivitäten</h3><small>Der Arbeitsvorrat im Zeitraum – nach Status und nach Art der Arbeit.</small></header>
-      <Show when={metrics().activities.total} fallback={<p class="crm-empty">Im gewählten Zeitraum ist keine Aktivität geplant.</p>}>
-        <div class="crm-insight-split">
-          <div class="crm-insight-bars">
-            <For each={byState()}>{slice =>
-              <button type="button" class="crm-insight-bar" data-state={slice.state} data-empty={slice.count === 0} onClick={() => props.onOpen("activities")}>
-                <span class="crm-insight-bar-label">{slice.label}</span>
-                <span class="crm-insight-bar-track"><i data-state={slice.state} style={{ width: bar(slice.count, maxOf(byState().map(item => item.count))) }} /></span>
-                <span class="crm-insight-bar-value"><strong>{slice.count}</strong></span>
-              </button>}</For>
-          </div>
-          <div class="crm-insight-bars">
-            <For each={byKind()}>{slice =>
-              <button type="button" class="crm-insight-bar" data-empty={slice.count === 0} onClick={() => props.onOpen("activities")}>
-                <span class="crm-insight-bar-label"><Icon name={ACTIVITY_ICONS[slice.kind]} size={13} />{slice.kind}</span>
-                <span class="crm-insight-bar-track"><i style={{ width: bar(slice.count, maxOf(byKind().map(item => item.count))) }} /></span>
-                <span class="crm-insight-bar-value"><strong>{slice.count}</strong><small>{slice.open} offen · {slice.done} erledigt</small></span>
-              </button>}</For>
-          </div>
+    <section class="crm-insight-report" aria-label="Offene Pipeline nach Phase">
+      <header>
+        <div>
+          <h3>Pipeline nach Phase</h3>
+          <small>Offene Deals je Phase. Gewichtet wird mit der in den Pipeline-Einstellungen hinterlegten Wahrscheinlichkeit.</small>
         </div>
-      </Show>
+        <PillMenu class="crm-insight-measure" label="Maßeinheit" value={measure()}
+          options={STAGE_MEASURES.map(value => ({ value, label: STAGE_MEASURE_LABELS[value] }))}
+          onChange={value => setMeasure(value as StageMeasure)} />
+      </header>
+      <ColumnChart
+        data={stageData()} series={[{ key: "amount", label: STAGE_MEASURE_LABELS[measure()], tone: "open" }]}
+        format={stageFormat} unit={STAGE_MEASURE_LABELS[measure()]} minStep={measure() === "count" ? 1 : 0}
+        label="Offene Pipeline nach Phase"
+        empty="Keine offenen Deals in diesem Zeitraum – es gibt nichts zu zeichnen. Die Phasen erscheinen wieder, sobald ein Deal darin liegt."
+        tableCaption="Offene Deals je Phase: Anzahl, Deal-Wert und gewichteter Wert."
+        columns={[{ key: "count", label: "Deals" }, { key: "value", label: "Deal-Wert" }, { key: "weighted", label: "Gewichtet" }]}
+        onSelect={() => props.onOpen("pipeline")} selectHint={datum => `Pipeline öffnen (${datum.label})`} />
+    </section>
+
+    <section class="crm-insight-report" aria-label="Deal-Ausgang nach verantwortlicher Person">
+      <header><div><h3>Deal-Ausgang nach verantwortlicher Person</h3><small>Jeder Deal im Zeitraum, aufgeteilt nach Ausgang: offen, gewonnen, verloren.</small></div></header>
+      <BarChart
+        data={ownerData()} series={OUTCOME_SERIES} format={count} unit="Anzahl Deals" minStep={1}
+        label="Deal-Ausgang nach verantwortlicher Person"
+        empty="Für diesen Zeitraum und Filter gibt es keine Deals – daher auch keine Verteilung nach Person."
+        tableCaption="Deals je Person nach Ausgang, mit offenem und gewonnenem Wert."
+        columns={[{ key: "openValue", label: "Offener Wert" }, { key: "wonValue", label: "Gewonnener Wert" }]}
+        onSelect={() => props.onOpen("pipeline")} selectHint={datum => `Deals öffnen (${datum.label})`} />
+    </section>
+
+    <section class="crm-insight-report" aria-label="Aktivitäten nach Art und Status">
+      <header><div><h3>Aktivitäten: erledigt und offen</h3><small>Der Arbeitsvorrat im Zeitraum – nach Art der Arbeit und nach Status.</small></div></header>
+      <div class="crm-insight-split">
+        <ColumnChart
+          data={kindData()} series={ACTIVITY_SERIES} format={count} unit="Anzahl Aktivitäten" minStep={1}
+          label="Aktivitäten nach Art, erledigt und offen"
+          empty="Im gewählten Zeitraum ist keine Aktivität geplant – keine Art von Arbeit zu zeigen."
+          tableCaption="Aktivitäten je Art: offen und erledigt."
+          onSelect={() => props.onOpen("activities")} selectHint={datum => `Aktivitäten öffnen (${datum.label})`} />
+        <ColumnChart
+          data={stateData()} series={stateSeries()} format={count} unit="Anzahl Aktivitäten" minStep={1}
+          label="Aktivitäten nach Status"
+          empty="Im gewählten Zeitraum ist keine Aktivität geplant – es gibt keinen Status zu zählen."
+          tableCaption="Aktivitäten je Status."
+          onSelect={() => props.onOpen("activities")} selectHint={datum => `Aktivitäten öffnen (${datum.label})`} />
+      </div>
     </section>
   </section>;
 }
