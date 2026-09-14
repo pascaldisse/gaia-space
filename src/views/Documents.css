@@ -499,8 +499,10 @@
   border-radius: var(--dk-radius-md); background: var(--accent-soft); color: var(--accent-text); font-size: 1.1rem;
 }
 .documents-library-card-copy { display: grid; min-width: 0; gap: 0.15rem; }
-.documents-library-card-copy strong, .documents-library-card-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.documents-library-card-copy small { color: var(--text-muted); font-size: var(--dk-fs-xs); }
+/* A library label is its identity, not supporting metadata. Let it take a second
+   line rather than turn half the collection into indistinguishable ellipses. */
+.documents-library-card-copy strong { white-space: normal; overflow-wrap: anywhere; line-height: 1.35; }
+.documents-library-card-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); font-size: var(--dk-fs-xs); }
 .documents-library-open { margin-left: auto; color: var(--accent-text); }
 /* A folder card is a button, not a link (it moves you inside the same page), so it
    must be told to stop looking like one. */
@@ -516,7 +518,7 @@ button.documents-library-card { font: inherit; text-align: left; cursor: pointer
   font-size: var(--dk-fs-xs); font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
 }
 .documents-shelf-grid {
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr));
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(18rem, 1fr));
   gap: var(--dk-space-sm); width: 100%;
 }
 .documents-shelf {
