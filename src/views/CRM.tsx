@@ -2,6 +2,7 @@ import { createEffect, createSignal, For, Show, onCleanup, onMount } from "solid
 import PageHeader, { Chip } from "../components/PageHeader";
 import { Icon } from "../components/Icon";
 import DateField from "../components/DateField";
+import { PillMenu } from "../components/controls";
 import { navigate, route } from "../router";
 import {
   ACTIVITY_KINDS, CRM_STAGES, PIPELINE_STAGES, activitiesOf, closeDeal, convertToDeal, customers as customerOrgs,
@@ -385,7 +386,7 @@ function DealPanel(props: { dealId: string; data: () => CrmData; onMutate: (fn: 
         <label>Währung<select value={current().currency} onChange={e => patch({ currency: e.currentTarget.value as Deal["currency"] })}><option value="EUR">EUR (€)</option><option value="CHF">CHF</option><option value="USD">USD ($)</option></select></label>
         <label>Gewinnwahrscheinlichkeit<div class="crm-percent-input"><input type="number" min="0" max="100" value={current().probability} onInput={e => patch({ probability: Math.max(0, Math.min(100, Number(e.currentTarget.value) || 0)) })} /><span>%</span></div><small>Gewichteter Deal-Wert: {money(dealAmount(current()) * current().probability / 100, current().currency)}</small></label>
         <Field label="Quelle" value={current().source} onChange={source => patch({ source })} />
-        <label>Verantwortliche Person<select value={current().owner} onChange={e => patch({ owner: e.currentTarget.value })}><For each={CRM_OWNERS}>{owner => <option value={owner === "Nicht zugeteilt" ? "" : owner}>{owner}</option>}</For></select></label>
+        <label>Verantwortliche Person<PillMenu label="Verantwortliche Person" value={current().owner} options={CRM_OWNERS.map(owner => ({ value: owner === "Nicht zugeteilt" ? "" : owner, label: owner }))} onChange={owner => patch({ owner })} /></label>
         <label>Erwarteter Abschluss<DateField label="Erwarteter Abschluss" value={current().expectedClose} onChange={expectedClose => patch({ expectedClose })} placeholder="Datum wählen" /></label>
         <label>Standort<select value={current().locationId ?? ""} onChange={e => patch({ locationId: e.currentTarget.value || null })}>
           <option value="">Kein bestimmter Standort</option><For each={org()?.locations ?? []}>{loc => <option value={loc.id}>{loc.name || "Unbenannter Standort"}</option>}</For></select></label>
@@ -446,7 +447,7 @@ function OrganizationPanel(props: { orgId: string; data: () => CrmData; onMutate
         <Field label="Mitarbeitende gesamt" value={current().employees} onChange={employees => patch({ employees })} />
         <Field label="Branchensoftware" value={current().software} onChange={software => patch({ software })} />
         <Field label="Quelle" value={current().source} onChange={source => patch({ source })} />
-        <label>Verantwortliche Person<select value={current().owner} onChange={e => patch({ owner: e.currentTarget.value })}><For each={CRM_OWNERS}>{owner => <option value={owner === "Nicht zugeteilt" ? "" : owner}>{owner}</option>}</For></select></label>
+        <label>Verantwortliche Person<PillMenu label="Verantwortliche Person" value={current().owner} options={CRM_OWNERS.map(owner => ({ value: owner === "Nicht zugeteilt" ? "" : owner, label: owner }))} onChange={owner => patch({ owner })} /></label>
         <label>Anzahl Standorte<input value={String(current().locations.length)} readOnly /></label>
       </div>
       <div class="crm-label-field"><span>Labels</span>
