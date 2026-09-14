@@ -15,6 +15,8 @@ import {
   type Organization, type PipelineStage,
   LEAD_STATE_LABELS,
 } from "../crmStore";
+import { importLeads, type ImportRow } from "../crmImport";
+import CrmImportDialog from "./CrmImportDialog";
 import CrmActivities from "./CrmActivities";
 import CrmInsights from "./CrmInsights";
 import "./CRM.css";
@@ -51,6 +53,7 @@ export default function CRM() {
   /** The inbox has two shelves, not two views: same table, same filters, one flag. */
   const [leadScope, setLeadScope] = createSignal<"inbox" | "archive">("inbox");
   const [convertTarget, setConvertTarget] = createSignal<string | null>(null);
+  const [importOpen, setImportOpen] = createSignal(false);
   const [stageSettingsOpen, setStageSettingsOpen] = createSignal(false);
   const [tab, setTab] = createSignal<CrmTab>(tabOf(route().tab));
   createEffect(() => setTab(tabOf(route().tab)));
@@ -98,6 +101,14 @@ export default function CRM() {
     });
     setSelected({ kind: "org", id: org.id });
     setNewOpen(false);
+  };
+  /** Import writes through the SAME draft mutation as every other CRM change, so the
+   *  imported records are persisted, filtered and searched exactly like typed ones. */
+  const runImport = (rows: ImportRow[]) => {
+    let outcome = { imported: 0, skipped: 0, names: [] as string[] };
+    mutate(draft => { outcome = importLeads(draft, rows); });
+    if (outcome.imported) { setLeadScope("inbox"); navigate({ view: "CRM", tab: "leads" }); }
+    return outcome;
   };
   const addDealFor = (organizationId: string) => {
     let created: string | undefined;
@@ -186,8 +197,14 @@ export default function CRM() {
         <LabelPicker label="Labels" selected={labelFilter()} library={labels()} onChange={setLabelFilter} />
         <select aria-label="Nach verantwortlicher Person filtern" value={filterOwner()} onChange={e => setFilterOwner(e.currentTarget.value)}><For each={owners()}>{owner => <option>{owner}</option>}</For></select>
       </Show>
+      {/* Importing is a LEAD action: it is offered where leads are triaged, and it names
+          what it does — a file becomes records in this inbox, not "data" somewhere. */}
+      <Show when={tab() === "leads"}>
+        <button class="ghost" onClick={() => setImportOpen(true)}><Icon name="upload" size={16} /> Importieren</button>
+      </Show>
       <button class="primary" onClick={() => setNewOpen(true)}><Icon name="plus" size={16} /> Organisation</button>
     </nav>
+    <Show when={importOpen()}><CrmImportDialog data={data} onImport={runImport} onClose={() => setImportOpen(false)} /></Show>
     <Show when={newOpen()}><NewOrganization onClose={() => setNewOpen(false)} onSave={addOrganization} /></Show>
     <Show when={stageSettingsOpen()}><PipelineSettings stages={data().pipelineStages} onClose={() => setStageSettingsOpen(false)} onSave={stages => { mutate(draft => setPipelineStages(draft, stages)); setStageSettingsOpen(false); }} /></Show>
     <Show when={drag()}>{active => <>

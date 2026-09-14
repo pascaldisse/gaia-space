@@ -243,3 +243,35 @@
 @media(max-width:720px){.crm-insight-cards{grid-template-columns:1fr 1fr}}
 /* Pipedrive-like report composition: one featured metric, three reading charts. */
 .crm-insight-dashboard{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;align-items:stretch}.crm-insight-dashboard>.crm-insight-cards{grid-column:1;grid-row:1;display:block}.crm-insight-dashboard>.crm-insight-cards .crm-insight-card:not(:first-child){display:none}.crm-insight-dashboard>.crm-insight-cards .crm-insight-card:first-child{height:100%;min-height:284px;display:flex;flex-direction:column;justify-content:center;padding:22px}.crm-insight-dashboard>.crm-insight-cards .crm-insight-card-value{font-size:30px}.crm-insight-dashboard>.crm-insight-report:nth-child(2){grid-column:2 / 5;grid-row:1}.crm-insight-dashboard>.crm-insight-report:nth-child(3){grid-column:1 / 3;grid-row:2}.crm-insight-dashboard>.crm-insight-report:nth-child(4){grid-column:3 / 5;grid-row:2}.crm-insight-dashboard .crm-insight-report{margin:0}@media(max-width:1050px){.crm-insight-dashboard{grid-template-columns:1fr 1fr}.crm-insight-dashboard>.crm-insight-cards{grid-column:1;grid-row:1}.crm-insight-dashboard>.crm-insight-report:nth-child(2){grid-column:2;grid-row:1}.crm-insight-dashboard>.crm-insight-report:nth-child(3){grid-column:1;grid-row:2}.crm-insight-dashboard>.crm-insight-report:nth-child(4){grid-column:2;grid-row:2}}@media(max-width:720px){.crm-insight-dashboard{grid-template-columns:1fr}.crm-insight-dashboard>.crm-insight-cards,.crm-insight-dashboard>.crm-insight-report:nth-child(2),.crm-insight-dashboard>.crm-insight-report:nth-child(3),.crm-insight-dashboard>.crm-insight-report:nth-child(4){grid-column:1;grid-row:auto}.crm-insight-dashboard>.crm-insight-cards .crm-insight-card:first-child{min-height:180px}}
+
+/* ── Import dialog ───────────────────────────────────────────────────────────
+   Wider than a normal modal because its job is READING rows, but the same paper,
+   the same header/footer rhythm. Verdict is carried by the row tint, never by a
+   status word repeated in every line. */
+.crm-import{width:min(940px,100%);max-height:86vh;overflow:auto;gap:12px}
+.crm-import-file{display:inline-grid;gap:6px;font-size:11px;color:var(--text-muted)}
+.crm-import-file input{font:inherit;font-size:12px}
+.crm-import-error{margin:0;font-size:12px;color:var(--status-danger-ink);background:var(--status-danger-bg);border:1px solid var(--status-danger-ink);border-radius:6px;padding:8px 10px}
+.crm-import-result{display:grid;gap:3px;padding:10px 12px;border-radius:6px;background:var(--status-success-bg,#e6f6e8);border:1px solid var(--status-success-ink,#118c5c);color:var(--status-success-ink,#118c5c);font-size:12px}
+.crm-import-summary{margin:0;font-size:12px;color:var(--text)}
+.crm-import-source{display:flex;gap:12px;flex-wrap:wrap}
+.crm-import-source label{flex:1;min-width:220px}
+.crm-import-mapping{display:grid;gap:7px;justify-items:start}
+.crm-import-map-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px;width:100%;padding:12px;border:1px solid var(--surface-border);border-radius:8px;background:var(--ctl-bg)}
+.crm-import-map-grid small{color:var(--text-faint);font-size:10px}
+.crm-import-duplicates{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;padding:9px 12px;border:1px solid var(--surface-border);border-radius:8px;background:var(--ctl-bg);font-size:12px;color:var(--text-muted)}
+.crm-import-duplicates p{margin:0}
+.crm-import-duplicates span{display:flex;gap:7px}
+.crm-import-preview{border:1px solid var(--surface-border);border-radius:8px;overflow:hidden;background:var(--surface)}
+.crm-import-head,.crm-import-row{display:grid;grid-template-columns:58px 1.2fr 1.2fr 1.3fr 1.1fr;gap:10px;align-items:center;padding:9px 12px}
+.crm-import-head{font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);background:var(--ctl-bg)}
+.crm-import-row{border-top:1px solid var(--surface-border);font-size:12px}
+.crm-import-row span{color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.crm-import-row strong{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.crm-import-row[data-import-state="duplicate"]{background:var(--status-warn-bg,#fff6e5)}
+.crm-import-row[data-import-state="error"]{background:var(--status-danger-bg,#fdecec)}
+.crm-import-row[data-import-state="skipped"] strong,.crm-import-row[data-import-state="error"] strong{color:var(--text-muted);text-decoration:line-through}
+.crm-import-check{display:grid;place-items:center;margin:0}
+.crm-import-check input{width:16px;height:16px}
+.crm-import-note{font-size:11px}
+.crm-import-more{padding:9px 12px;border-top:1px solid var(--surface-border)}
