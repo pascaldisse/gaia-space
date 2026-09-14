@@ -29,7 +29,7 @@
 .crm-lead-row .crm-lead-unknown{color:var(--text-faint);font-style:italic}
 .crm-lead-labels{overflow:visible!important}
 .crm-lead-actions{display:flex;gap:6px;justify-content:flex-end;white-space:nowrap}
-.crm-lead-actions .ghost.small{border:1px solid var(--surface-border);border-radius:5px;background:transparent;color:var(--accent);padding:4px 8px;font:inherit;font-size:10px;cursor:pointer}
+.crm-lead-actions .ghost.small{display:inline-flex!important;align-items:center;justify-content:center;width:auto!important;min-height:26px;grid-template-columns:none;border:1px solid var(--surface-border);border-radius:5px;background:transparent;color:var(--accent);padding:4px 8px;font:inherit;font-size:10px;cursor:pointer}
 .crm-lead-actions .ghost.small.danger{color:var(--status-danger-ink);border-color:var(--status-danger-ink);background:var(--status-danger-bg);display:grid;place-items:center}
 .crm-record-standing{font-size:12px;color:var(--text-muted)}
 @media(max-width:850px){.crm-lead-table .crm-directory-head,.crm-lead-row{grid-template-columns:1.2fr .9fr .8fr 1fr auto}.crm-lead-table .crm-directory-head span:nth-child(4),.crm-lead-table .crm-directory-head span:nth-child(5),.crm-lead-row>span:nth-child(4),.crm-lead-row>span:nth-child(5){display:none}}
@@ -83,6 +83,7 @@
 /* ── Pipeline stage settings: phase name + phase-owned win probability ─────── */
 .crm-pipeline-summary{align-items:center;gap:12px}
 .crm-stage-settings-button{display:inline-flex!important;align-items:center;gap:5px;height:30px;padding:0 10px;border:1px solid var(--surface-border);border-radius:7px;background:var(--canvas);color:var(--text);font:inherit;font-size:11px;font-weight:600;white-space:nowrap;cursor:pointer}
+.crm-pipeline-summary .crm-stage-settings-button{border:1px solid var(--surface-border);background:var(--canvas);color:var(--text)}
 .crm-stage-settings-button:hover{border-color:var(--accent);color:var(--accent)}
 .crm-stage-settings{width:min(520px,100%)}
 .crm-stage-settings-list{display:grid;gap:6px}
@@ -348,6 +349,7 @@
 .crm-file-picker input{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
 .crm-file-picker-button{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:28px;padding:0 10px;border:1px solid var(--surface-border);border-radius:6px;background:var(--surface);color:var(--text);font-size:11px;font-weight:650;white-space:nowrap}
 .crm-file-picker-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-muted);font-size:12px}
+.crm-view button.ghost.small,.crm-overlay button.ghost.small,.crm-detail button.ghost.small{opacity:1}
 .crm-new-activity{flex:none;white-space:nowrap}
 .crm-activity-head>span:first-child{display:grid;place-items:center}
 
@@ -371,6 +373,7 @@
 .crm-deal-table .crm-directory-head,.crm-deal-table button{grid-template-columns:minmax(0,1.3fr) minmax(0,1fr) auto;gap:8px}
 .crm-outcome-summary{flex-wrap:wrap}
 .crm-stage-row .crm-stage-menu{flex:1 0 100%}
+.crm-detail{width:100vw;max-width:100vw}
 .crm-save-bar{padding-inline:18px}
 }
 @media(max-width:520px){
@@ -379,6 +382,8 @@
 .crm-toolbar .crm-labelpicker,.crm-toolbar .crm-labelpicker-trigger,.crm-toolbar .crm-owner-filter{width:100%!important;min-width:0}
 .crm-toolbar :is(.crm-import-trigger,.crm-export-trigger,.primary){width:100%;justify-content:center}
 .crm-directory{padding:18px 14px}
+.crm-pipeline-summary{align-items:flex-start;flex-wrap:wrap}
+.crm-pipeline-summary>span{flex:1 0 100%}
 .crm-directory>header{gap:8px}
 .crm-directory header p{overflow-wrap:anywhere}
 .crm-lead-table .crm-directory-head,.crm-lead-row{grid-template-columns:minmax(0,1.3fr) minmax(0,.9fr)}
@@ -406,7 +411,6 @@
 .crm-insight-custom{display:grid;grid-template-columns:1fr 1fr;width:100%}
 .crm-insight-report{overflow-x:auto}
 .crm-insight-report .chart-columns-plot{min-width:520px}
-.crm-detail{width:100vw;max-width:100vw}
 .crm-stage-row{align-items:stretch}
 .crm-stage-row>.ghost{flex:1}
 .crm-save-actions{width:100%}
