@@ -18,6 +18,9 @@
 .crm-lead-card footer{align-items:center}
 .crm-lead-card footer .ghost.small{border:1px solid var(--surface-border);border-radius:5px;background:transparent;color:var(--accent);padding:3px 7px;font:inherit;font-size:10px;cursor:pointer}
 .crm-drop-zone.is-over{border-color:var(--accent);background:var(--accent-soft);color:var(--accent-text)}
+/* Terminal states are affirmative/negative destinations, not neutral buttons. */
+.crm-drop-zone.won{border-color:var(--status-success-ink);background:var(--status-success-bg);color:var(--status-success-ink)}
+.crm-drop-zone.lost{border-color:var(--status-danger-ink);background:var(--status-danger-bg);color:var(--status-danger-ink)}
 .crm-trash-list{display:grid;gap:6px}
 .crm-trash-row{display:grid;grid-template-columns:1fr auto auto;gap:9px;align-items:center;padding:10px 12px;border:1px solid var(--surface-border);border-radius:7px;background:var(--surface)}
 .crm-trash-row span{display:grid;gap:3px;font-size:12px}
