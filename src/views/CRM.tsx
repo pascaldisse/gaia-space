@@ -18,6 +18,7 @@ import {
   type Organization, type PipelineStage, type RecordInput, type DealInput,
   LEAD_STATE_LABELS,
 } from "../crmStore";
+import { formatAmount, formatMoney, moneyOf, MIXED_CURRENCY_LABEL } from "../crmInsights";
 import { importLeads, type ImportRow } from "../crmImport";
 import CrmImportDialog from "./CrmImportDialog";
 import CrmExportDialog from "./CrmExportDialog";
@@ -29,7 +30,12 @@ const split = (value: string) => value.split(/[,\n]/).map(x => x.trim()).filter(
 const date = (value: string) => value ? new Intl.DateTimeFormat("de-DE", { dateStyle: "medium" }).format(new Date(`${value}T12:00:00`)) : "Kein Termin";
 const stamp = (value: string) => new Intl.DateTimeFormat("de-DE", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
 
-const money = (amount: number, currency: Deal["currency"] = "EUR") => new Intl.NumberFormat("de-DE", { style: "currency", currency, maximumFractionDigits: 0 }).format(amount);
+/** ONE money vocabulary for the whole CRM (§crmInsights): a single deal prints its own
+ *  currency, and any figure over SEVERAL deals goes through moneyOf/formatMoney, which
+ *  keeps one amount PER currency. A board that adds 10.000 CHF to 20.000 € and writes
+ *  "30.000 €" under it is not rounding — it is stating something false. */
+const money = formatAmount;
+const MIXED_HINT = `${MIXED_CURRENCY_LABEL} – je Währung ausgewiesen, nie addiert.`;
 
 /** The CRM's work views. Each is route state (§router.crmTabs), so the rail can
  *  highlight one and a link opens the same surface. */
@@ -222,6 +228,9 @@ export default function CRM() {
   /** Weighting reads the stage, never the deal: one source of truth for the forecast. */
   const probabilityOf = (stage: CrmStage) => stageProbability(data(), stage);
   const weighted = (deal: Deal) => dealAmount(deal) * dealProbability(data(), deal) / 100;
+  /** Board figures are per currency, never one merged number (§money above). */
+  const boardTotal = () => moneyOf(boardDeals());
+  const boardWeighted = () => moneyOf(boardDeals(), weighted);
 
   return <section class="crm-view">
     <PageHeader icon="columns" title="CRM" subline="Organisationen, Deals und Aktivitäten im Vertrieb." chips={<Chip value={count()} label={chipLabel()} />} />
@@ -258,13 +267,13 @@ export default function CRM() {
 
     <Show when={tab() === "pipeline"}>
       <section class="crm-pipeline">
-        <div class="crm-pipeline-summary"><span><strong>{money(boardDeals().reduce((sum, deal) => sum + dealAmount(deal), 0))}</strong> Gesamtwert · <strong>{money(boardDeals().reduce((sum, deal) => sum + weighted(deal), 0))}</strong> gewichteter Pipelinewert · {boardDeals().length} offene Deals</span>
+        <div class="crm-pipeline-summary"><span><strong>{formatMoney(boardTotal())}</strong> Gesamtwert · <strong>{formatMoney(boardWeighted())}</strong> gewichteter Pipelinewert · {boardDeals().length} offene Deals<Show when={boardTotal().mixed}><small class="crm-currency-note">{MIXED_HINT}</small></Show></span>
           <button class="ghost small crm-stage-settings-button" onClick={() => setStageSettingsOpen(true)}><Icon name="settings" size={14} /> Pipeline-Einstellungen</button></div>
         <div class="crm-board" aria-label="Vertriebspipeline">
           <For each={PIPELINE_STAGES}>{stage => {
             const inStage = () => boardDeals().filter(deal => deal.stage === stage);
             return <section class="crm-column" data-crm-stage={stage} classList={{ "is-drop-target": dragOverStage() === stage }}>
-              <header><strong>{stageName(data(), stage)}</strong><span>{inStage().length} · {probabilityOf(stage)}% · {money(inStage().reduce((sum, deal) => sum + weighted(deal), 0))} gewichtet</span></header>
+              <header><strong>{stageName(data(), stage)}</strong><span>{inStage().length} · {probabilityOf(stage)}% · {formatMoney(moneyOf(inStage(), weighted))} gewichtet</span></header>
               <div class="crm-column-cards"><For each={inStage()}>{deal => <DealCard deal={deal} org={orgOf(deal)} library={labels()} probability={probabilityOf(deal.stage)} onPointerDown={startDrag({ kind: "deal", id: deal.id })} onOpen={() => openRecord({ kind: "deal", id: deal.id })} />}</For></div>
             </section>;
           }}</For>
@@ -446,11 +455,11 @@ function DealCard(props: { deal: Deal; org: Organization | undefined; library: L
 
 function DealTable(props: { title: string; status: Deal["status"]; deals: () => Deal[]; data: () => CrmData; onOpen: (dealId: string) => void; onOpenOrg: (orgId: string) => void }) {
   const outcome = () => props.status;
-  const total = () => props.deals().reduce((sum, deal) => sum + dealAmount(deal), 0);
+  const total = () => moneyOf(props.deals());
   const outcomeLabel = () => outcome() === "Gewonnen" ? "Gewonnener Deal-Wert" : outcome() === "Verloren" ? "Verlorenes Deal-Volumen" : "Offener Deal-Wert";
   return <section class="crm-directory crm-deal-directory" classList={{ "is-won": outcome() === "Gewonnen", "is-lost": outcome() === "Verloren" }}>
     <header><div><h2>{props.title}</h2><p>Ein Deal ist die Verkaufschance; die Organisation dahinter bleibt bestehen.</p></div><span>{props.deals().length} Deal{props.deals().length === 1 ? "" : "s"}</span></header>
-    <Show when={outcome() !== "Offen"}><div class="crm-outcome-summary"><span>{outcome() === "Gewonnen" ? "✓" : "×"} {outcome()}</span><strong>{money(total())}</strong><small>{outcomeLabel()}</small></div></Show>
+    <Show when={outcome() !== "Offen"}><div class="crm-outcome-summary"><span>{outcome() === "Gewonnen" ? "✓" : "×"} {outcome()}</span><strong>{formatMoney(total())}</strong><small>{outcomeLabel()}<Show when={total().mixed}> · {MIXED_HINT}</Show></small></div></Show>
     <div class="crm-directory-table crm-deal-table">
       <div class="crm-directory-head"><span>Deal</span><span>Organisation</span><span>Status</span><span>Deal-Wert</span><span>Abgeschlossen am</span><span>Verantwortlich</span></div>
       <For each={props.deals()}>{deal => <button onClick={() => props.onOpen(deal.id)}>

@@ -71,6 +71,43 @@ test("empty outcome lists keep the outcome named in their summary", async () => 
   expect(host.querySelector(".crm-outcome-summary")?.textContent).toContain("Verlorenes Deal-Volumen");
 });
 
+// The board used to print every total with a euro sign, whatever the deals carried:
+// 20.000 € plus 10.000 CHF appeared as "30.000 €". A total may never merge currencies.
+test("board and column totals never add two currencies under one symbol", async () => {
+  const store = JSON.parse(localStorage.getItem("gaia.crm.prototype.v1")!);
+  localStorage.removeItem("gaia.crm.prototype.v1");
+  localStorage.setItem("gaia.crm.prototype.v2", JSON.stringify({
+    version: 2, pipelineStages: undefined, labels: [], activities: [],
+    organizations: [{ ...store[0], id: "org-1", locations: [], contacts: [], notes: [], files: [], labels: [], deletedAt: null, createdAt: "2026-09-01T10:00:00.000Z" }],
+    deals: [
+      { id: "deal-eur", organizationId: "org-1", locationId: null, title: "Deal EUR", stage: "Qualified", status: "Offen", owner: "Jannes", source: "", value: "20.000", currency: "EUR", expectedClose: "", labels: [], nextStep: "", nextStepDate: "", notes: [], activities: [], files: [], createdAt: "2026-09-01T10:00:00.000Z", stageEnteredAt: "2026-09-01T10:00:00.000Z", closedAt: null, deletedAt: null },
+      { id: "deal-chf", organizationId: "org-1", locationId: null, title: "Deal CHF", stage: "Qualified", status: "Offen", owner: "Jannes", source: "", value: "10.000", currency: "CHF", expectedClose: "", labels: [], nextStep: "", nextStepDate: "", notes: [], activities: [], files: [], createdAt: "2026-09-01T10:00:00.000Z", stageEnteredAt: "2026-09-01T10:00:00.000Z", closedAt: null, deletedAt: null },
+    ],
+  }));
+  navigate({ view: "CRM", tab: "pipeline" });
+  const host = mount();
+  await settle();
+
+  const summary = host.querySelector(".crm-pipeline-summary")!.textContent!;
+  expect(summary).toContain("20.000");
+  expect(summary).toContain("CHF");
+  expect(summary).not.toContain("30.000");
+  expect(host.querySelector(".crm-pipeline-summary .crm-currency-note")).toBeTruthy();
+
+  // The Qualified column holds both deals: its weighted figure is two amounts, not one.
+  const qualified = [...host.querySelectorAll(".crm-column")]
+    .find(column => column.querySelector("header strong")?.textContent === "Qualified")!;
+  const header = qualified.querySelector("header span")!.textContent!;
+  expect(header).toContain("CHF");
+  expect(header.match(/gewichtet/g)).toHaveLength(1);
+  expect(header).toContain("·");
+
+  // A single card keeps its own currency, untouched by the grouping.
+  const values = [...qualified.querySelectorAll(".crm-card footer span:last-child")].map(node => node.textContent!);
+  expect(values.some(value => value.includes("CHF"))).toBe(true);
+  expect(values.some(value => value.includes("€"))).toBe(true);
+});
+
 test("the deal panel owns the conversation and the organization panel only summarizes it", async () => {
   navigate({ view: "CRM", tab: "pipeline" });
   const host = mount();
