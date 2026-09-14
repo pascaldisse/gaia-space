@@ -22,6 +22,7 @@ const money = (amount: number, currency: Deal["currency"] = "EUR") => new Intl.N
 type CrmTab = "leads" | "pipeline" | "open" | "won" | "lost" | "trash" | "activities" | "customers";
 const tabOf = (tab: string | undefined): CrmTab =>
   (["leads", "pipeline", "open", "won", "lost", "trash", "activities", "customers"] as CrmTab[]).includes(tab as CrmTab) ? tab as CrmTab : "pipeline";
+const CRM_OWNERS = ["Nicht zugeteilt", "Jannes", "Bjarne", "Charles", "Pascal"] as const;
 const TAB_TITLE: Record<CrmTab, string> = {
   leads: "Leads", pipeline: "Pipeline", open: "Offene Deals", won: "Gewonnene Deals", lost: "Verlorene Deals",
   trash: "Papierkorb", activities: "Aktivitäten", customers: "Kunden",
@@ -383,7 +384,7 @@ function DealPanel(props: { dealId: string; data: () => CrmData; onMutate: (fn: 
         <label>Währung<select value={current().currency} onChange={e => patch({ currency: e.currentTarget.value as Deal["currency"] })}><option value="EUR">EUR (€)</option><option value="CHF">CHF</option><option value="USD">USD ($)</option></select></label>
         <label>Gewinnwahrscheinlichkeit<div class="crm-percent-input"><input type="number" min="0" max="100" value={current().probability} onInput={e => patch({ probability: Math.max(0, Math.min(100, Number(e.currentTarget.value) || 0)) })} /><span>%</span></div><small>Gewichteter Deal-Wert: {money(dealAmount(current()) * current().probability / 100, current().currency)}</small></label>
         <Field label="Quelle" value={current().source} onChange={source => patch({ source })} />
-        <Field label="Verantwortliche Person" value={current().owner} onChange={owner => patch({ owner })} />
+        <label>Verantwortliche Person<select value={current().owner} onChange={e => patch({ owner: e.currentTarget.value })}><For each={CRM_OWNERS}>{owner => <option value={owner === "Nicht zugeteilt" ? "" : owner}>{owner}</option>}</For></select></label>
         <label>Erwarteter Abschluss<input type="date" value={current().expectedClose} onInput={e => patch({ expectedClose: e.currentTarget.value })} /></label>
         <label>Standort<select value={current().locationId ?? ""} onChange={e => patch({ locationId: e.currentTarget.value || null })}>
           <option value="">Kein bestimmter Standort</option><For each={org()?.locations ?? []}>{loc => <option value={loc.id}>{loc.name || "Unbenannter Standort"}</option>}</For></select></label>
@@ -444,7 +445,7 @@ function OrganizationPanel(props: { orgId: string; data: () => CrmData; onMutate
         <Field label="Mitarbeitende gesamt" value={current().employees} onChange={employees => patch({ employees })} />
         <Field label="Branchensoftware" value={current().software} onChange={software => patch({ software })} />
         <Field label="Quelle" value={current().source} onChange={source => patch({ source })} />
-        <Field label="Verantwortliche Person" value={current().owner} onChange={owner => patch({ owner })} />
+        <label>Verantwortliche Person<select value={current().owner} onChange={e => patch({ owner: e.currentTarget.value })}><For each={CRM_OWNERS}>{owner => <option value={owner === "Nicht zugeteilt" ? "" : owner}>{owner}</option>}</For></select></label>
         <label>Anzahl Standorte<input value={String(current().locations.length)} readOnly /></label>
       </div>
       <div class="crm-label-field"><span>Labels</span>
