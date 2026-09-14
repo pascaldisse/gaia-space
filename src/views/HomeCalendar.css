@@ -192,7 +192,7 @@
   position: absolute;
   /* Anchor to the numeral, not the cell bottom: row height changes must never
      make an event look like it belongs to the following day. */
-  top: calc(50% + .67rem);
+  top: calc(50% + .67em);
   transform: translateY(-50%);
   width: 5px;
   height: 5px;
