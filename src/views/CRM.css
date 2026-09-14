@@ -58,3 +58,4 @@
 .crm-label-field{padding-top:2px}.crm-label-field>span{font-weight:600}.crm-next-fields{display:grid;grid-template-columns:minmax(0,1fr) 170px;gap:14px;align-items:end}
 .crm-add-note-card{min-height:72px;padding:14px;border-radius:8px}.crm-add-note-card strong{font-size:13px}
 @media(max-width:720px){.crm-detail-head,.crm-stage-row,.crm-detail-body{padding-left:18px;padding-right:18px}.crm-next-fields{grid-template-columns:1fr}.crm-stage-row{flex-wrap:wrap}.crm-stage-row select{flex-basis:100%}}
+.crm-percent-input{position:relative}.crm-percent-input input{padding-right:30px}.crm-percent-input span{position:absolute;right:11px;top:50%;transform:translateY(-50%);font-size:12px;font-weight:650;color:var(--text-muted);pointer-events:none}

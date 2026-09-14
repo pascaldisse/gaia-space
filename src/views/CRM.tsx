@@ -158,12 +158,12 @@ export default function CRM() {
 
     <Show when={tab() === "pipeline"}>
       <section class="crm-pipeline">
-        <div class="crm-pipeline-summary"><span><strong>{money(boardDeals().reduce((sum, deal) => sum + dealAmount(deal), 0))}</strong> Pipelinewert · <strong>{money(boardDeals().reduce((sum, deal) => sum + dealAmount(deal) * deal.probability / 100, 0))}</strong> gewichtet · {boardDeals().length} offene Deals</span><span>Pipeline: Vertrieb</span></div>
+        <div class="crm-pipeline-summary"><span><strong>{money(boardDeals().reduce((sum, deal) => sum + dealAmount(deal), 0))}</strong> Gesamtwert · <strong>{money(boardDeals().reduce((sum, deal) => sum + dealAmount(deal) * deal.probability / 100, 0))}</strong> gewichteter Pipelinewert · {boardDeals().length} offene Deals</span><span>Pipeline: Vertrieb</span></div>
         <div class="crm-board" aria-label="Vertriebspipeline">
           <For each={PIPELINE_STAGES}>{stage => {
             const inStage = () => boardDeals().filter(deal => deal.stage === stage);
             return <section class="crm-column" data-crm-stage={stage} classList={{ "is-drop-target": dragOverStage() === stage }}>
-              <header><strong>{stage}</strong><span>{inStage().length} · {money(inStage().reduce((sum, deal) => sum + dealAmount(deal), 0))}</span></header>
+              <header><strong>{stage}</strong><span>{inStage().length} · {money(inStage().reduce((sum, deal) => sum + dealAmount(deal) * deal.probability / 100, 0))} gewichtet</span></header>
               <div class="crm-column-cards"><For each={inStage()}>{deal => <DealCard deal={deal} org={orgOf(deal)} library={labels()} onPointerDown={startDrag({ kind: "deal", id: deal.id })} onOpen={() => openRecord({ kind: "deal", id: deal.id })} />}</For></div>
             </section>;
           }}</For>
@@ -377,10 +377,11 @@ function DealPanel(props: { dealId: string; data: () => CrmData; onMutate: (fn: 
     <nav class="crm-tabs"><For each={["Übersicht", "Aktivitäten", "Dokumente"] as const}>{name => <button classList={{ active: tab() === name }} onClick={() => setTab(name)}>{name}</button>}</For></nav>
     <Show when={tab() === "Übersicht"}><div class="crm-detail-body">
       <section class="crm-section"><h2>Deal</h2><div class="crm-fields two">
+        <label>Verknüpfter Kunde / Organisation<select value={current().organizationId} onChange={e => patch({ organizationId: e.currentTarget.value, locationId: null })}><For each={props.data().organizations.filter(item => !item.deletedAt)}>{item => <option value={item.id}>{item.name}</option>}</For></select></label>
         <Field label="Titel" value={current().title} onChange={title => patch({ title })} />
         <label>Deal-Wert<input inputmode="decimal" value={current().value} onInput={e => patch({ value: e.currentTarget.value.replace(/[^0-9,.]/g, "") })} placeholder="z. B. 12.500" /></label>
         <label>Währung<select value={current().currency} onChange={e => patch({ currency: e.currentTarget.value as Deal["currency"] })}><option value="EUR">EUR (€)</option><option value="CHF">CHF</option><option value="USD">USD ($)</option></select></label>
-        <label>Gewinnwahrscheinlichkeit<input type="number" min="0" max="100" value={current().probability} onInput={e => patch({ probability: Math.max(0, Math.min(100, Number(e.currentTarget.value) || 0)) })} /><small>Gewichteter Wert: {money(dealAmount(current()) * current().probability / 100, current().currency)}</small></label>
+        <label>Gewinnwahrscheinlichkeit<div class="crm-percent-input"><input type="number" min="0" max="100" value={current().probability} onInput={e => patch({ probability: Math.max(0, Math.min(100, Number(e.currentTarget.value) || 0)) })} /><span>%</span></div><small>Gewichteter Deal-Wert: {money(dealAmount(current()) * current().probability / 100, current().currency)}</small></label>
         <Field label="Quelle" value={current().source} onChange={source => patch({ source })} />
         <Field label="Verantwortliche Person" value={current().owner} onChange={owner => patch({ owner })} />
         <label>Erwarteter Abschluss<input type="date" value={current().expectedClose} onInput={e => patch({ expectedClose: e.currentTarget.value })} /></label>
