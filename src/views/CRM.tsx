@@ -84,7 +84,7 @@ export default function CRM() {
           <footer><span>{item.account.owner || "Nicht zugeteilt"}</span><Show when={item.location.contacts.length}><span>{item.location.contacts.length} Kontakt{item.location.contacts.length === 1 ? "" : "e"}</span></Show></footer>
         </div>}</For></div>
       </section>}</For>
-    </div><div class="crm-terminal-zones"><DropZone label="Verloren" tone="lost" onDrop={locationId => updateLocation(locationId, { status: "Verloren" })}/><DropZone label="Gewonnen" tone="won" onDrop={locationId => move(locationId, "Gewonnen")}/></div></section></Show>
+    </div><div class="crm-terminal-zones"><span>Deal abschließen</span><DropZone label="Verloren" tone="lost" onDrop={locationId => updateLocation(locationId, { status: "Verloren" })}/><DropZone label="Gewonnen" tone="won" onDrop={locationId => move(locationId, "Gewonnen")}/></div></section></Show>
     <Show when={view() === "Kunden"}><CustomerDirectory title="Kundenkarteien" items={visible} onOpen={setSelected}/></Show>
     <Show when={view() === "Offene Deals"}><CustomerDirectory title="Offene Deals" items={() => visible().filter(x => dealStatus(x) === "Aktiv" && dealStage(x) !== "Gewonnen")} onOpen={setSelected}/></Show>
     <Show when={view() === "Abgeschlossene Deals"}><CustomerDirectory title="Abgeschlossene Deals" items={() => visible().filter(x => dealStatus(x) === "Verloren" || dealStage(x) === "Gewonnen")} onOpen={setSelected}/></Show>
