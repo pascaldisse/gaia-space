@@ -435,7 +435,7 @@ function OrganizationPanel(props: { orgId: string; data: () => CrmData; onMutate
       <p>{isCustomerNow() ? "Kunde" : "Lead"}</p><h1>{current().name}</h1><span class="crm-record-kind">Organisation</span>
     </div><button class="icon-button" onClick={props.onClose} aria-label="Organisation schließen"><Icon name="close" /></button></header>
     <div class="crm-stage-row">
-      <button class="ghost" onClick={props.onAddDeal}><Icon name="plus" size={14} /> Deal anlegen</button>
+      <button class="ghost success" style={{ background: "#e6f6e8", color: "#118c5c", "border-color": "#118c5c" }} onClick={props.onAddDeal}><Icon name="plus" size={14} /> Deal anlegen</button>
       <button class="ghost danger" onClick={() => { props.onMutate(draft => softDeleteOrganization(draft, props.orgId)); props.onClose(); }}><Icon name="trash" size={15} /> In den Papierkorb</button>
     </div>
     <nav class="crm-tabs"><For each={["Stammdaten", "Deals", "Verlauf"] as const}>{name => <button classList={{ active: tab() === name }} onClick={() => setTab(name)}>{name}</button>}</For></nav>
@@ -456,9 +456,10 @@ function OrganizationPanel(props: { orgId: string; data: () => CrmData; onMutate
         <LabelChips ids={current().labels} library={props.data().labels} />
       </div></section>
       <section class="crm-section"><div class="crm-section-title"><h2>Standorte</h2>
-        <button class="ghost small" onClick={() => { const next = emptyLocation(`${current().name} · Neuer Standort`); patch({ locations: [...current().locations, next] }); setLocationId(next.id); }}><Icon name="plus" size={14} /> Standort</button></div>
+        <button class="crm-add-location" onClick={() => { const next = emptyLocation(`${current().name} · Neuer Standort`); patch({ locations: [...current().locations, next] }); setLocationId(next.id); }}><Icon name="plus" size={14} /> Standort hinzufügen</button></div>
         <div class="crm-location-list"><For each={current().locations}>{loc => <button classList={{ active: loc.id === location()?.id }} onClick={() => setLocationId(loc.id)}>{loc.name || "Unbenannt"}<small>{loc.address.split("\n")[0] || "Keine Adresse"}</small></button>}</For></div>
         <Show when={location()}>{loc => <>
+          <div class="crm-section-title"><h3>Standortdaten</h3><button class="ghost small danger" onClick={() => { const remaining = current().locations.filter(item => item.id !== loc().id); patch({ locations: remaining }); setLocationId(remaining[0]?.id ?? null); }}><Icon name="trash" size={14} /> Standort löschen</button></div>
           <Field label="Standortname" value={loc().name} onChange={name => patchLocation({ name })} />
           <Field label="Mitarbeitende an diesem Standort" value={loc().employees} onChange={employees => patchLocation({ employees })} />
           <label>Adresse<textarea value={loc().address} onInput={e => patchLocation({ address: e.currentTarget.value })} placeholder="Straße, Hausnummer&#10;PLZ Ort" /></label>
