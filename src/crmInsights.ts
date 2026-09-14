@@ -97,17 +97,74 @@ export const scopeActivities = (data: CrmData, scope: InsightScope): ActivityEnt
     return inRange(entry.activity.dueDate, scope.range);
   });
 
+/** ── Money is never one number ────────────────────────────────────────────────
+ *  A deal carries its own currency (§crmStore.Deal.currency). Adding 10.000 CHF to
+ *  20.000 € and printing "30.000 €" is not a rounding error, it is a false statement,
+ *  so no report in this module ever returns a bare monetary number: it returns the
+ *  amounts PER CURRENCY, and says out loud when a figure spans several of them.
+ *  `amount` is the plain sum and is only meaningful when `mixed` is false — a chart
+ *  axis may use it then, and must fall back to counts when it is mixed. */
+export type Currency = Deal["currency"];
+export const CURRENCY_ORDER = ["EUR", "CHF", "USD"] as const;
+export type MoneyPart = { currency: Currency; amount: number };
+export type Money = { parts: MoneyPart[]; currency: Currency | null; amount: number; mixed: boolean };
+export const EMPTY_MONEY: Money = { parts: [], currency: null, amount: 0, mixed: false };
+export const MIXED_CURRENCY_LABEL = "Gemischte Währungen";
+
+const currencyOf = (deal: Deal): Currency =>
+  (CURRENCY_ORDER as readonly string[]).includes(deal.currency) ? deal.currency : "EUR";
+
+/** Sum a set of deals into one amount PER currency, in a stable order. */
+export const moneyOf = (deals: Deal[], per: (deal: Deal) => number = dealAmount): Money => {
+  const buckets = new Map<Currency, number>();
+  for (const deal of deals) {
+    const currency = currencyOf(deal);
+    buckets.set(currency, (buckets.get(currency) ?? 0) + per(deal));
+  }
+  const parts = CURRENCY_ORDER.filter(currency => buckets.has(currency))
+    .map(currency => ({ currency, amount: buckets.get(currency)! }));
+  return {
+    parts,
+    currency: parts.length === 1 ? parts[0].currency : null,
+    amount: parts.reduce((total, part) => total + part.amount, 0),
+    mixed: parts.length > 1,
+  };
+};
+/** Which currencies a scope actually contains — the view asks this before it offers a
+ *  monetary chart axis at all. */
+export const scopeCurrencies = (deals: Deal[]): Currency[] =>
+  CURRENCY_ORDER.filter(currency => deals.some(deal => currencyOf(deal) === currency));
+
+/** `€` is unambiguous, `$` is not — so every foreign currency prints its CODE (`USD`,
+ *  `CHF`). Beside each other in one report, symbols would be the old lie again. */
+export const formatAmount = (amount: number, currency: Currency = "EUR") =>
+  new Intl.NumberFormat("de-DE", {
+    style: "currency", currency, maximumFractionDigits: 0,
+    currencyDisplay: currency === "EUR" ? "symbol" : "code",
+  }).format(amount);
+export const formatAmountShort = (amount: number, currency: Currency = "EUR") =>
+  Math.abs(amount) >= 10000
+    ? `${new Intl.NumberFormat("de-DE", { maximumFractionDigits: Math.abs(amount) >= 100000 ? 0 : 1 }).format(amount / 1000)} Tsd. ${currency === "EUR" ? "€" : currency}`
+    : formatAmount(amount, currency);
+/** Every currency, spelled out: `20.000 € · 10.000 CHF`. Never one merged total. */
+export const formatMoney = (money: Money): string =>
+  !money.parts.length ? formatAmount(0) : money.parts.map(part => formatAmount(part.amount, part.currency)).join(" · ");
+/** A headline: one currency prints its amount, several print `Gemischte Währungen`
+ *  with the per-currency amounts beside it, so nothing is ever labelled EUR falsely. */
+export const moneyHeadline = (money: Money): { value: string; detail: string } =>
+  money.mixed ? { value: MIXED_CURRENCY_LABEL, detail: formatMoney(money) } : { value: formatMoney(money), detail: "" };
+
 /** ── The four headline numbers ────────────────────────────────────────────── */
-export type Metric = { count: number; value: number };
+export type Metric = { count: number; money: Money };
 export type WinRate = { won: number; lost: number; rate: number | null };
 export type InsightMetrics = {
   won: Metric;
-  openPipeline: Metric & { gross: number };
+  openPipeline: Metric & { gross: Money };
   winRate: WinRate;
+  /** The currencies present in the scope — one means every figure is comparable. */
+  currencies: Currency[];
   activities: { open: number; overdue: number; total: number };
 };
-
-const sum = (deals: Deal[]) => deals.reduce((total, deal) => total + dealAmount(deal), 0);
 
 export const insightMetrics = (data: CrmData, scope: InsightScope, at: Date = new Date()): InsightMetrics => {
   const deals = scopeDeals(data, scope);
@@ -117,13 +174,14 @@ export const insightMetrics = (data: CrmData, scope: InsightScope, at: Date = ne
   const activities = scopeActivities(data, scope);
   const states = activities.map(entry => activityState(entry.activity, at));
   return {
-    won: { count: won.length, value: sum(won) },
+    won: { count: won.length, money: moneyOf(won) },
     openPipeline: {
       count: open.length,
       // Weighted by the STAGE's probability — the same single source the board uses.
-      value: open.reduce((total, deal) => total + dealAmount(deal) * dealProbability(data, deal) / 100, 0),
-      gross: sum(open),
+      money: moneyOf(open, deal => dealAmount(deal) * dealProbability(data, deal) / 100),
+      gross: moneyOf(open),
     },
+    currencies: scopeCurrencies(deals),
     // A rate needs decided deals. None decided -> no rate exists, and `null` says that.
     winRate: { won: won.length, lost: lost.length, rate: won.length + lost.length ? won.length / (won.length + lost.length) : null },
     activities: {
@@ -138,7 +196,7 @@ export const insightMetrics = (data: CrmData, scope: InsightScope, at: Date = ne
  *  Every configured stage appears, including the empty ones: a column with nothing in
  *  it is a finding, not a gap to hide. Names and probabilities come from the pipeline
  *  configuration (§crmStore.stageConfig), so renaming a phase renames the report. */
-export type StageSlice = { stage: CrmStage; name: string; probability: number; count: number; value: number; weighted: number };
+export type StageSlice = { stage: CrmStage; name: string; probability: number; count: number; money: Money; weighted: Money };
 export const stageDistribution = (data: CrmData, scope: InsightScope): StageSlice[] => {
   const open = scopeDeals(data, scope).filter(deal => deal.status === "Offen");
   return PIPELINE_STAGES.map(stage => {
@@ -146,14 +204,14 @@ export const stageDistribution = (data: CrmData, scope: InsightScope): StageSlic
     const config = stageConfig(data, stage);
     return {
       stage, name: stageName(data, stage), probability: config.probability,
-      count: inStage.length, value: sum(inStage),
-      weighted: inStage.reduce((total, deal) => total + dealAmount(deal) * config.probability / 100, 0),
+      count: inStage.length, money: moneyOf(inStage),
+      weighted: moneyOf(inStage, deal => dealAmount(deal) * config.probability / 100),
     };
   });
 };
 
 /** ── Deal status by owner ─────────────────────────────────────────────────── */
-export type OwnerSlice = { owner: string; open: number; won: number; lost: number; openValue: number; wonValue: number; total: number };
+export type OwnerSlice = { owner: string; open: number; won: number; lost: number; openMoney: Money; wonMoney: Money; total: number };
 export const ownerBreakdown = (data: CrmData, scope: InsightScope): OwnerSlice[] => {
   const buckets = new Map<string, Deal[]>();
   for (const deal of scopeDeals(data, scope)) {
@@ -165,7 +223,7 @@ export const ownerBreakdown = (data: CrmData, scope: InsightScope): OwnerSlice[]
     const won = deals.filter(deal => deal.status === "Gewonnen");
     return {
       owner, open: open.length, won: won.length, lost: deals.filter(deal => deal.status === "Verloren").length,
-      openValue: sum(open), wonValue: sum(won), total: deals.length,
+      openMoney: moneyOf(open), wonMoney: moneyOf(won), total: deals.length,
     };
   }).sort((a, b) => b.total - a.total || a.owner.localeCompare(b.owner, "de"));
 };

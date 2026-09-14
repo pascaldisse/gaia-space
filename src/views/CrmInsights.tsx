@@ -1,12 +1,13 @@
-import { Show, createMemo, createSignal } from "solid-js";
+import { Show, createEffect, createMemo, createSignal } from "solid-js";
 import { Icon } from "../components/Icon";
 import DateField from "../components/DateField";
 import { PillMenu } from "../components/controls";
 import { BarChart, ColumnChart, type ChartDatum, type ChartSeries } from "../components/Chart";
 import { ACTIVITY_ICONS, type CrmData } from "../crmStore";
 import {
-  ALL_OWNERS, INSIGHT_RANGES, INSIGHT_RANGE_LABELS, activityKindBreakdown, activityStateBreakdown,
-  insightMetrics, insightOwners, ownerBreakdown, rangeLabel, resolveRange, stageDistribution,
+  ALL_OWNERS, INSIGHT_RANGES, INSIGHT_RANGE_LABELS, MIXED_CURRENCY_LABEL, activityKindBreakdown,
+  activityStateBreakdown, formatAmountShort, formatMoney, insightMetrics, insightOwners, moneyHeadline,
+  ownerBreakdown, rangeLabel, resolveRange, stageDistribution,
   type InsightRangeKey, type InsightScope,
 } from "../crmInsights";
 
@@ -31,10 +32,8 @@ import {
  *  The cards stay LINKS: a number you cannot open is a dead end, so the won value opens
  *  the won deals, the pipeline opens the board, the rate opens the lost list. */
 
-const money = (amount: number) => new Intl.NumberFormat("de-DE", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(amount);
-const moneyShort = (amount: number) => amount >= 10000
-  ? `${new Intl.NumberFormat("de-DE", { maximumFractionDigits: amount >= 100000 ? 0 : 1 }).format(amount / 1000)} Tsd. €`
-  : money(amount);
+/** Money is formatted by §crmInsights, per currency — the view never adds up CHF and
+ *  EUR to print one € figure. */
 const count = (value: number) => new Intl.NumberFormat("de-DE", { maximumFractionDigits: 1 }).format(value);
 const percent = (value: number) => `${Math.round(value * 100)} %`;
 
@@ -71,15 +70,22 @@ export default function CrmInsights(props: { data: () => CrmData; onOpen: (tab: 
   const byState = createMemo(() => activityStateBreakdown(props.data(), scope()));
   const byKind = createMemo(() => activityKindBreakdown(props.data(), scope()));
 
+  /** Several currencies in scope -> a monetary AXIS would be a lie (one bar cannot be
+   *  € and CHF at once), so the chart falls back to counts and the per-currency amounts
+   *  are printed in the table underneath. */
+  const currencies = createMemo(() => metrics().currencies);
+  const mixed = createMemo(() => currencies().length > 1);
+  createEffect(() => { if (mixed() && measure() !== "count") setMeasure("count"); });
+
   const stageData = createMemo<ChartDatum[]>(() => stages().map(slice => ({
     key: slice.stage, label: slice.name, note: `${slice.probability} %`,
-    values: { amount: measure() === "count" ? slice.count : measure() === "value" ? slice.value : slice.weighted },
-    extra: { count: count(slice.count), value: money(slice.value), weighted: money(slice.weighted) },
+    values: { amount: measure() === "count" ? slice.count : measure() === "value" ? slice.money.amount : slice.weighted.amount },
+    extra: { count: count(slice.count), value: formatMoney(slice.money), weighted: formatMoney(slice.weighted) },
   })));
   const ownerData = createMemo<ChartDatum[]>(() => byOwner().map(slice => ({
     key: slice.owner, label: slice.owner,
     values: { open: slice.open, won: slice.won, lost: slice.lost },
-    extra: { openValue: money(slice.openValue), wonValue: money(slice.wonValue) },
+    extra: { openValue: formatMoney(slice.openMoney), wonValue: formatMoney(slice.wonMoney) },
   })));
   const kindData = createMemo<ChartDatum[]>(() => byKind().map(slice => ({
     key: slice.kind, label: slice.kind,
@@ -91,7 +97,11 @@ export default function CrmInsights(props: { data: () => CrmData; onOpen: (tab: 
   })));
   const stateSeries = createMemo<ChartSeries[]>(() => [{ key: "count", label: "Aktivitäten", tone: "accent" }]);
 
-  const stageFormat = (value: number) => measure() === "count" ? count(value) : moneyShort(value);
+  const stageFormat = (value: number) =>
+    measure() === "count" ? count(value) : formatAmountShort(value, currencies()[0] ?? "EUR");
+
+  const wonHead = createMemo(() => moneyHeadline(metrics().won.money));
+  const pipelineHead = createMemo(() => moneyHeadline(metrics().openPipeline.money));
 
   return <section class="crm-directory crm-insights">
     <header>
@@ -121,11 +131,13 @@ export default function CrmInsights(props: { data: () => CrmData; onOpen: (tab: 
 
     <div class="crm-insight-dashboard">
     <div class="crm-insight-cards">
-      <Card title="Gewonnener Deal-Wert" tone="won" hint={`${metrics().won.count} gewonnene Deal${metrics().won.count === 1 ? "" : "s"} im Zeitraum`}
-        value={metrics().won.count ? money(metrics().won.value) : null} empty="Kein gewonnener Deal in diesem Zeitraum."
+      <Card title="Gewonnener Deal-Wert" tone="won"
+        hint={`${metrics().won.count} gewonnene Deal${metrics().won.count === 1 ? "" : "s"} im Zeitraum${wonHead().detail ? ` · ${wonHead().detail}` : ""}`}
+        value={metrics().won.count ? wonHead().value : null} empty="Kein gewonnener Deal in diesem Zeitraum."
         action="Gewonnene Deals öffnen" onOpen={() => props.onOpen("won")} />
-      <Card title="Gewichtete offene Pipeline" tone="open" hint={`${metrics().openPipeline.count} offene Deals · ${money(metrics().openPipeline.gross)} ungewichtet`}
-        value={metrics().openPipeline.count ? money(metrics().openPipeline.value) : null} empty="Keine offenen Deals in diesem Zeitraum."
+      <Card title="Gewichtete offene Pipeline" tone="open"
+        hint={`${metrics().openPipeline.count} offene Deals · ${pipelineHead().detail ? `${pipelineHead().detail} gewichtet · ` : ""}${formatMoney(metrics().openPipeline.gross)} ungewichtet`}
+        value={metrics().openPipeline.count ? pipelineHead().value : null} empty="Keine offenen Deals in diesem Zeitraum."
         action="Pipeline öffnen" onOpen={() => props.onOpen("pipeline")} />
       <Card title="Gewinnquote" tone="rate"
         hint={metrics().winRate.rate === null ? "Quote braucht abgeschlossene Deals" : `${metrics().winRate.won} gewonnen · ${metrics().winRate.lost} verloren`}
@@ -144,9 +156,12 @@ export default function CrmInsights(props: { data: () => CrmData; onOpen: (tab: 
         <div>
           <h3>Pipeline nach Phase</h3>
           <small>Offene Deals je Phase. Gewichtet wird mit der in den Pipeline-Einstellungen hinterlegten Wahrscheinlichkeit.</small>
+          <Show when={mixed()}>
+            <small class="crm-insight-currency-note">{MIXED_CURRENCY_LABEL} ({currencies().join(" · ")}) – Beträge werden nicht addiert; die Tabelle nennt sie je Währung.</small>
+          </Show>
         </div>
         <PillMenu class="crm-insight-measure" label="Maßeinheit" value={measure()}
-          options={STAGE_MEASURES.map(value => ({ value, label: STAGE_MEASURE_LABELS[value] }))}
+          options={(mixed() ? ["count" as const] : STAGE_MEASURES).map(value => ({ value, label: STAGE_MEASURE_LABELS[value] }))}
           onChange={value => setMeasure(value as StageMeasure)} />
       </header>
       <ColumnChart

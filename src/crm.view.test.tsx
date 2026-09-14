@@ -58,6 +58,19 @@ test("the pipeline renders deals, with the organization named as context", async
   expect(stored.deals).toHaveLength(1);
 });
 
+test("empty outcome lists keep the outcome named in their summary", async () => {
+  navigate({ view: "CRM", tab: "won" });
+  const host = mount();
+  await settle();
+  expect(host.querySelector(".crm-outcome-summary")?.textContent).toContain("Gewonnen");
+  expect(host.querySelector(".crm-outcome-summary")?.textContent).toContain("Gewonnener Deal-Wert");
+
+  navigate({ view: "CRM", tab: "lost" });
+  await settle();
+  expect(host.querySelector(".crm-outcome-summary")?.textContent).toContain("Verloren");
+  expect(host.querySelector(".crm-outcome-summary")?.textContent).toContain("Verlorenes Deal-Volumen");
+});
+
 test("the deal panel owns the conversation and the organization panel only summarizes it", async () => {
   navigate({ view: "CRM", tab: "pipeline" });
   const host = mount();

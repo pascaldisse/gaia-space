@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import {
   ACTIVITY_COLUMNS, CONTACT_COLUMNS, CSV_BOM, DEAL_COLUMNS, EXPORT_SCHEMA, EXPORT_SCHEMA_VERSION, ORGANIZATION_COLUMNS,
-  activityRows, buildBackup, buildExportFiles, contactRows, countsForScope, csvCell, csvTable, dealRows, deDate, deNumber,
+  activityRows, buildBackup, buildExportFiles, contactRows, countsForScope, csvCell, csvGuard, csvTable, dealRows, deDate, deNumber,
   deStamp, exportFileName, fileStats, formatRowCount, organizationRows, selectScope,
 } from "./crmExport";
 import {
@@ -54,6 +54,27 @@ test("a cell is quoted exactly when it must be, and a quote doubles", () => {
   expect(csvCell(null)).toBe("");
   expect(csvCell(undefined)).toBe("");
   expect(csvCell(0)).toBe("0");
+});
+
+test("a cell that a spreadsheet would EXECUTE is neutralised — phone numbers are not", () => {
+  // Formula injection: the four leads a spreadsheet runs, whatever the whitespace.
+  expect(csvCell("=HYPERLINK(\"http://x\";\"Klick\")")).toStartWith("\"'=HYPERLINK");
+  expect(csvGuard("=1+1")).toBe("'=1+1");
+  expect(csvGuard("@SUM(A1)")).toBe("'@SUM(A1)");
+  expect(csvGuard("  =cmd|' /c calc'!A1")).toBe("'  =cmd|' /c calc'!A1");
+  expect(csvGuard("-=1+1")).toBe("'-=1+1");
+  expect(csvGuard("+AND(1;1)")).toBe("'+AND(1;1)");
+  // Telephone numbers survive EXACTLY as typed — a mangled number is a lost customer.
+  expect(csvGuard("+49 30 123456")).toBe("+49 30 123456");
+  expect(csvGuard("+41 (0)44 123 45 67")).toBe("+41 (0)44 123 45 67");
+  expect(csvGuard("+1.800.555.0100")).toBe("+1.800.555.0100");
+  expect(csvGuard("+49-30-1234/56")).toBe("+49-30-1234/56");
+  // Plain numbers, signed or not, are numbers and stay numbers.
+  expect(csvGuard("-1.200,50")).toBe("-1.200,50");
+  expect(csvGuard("+7")).toBe("+7");
+  // Ordinary text is untouched — the guard is not a general prefixer.
+  expect(csvCell("Optik Nord")).toBe("Optik Nord");
+  expect(csvCell("Rabatt 10% (=Aktion)")).toBe("Rabatt 10% (=Aktion)");
 });
 
 test("a table is BOM-prefixed, semicolon-separated and CRLF-terminated", () => {

@@ -229,7 +229,8 @@ export default function CRM() {
       <Show when={tab() !== "insights"}>
         <div class="crm-search"><Icon name="search" size={17} /><input value={query()} onInput={e => setQuery(e.currentTarget.value)} placeholder="Organisation, Standort oder Adresse suchen" aria-label="CRM durchsuchen" /></div>
         <LabelPicker label="Labels" selected={labelFilter()} library={labels()} onChange={setLabelFilter} />
-        <select aria-label="Nach verantwortlicher Person filtern" value={filterOwner()} onChange={e => setFilterOwner(e.currentTarget.value)}><For each={owners()}>{owner => <option>{owner}</option>}</For></select>
+        <PillMenu class="crm-owner-filter" label="Nach verantwortlicher Person filtern" value={filterOwner()}
+          options={owners().map(owner => ({ value: owner, label: owner }))} onChange={setFilterOwner} />
       </Show>
       {/* Importing is a LEAD action: it is offered where leads are triaged, and it names
           what it does — a file becomes records in this inbox, not "data" somewhere. */}
@@ -319,7 +320,8 @@ export default function CRM() {
     <Show when={convertOrg()}>{org => <ConvertLead org={org()} data={data} onClose={() => setConvertTarget(null)} onConvert={runConvert} />}</Show>
 
     <Show when={tab() === "open" || tab() === "won" || tab() === "lost"}>
-      <DealTable title={TAB_TITLE[tab()]} deals={() => listFor(tab())} data={data} onOpen={dealId => setSelected({ kind: "deal", id: dealId })} onOpenOrg={orgId => setSelected({ kind: "org", id: orgId })} />
+      <DealTable title={TAB_TITLE[tab()]} status={tab() === "won" ? "Gewonnen" : tab() === "lost" ? "Verloren" : "Offen"}
+        deals={() => listFor(tab())} data={data} onOpen={dealId => setSelected({ kind: "deal", id: dealId })} onOpenOrg={orgId => setSelected({ kind: "org", id: orgId })} />
     </Show>
 
     <Show when={tab() === "customers"}>
@@ -442,8 +444,8 @@ function DealCard(props: { deal: Deal; org: Organization | undefined; library: L
   </div>;
 }
 
-function DealTable(props: { title: string; deals: () => Deal[]; data: () => CrmData; onOpen: (dealId: string) => void; onOpenOrg: (orgId: string) => void }) {
-  const outcome = () => props.deals()[0]?.status;
+function DealTable(props: { title: string; status: Deal["status"]; deals: () => Deal[]; data: () => CrmData; onOpen: (dealId: string) => void; onOpenOrg: (orgId: string) => void }) {
+  const outcome = () => props.status;
   const total = () => props.deals().reduce((sum, deal) => sum + dealAmount(deal), 0);
   const outcomeLabel = () => outcome() === "Gewonnen" ? "Gewonnener Deal-Wert" : outcome() === "Verloren" ? "Verlorenes Deal-Volumen" : "Offener Deal-Wert";
   return <section class="crm-directory crm-deal-directory" classList={{ "is-won": outcome() === "Gewonnen", "is-lost": outcome() === "Verloren" }}>

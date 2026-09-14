@@ -174,9 +174,34 @@ export const backupJson = (backup: CrmBackup) => JSON.stringify(backup, null, 2)
  *  a line break survives INSIDE the quotes, so a multi-line address stays one cell. */
 export const CSV_DELIMITER = ";";
 export const CSV_BOM = "\uFEFF";
+
+/** ── Formula injection, without breaking telephone numbers ──────────────────
+ *  A spreadsheet EXECUTES a cell that begins with `=`, `+`, `-` or `@`, so an exported
+ *  name like `=HYPERLINK(...)` would run on somebody else's machine. The cell is
+ *  therefore prefixed with an apostrophe, which every spreadsheet reads as "this is
+ *  text".
+ *
+ *  But `+49 30 123456` is a PHONE NUMBER, not a formula, and a CRM that mangles phone
+ *  numbers is worse than the risk it defends against. So the guard fires only on a
+ *  value that is not phone-like and not a plain number: `+`/`-` followed by digits and
+ *  the usual separators stays exactly as the person typed it. */
+const FORMULA_LEAD = /^[=+\-@]/;
+/** `+49 30 12-34`, `+41 (0)44 123 45 67`, `+1.800.555.0100` — a leading plus, then only
+ *  digits and standard separators, with at least one digit. */
+const PHONE_LIKE = /^\+[\d\s().\/-]*\d[\d\s().\/-]*$/;
+/** A number, signed or not, in German or English notation: `-1.200,50`, `+7`. */
+const NUMERIC_LIKE = /^[-+]?\d[\d.,\s]*$/;
+export const CSV_GUARD = "'";
+export const csvGuard = (text: string): string => {
+  const leading = text.replace(/^[\s\u00a0]+/, "");
+  if (!FORMULA_LEAD.test(leading)) return text;
+  if (PHONE_LIKE.test(leading) || NUMERIC_LIKE.test(leading)) return text;
+  return CSV_GUARD + text;
+};
+
 export const csvCell = (value: unknown): string => {
   const text = value === null || value === undefined ? "" : String(value);
-  const normalized = text.replace(/\r\n/g, "\n");
+  const normalized = csvGuard(text.replace(/\r\n/g, "\n"));
   return /[";\n]/.test(normalized) ? `"${normalized.replace(/"/g, '""')}"` : normalized;
 };
 export const csvTable = (headers: string[], rows: unknown[][]): string =>

@@ -200,6 +200,36 @@ test("no data is said out loud, never drawn as empty bars or dead buttons", asyn
   expect(host.querySelectorAll(".chart-column, .chart-bar, .chart-data")).toHaveLength(0);
 });
 
+test("deals in several currencies are never merged into one € figure", async () => {
+  seedWith({
+    ...DOC,
+    deals: [
+      deal({ id: 1, stage: "Qualified", value: "10000", currency: "EUR" }),
+      deal({ id: 2, stage: "Qualified", value: "20000", currency: "CHF" }),
+      deal({ id: 3, status: "Gewonnen", value: "30000", currency: "USD", closedAt: iso(-3) }),
+      deal({ id: 4, status: "Gewonnen", value: "5000", currency: "EUR", closedAt: iso(-3) }),
+    ],
+  });
+  navigate({ view: "CRM", tab: "insights" });
+  const host = mount();
+  await settle();
+  const won = cardBy(host, "Gewonnener Deal-Wert");
+  expect(text(won.querySelector(".crm-insight-card-value"))).toBe("Gemischte Währungen");
+  expect(text(won)).toContain("5.000 €");
+  expect(text(won)).toContain("30.000 USD");
+  expect(text(won)).not.toContain("35.000");                      // the old, false total
+  const pipeline = cardBy(host, "Gewichtete offene Pipeline");
+  expect(text(pipeline.querySelector(".crm-insight-card-value"))).toBe("Gemischte Währungen");
+  expect(text(pipeline)).toContain("10.000 €");
+  expect(text(pipeline)).toContain("20.000 CHF");
+  // A money AXIS cannot exist across currencies, so the chart counts and says why.
+  expect(text(host.querySelector(".crm-insight-currency-note"))).toContain("Gemischte Währungen");
+  const row = [...report(host, "Offene Pipeline nach Phase").querySelectorAll("tbody tr")]
+    .find(item => text(item).startsWith("Qualified"))!;
+  expect(text(row)).toContain("10.000 €");
+  expect(text(row)).toContain("20.000 CHF");
+});
+
 test("the sales reports stay inside the CRM: the record toolbar is not drawn here", async () => {
   navigate({ view: "CRM", tab: "insights" });
   const host = mount();

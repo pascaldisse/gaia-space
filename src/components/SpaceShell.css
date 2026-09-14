@@ -348,6 +348,13 @@
 .space-chat-shell.sidebar-collapsed .space-sidebar { padding-inline: 0; border-right: 0; overflow: hidden; }
 .space-chat-shell.sidebar-collapsed .sidebar-toggle .rail-icon { transform: rotate(180deg); }
 .space-chat-shell .space-sidebar { display: none; }
+.space-chat-shell .commandbar { grid-template-columns: minmax(0, 1fr) auto; gap: 8px; padding-inline: 12px; }
+.space-chat-shell .command-search { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.space-chat-shell .top-actions .btn { white-space: nowrap; }
+}
+@media (max-width: 420px) {
+.space-chat-shell .command-search { padding-inline: 10px; font-size: 0; }
+.space-chat-shell .command-search .icon { width: 17px; height: 17px; }
 }
 
 /* ── placeholder views (Home / Development) ───────────────────────────── */

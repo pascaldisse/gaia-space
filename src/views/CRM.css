@@ -265,6 +265,8 @@
 .crm-insight-report>header>div{display:grid;gap:3px}
 .crm-insight-report h3{margin:0;font-size:14px}
 .crm-insight-report small{font-size:11px;color:var(--text-muted)}
+/* Several currencies in one report: stated, never silently added up. */
+.crm-insight-report small.crm-insight-currency-note{color:var(--text)}
 /* Two charts side by side while there is room; the report itself never splits. */
 .crm-insight-split{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:22px}
 @media(max-width:720px){.crm-insight-cards{grid-template-columns:1fr 1fr}}
@@ -335,3 +337,81 @@
 .crm-export-result{display:grid;gap:5px;padding:10px 12px;border-radius:6px;background:var(--status-success-bg,#e6f6e8);border:1px solid var(--status-success-ink,#118c5c);color:var(--status-success-ink,#118c5c);font-size:12px}
 .crm-export-result ul{margin:0;padding-left:17px;display:grid;gap:2px}
 .crm-export footer .primary{display:inline-flex;align-items:center;gap:6px}
+
+/* QA: native fields → visible affordance; file input → product control. */
+.crm-modal select,.crm-detail select{appearance:none;-webkit-appearance:none;padding-right:30px;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8' fill='none'%3E%3Cpath d='M1 1.5 6 6.5 11 1.5' stroke='%2368717d' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 10px center;background-size:12px 8px}
+.crm-owner-filter{display:inline-flex!important;align-items:center;height:38px;min-width:76px;border:1px solid var(--surface-border);border-radius:8px;background:var(--canvas);box-sizing:border-box}
+.crm-owner-filter .pill-menu-trigger{display:flex!important;align-items:center;width:100%;height:36px!important;padding:0 10px!important;border:0!important;background:transparent!important;color:var(--text)!important;font:inherit!important;font-size:12px!important;font-weight:500!important;text-align:left}
+.crm-owner-filter .pill-menu-chevron{color:var(--text-muted)!important}
+.crm-file-picker{position:relative;display:flex;align-items:center;gap:10px;width:100%;min-height:38px;padding:4px 6px;border:1px solid var(--surface-border);border-radius:8px;background:var(--ctl-bg);box-sizing:border-box;cursor:pointer}
+.crm-file-picker:focus-within{border-color:var(--accent);outline:2px solid color-mix(in srgb,var(--accent) 24%,transparent)}
+.crm-file-picker input{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+.crm-file-picker-button{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:28px;padding:0 10px;border:1px solid var(--surface-border);border-radius:6px;background:var(--surface);color:var(--text);font-size:11px;font-weight:650;white-space:nowrap}
+.crm-file-picker-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-muted);font-size:12px}
+.crm-new-activity{flex:none;white-space:nowrap}
+.crm-activity-head>span:first-child{display:grid;place-items:center}
+
+/* QA: viewport containment + intentional internal scrolling. */
+.crm-view>*{min-width:0;max-width:100%;box-sizing:border-box}
+@media(max-width:1250px){
+.crm-insight-dashboard{grid-template-columns:1fr}
+.crm-insight-dashboard>.crm-insight-cards,.crm-insight-dashboard>.crm-insight-report:nth-child(2),.crm-insight-dashboard>.crm-insight-report:nth-child(3),.crm-insight-dashboard>.crm-insight-report:nth-child(4){grid-column:1;grid-row:auto}
+.crm-insight-dashboard>.crm-insight-cards .crm-insight-card:first-child{min-height:180px}
+}
+@media(max-width:720px){
+.crm-view>.page-header{padding:16px 14px 12px}
+.crm-view>.page-header .subtitle{max-width:100%;white-space:normal;overflow-wrap:anywhere}
+.crm-view>.page-actionbar{padding:10px 14px}
+.crm-toolbar{align-items:stretch}
+.crm-toolbar .crm-search{order:3;flex:1 0 100%;max-width:none;min-width:0}
+.crm-toolbar .crm-search input{min-width:0;text-overflow:ellipsis}
+.crm-lead-table .crm-directory-head,.crm-lead-row{grid-template-columns:minmax(0,1.25fr) minmax(0,.8fr) minmax(0,1fr);gap:8px}
+.crm-lead-table .crm-directory-head span:nth-child(7){display:none}
+.crm-lead-actions{grid-column:1/-1;justify-content:flex-start;flex-wrap:wrap}
+.crm-deal-table .crm-directory-head,.crm-deal-table button{grid-template-columns:minmax(0,1.3fr) minmax(0,1fr) auto;gap:8px}
+.crm-outcome-summary{flex-wrap:wrap}
+.crm-stage-row .crm-stage-menu{flex:1 0 100%}
+.crm-save-bar{padding-inline:18px}
+}
+@media(max-width:520px){
+.crm-toolbar{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.crm-toolbar .crm-search{order:initial;grid-column:1/-1;width:100%}
+.crm-toolbar .crm-labelpicker,.crm-toolbar .crm-labelpicker-trigger,.crm-toolbar .crm-owner-filter{width:100%!important;min-width:0}
+.crm-toolbar :is(.crm-import-trigger,.crm-export-trigger,.primary){width:100%;justify-content:center}
+.crm-directory{padding:18px 14px}
+.crm-directory>header{gap:8px}
+.crm-directory header p{overflow-wrap:anywhere}
+.crm-lead-table .crm-directory-head,.crm-lead-row{grid-template-columns:minmax(0,1.3fr) minmax(0,.9fr)}
+.crm-lead-table .crm-directory-head span:nth-child(6),.crm-lead-row>span:nth-child(6){display:none}
+.crm-directory-head,.crm-directory-table button{grid-template-columns:minmax(0,1.4fr) minmax(58px,.7fr);gap:8px}
+.crm-deal-table .crm-directory-head,.crm-deal-table button{grid-template-columns:minmax(0,1.3fr) minmax(0,1fr) auto}
+.crm-trash-row{grid-template-columns:1fr 1fr}
+.crm-trash-row>span{grid-column:1/-1}
+.crm-trash-row .ghost{width:100%;white-space:normal}
+.crm-activities>header{display:grid;gap:12px}
+.crm-activity-head-actions{display:grid;grid-template-columns:1fr;width:100%;gap:8px}
+.crm-mode-toggle{width:100%;box-sizing:border-box}
+.crm-mode-toggle button{flex:1}
+.crm-new-activity{width:100%;justify-content:center}
+.crm-activity-filters{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}
+.crm-filter-chip{width:100%;justify-content:center;box-sizing:border-box}
+.crm-kind-filter{grid-column:1/-1;width:100%;margin-left:0!important}
+.crm-activity-head span:nth-child(4),.crm-activity-head span:nth-child(7),.crm-activity-row>span:nth-child(4),.crm-activity-row>span:nth-child(7){display:none}
+.crm-activity-head,.crm-activity-row{grid-template-columns:32px minmax(0,1fr) 62px;gap:8px;padding:10px}
+.crm-month-head{display:grid;grid-template-columns:auto minmax(0,1fr) auto}
+.crm-month-head strong{min-width:0;text-align:center}
+.crm-month-today{grid-column:1/-1;width:100%;margin-left:0}
+.crm-insights>header{display:grid;gap:8px}
+.crm-insights>header>span{justify-self:start;max-width:100%;white-space:normal}
+.crm-insight-custom{display:grid;grid-template-columns:1fr 1fr;width:100%}
+.crm-insight-report{overflow-x:auto}
+.crm-insight-report .chart-columns-plot{min-width:520px}
+.crm-detail{width:100vw;max-width:100vw}
+.crm-stage-row{align-items:stretch}
+.crm-stage-row>.ghost{flex:1}
+.crm-save-actions{width:100%}
+.crm-save-actions .crm-trash-action{flex-basis:100%;justify-content:center}
+.crm-location-actions{flex-wrap:wrap;justify-content:flex-end}
+.crm-file-picker{align-items:stretch;flex-direction:column;gap:5px}
+.crm-file-picker-name{padding:2px 5px}
+}

@@ -23,6 +23,7 @@ const PREVIEW_LIMIT = 60;
 
 export default function CrmImportDialog(props: { data: () => CrmData; onImport: (rows: ImportRow[]) => ImportResult; onClose: () => void }) {
   const [file, setFile] = createSignal<ImportFile | null>(null);
+  const [pickedName, setPickedName] = createSignal("");
   const [sheetName, setSheetName] = createSignal("");
   const [headerRow, setHeaderRow] = createSignal(0);
   const [mapping, setMapping] = createSignal<Mapping>({});
@@ -116,14 +117,18 @@ export default function CrmImportDialog(props: { data: () => CrmData; onImport: 
         <span>{outcome().skipped} übersprungen · die neuen Datensätze stehen im Lead-Posteingang.</span>
         {/* A second list is a normal next step, so the picker comes back instead of
             forcing a close-and-reopen. */}
-        <button type="button" class="ghost small" onClick={() => { setFile(null); setRows([]); setResult(null); setShowMapping(false); }}>Weitere Datei importieren</button>
+        <button type="button" class="ghost small" onClick={() => { setFile(null); setPickedName(""); setRows([]); setResult(null); setShowMapping(false); }}>Weitere Datei importieren</button>
       </div>}</Show>
 
       <Show when={!file()}>
         <p>Excel (.xlsx, .xls) oder CSV. Die Datei wird <strong>lokal in diesem Fenster</strong> gelesen und nirgendwohin hochgeladen; die Datensätze landen im Lead-Posteingang.</p>
         <label class="crm-import-file">Datei wählen
-          <input type="file" accept=".xlsx,.xls,.csv" aria-label="Excel- oder CSV-Datei wählen"
-            onChange={event => { const picked = event.currentTarget.files?.[0]; if (picked) void loadFile(picked); }} />
+          <span class="crm-file-picker">
+            <span class="crm-file-picker-button"><Icon name="upload" size={15} /> Datei auswählen</span>
+            <span class="crm-file-picker-name">{pickedName() || "Keine Datei ausgewählt"}</span>
+            <input type="file" accept=".xlsx,.xls,.csv" aria-label="Excel- oder CSV-Datei wählen"
+              onChange={event => { const picked = event.currentTarget.files?.[0]; if (picked) { setPickedName(picked.name); void loadFile(picked); } }} />
+          </span>
         </label>
       </Show>
 

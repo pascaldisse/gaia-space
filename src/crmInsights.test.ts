@@ -1,7 +1,8 @@
 import { expect, test, describe } from "bun:test";
 import {
-  ALL_OWNERS, activityKindBreakdown, activityStateBreakdown, dealAmount, dealDay, inRange, insightMetrics,
-  insightOwners, ownerBreakdown, resolveRange, stageDistribution, UNASSIGNED,
+  ALL_OWNERS, EMPTY_MONEY, MIXED_CURRENCY_LABEL, activityKindBreakdown, activityStateBreakdown, dealAmount,
+  dealDay, formatMoney, inRange, insightMetrics, insightOwners, moneyHeadline, moneyOf, ownerBreakdown,
+  resolveRange, stageDistribution, UNASSIGNED,
 } from "./crmInsights";
 import { dayKey, normalize, type CrmData } from "./crmStore";
 
@@ -76,13 +77,16 @@ describe("scoping", () => {
 describe("headline metrics", () => {
   test("won value counts only actually won deals inside the range", () => {
     const metrics = insightMetrics(doc(), scope(), NOW);
-    expect(metrics.won).toEqual({ count: 1, value: 30000 });       // 99.000 closed 400 days ago is out
-    expect(insightMetrics(doc(), scope(ALL_OWNERS, "all"), NOW).won).toEqual({ count: 2, value: 129000 });
+    expect(metrics.won).toMatchObject({ count: 1 });                // 99.000 closed 400 days ago is out
+    expect(metrics.won.money.parts).toEqual([{ currency: "EUR", amount: 30000 }]);
+    expect(insightMetrics(doc(), scope(ALL_OWNERS, "all"), NOW).won.money.amount).toBe(129000);
   });
   test("open pipeline is weighted by the stage probability, never by the deal", () => {
     const metrics = insightMetrics(doc(), scope(), NOW);
     // Qualified 20% of 10.000 + Angebot 50% of 20.000 + Kontakt 30% of 4.000 = 2.000 + 10.000 + 1.200
-    expect(metrics.openPipeline).toEqual({ count: 3, value: 13200, gross: 34000 });
+    expect(metrics.openPipeline.count).toBe(3);
+    expect(metrics.openPipeline.money.parts).toEqual([{ currency: "EUR", amount: 13200 }]);
+    expect(metrics.openPipeline.gross.parts).toEqual([{ currency: "EUR", amount: 34000 }]);
   });
   test("win rate is won/(won+lost) and is null when nothing is decided", () => {
     expect(insightMetrics(doc(), scope(), NOW).winRate).toEqual({ won: 1, lost: 1, rate: 0.5 });
@@ -102,12 +106,13 @@ describe("headline metrics", () => {
   });
   test("the owner filter narrows every number, unassigned included", () => {
     const bjarne = insightMetrics(doc(), scope("Bjarne"), NOW);
-    expect(bjarne.won).toEqual({ count: 0, value: 0 });
+    expect(bjarne.won).toMatchObject({ count: 0 });
+    expect(bjarne.won.money.parts).toEqual([]);
     expect(bjarne.winRate).toEqual({ won: 0, lost: 1, rate: 0 });
-    expect(bjarne.openPipeline.gross).toBe(20000);
+    expect(bjarne.openPipeline.gross.amount).toBe(20000);
     expect(bjarne.activities.total).toBe(1);                      // the inbox call-back
     const none = insightMetrics(doc(), scope(UNASSIGNED), NOW);
-    expect(none.openPipeline.gross).toBe(4000);                   // deal 7 only; the deleted one stays deleted
+    expect(none.openPipeline.gross.amount).toBe(4000);            // deal 7 only; the deleted one stays deleted
   });
 });
 
@@ -116,8 +121,12 @@ describe("reports", () => {
     const slices = stageDistribution(doc(), scope());
     expect(slices).toHaveLength(6);
     const qualified = slices.find(slice => slice.stage === "Qualified")!;
-    expect(qualified).toMatchObject({ count: 1, value: 10000, weighted: 2000, probability: 20 });
-    expect(slices.find(slice => slice.stage === "Non-Qualified")).toMatchObject({ count: 0, value: 0, weighted: 0 });
+    expect(qualified).toMatchObject({ count: 1, probability: 20 });
+    expect(qualified.money.amount).toBe(10000);
+    expect(qualified.weighted.amount).toBe(2000);
+    const nonQualified = slices.find(slice => slice.stage === "Non-Qualified")!;
+    expect(nonQualified).toMatchObject({ count: 0 });
+    expect(nonQualified.money.parts).toEqual([]);
     // Won and lost deals are a status, never a column of the distribution.
     expect(slices.reduce((total, slice) => total + slice.count, 0)).toBe(3);
   });
@@ -125,9 +134,11 @@ describe("reports", () => {
     const rows = ownerBreakdown(doc(), scope());
     // Two deals each for Jannes and Bjarne -> a tie, broken alphabetically, never randomly.
     expect(rows.map(row => row.owner)).toEqual(["Bjarne", "Jannes", UNASSIGNED]);
-    expect(rows[1]).toMatchObject({ open: 1, won: 1, lost: 0, openValue: 10000, wonValue: 30000 });
+    expect(rows[1]).toMatchObject({ open: 1, won: 1, lost: 0 });
+    expect(rows[1].openMoney.amount).toBe(10000);
+    expect(rows[1].wonMoney.amount).toBe(30000);
     expect(rows[0]).toMatchObject({ open: 1, won: 0, lost: 1 });
-    expect(rows[2]).toMatchObject({ open: 1, won: 0, lost: 0, openValue: 4000 });
+    expect(rows[2].openMoney.amount).toBe(4000);
   });
   test("activity reports split by state and by kind, counting the same entries", () => {
     const states = activityStateBreakdown(doc(), scope(), NOW);
@@ -141,11 +152,74 @@ describe("reports", () => {
   test("an empty document reports zeros and no rate, never an invented figure", () => {
     const empty = normalize({ version: 2, organizations: [], deals: [], labels: [], pipelineStages: [], activities: [] });
     const metrics = insightMetrics(empty, scope(), NOW);
-    expect(metrics.won).toEqual({ count: 0, value: 0 });
-    expect(metrics.openPipeline).toEqual({ count: 0, value: 0, gross: 0 });
+    expect(metrics.won).toEqual({ count: 0, money: EMPTY_MONEY });
+    expect(metrics.openPipeline).toEqual({ count: 0, money: EMPTY_MONEY, gross: EMPTY_MONEY });
+    expect(metrics.currencies).toEqual([]);
     expect(metrics.winRate.rate).toBeNull();
     expect(ownerBreakdown(empty, scope())).toEqual([]);
     expect(stageDistribution(empty, scope()).every(slice => slice.count === 0)).toBe(true);
   });
   // How a counted value becomes a bar length is the axis's business: §chartScale.test.
+});
+
+describe("currencies are never added up", () => {
+  // A document where the same pipeline carries EUR, CHF and USD deals — the case that
+  // used to print one € total that nobody owed.
+  const mixedDoc = (): CrmData => normalize({
+    version: 2,
+    organizations: [{ id: "org-1", name: "Optik Nord", locations: [], labels: [], owner: "Jannes", createdAt: iso(-40), deletedAt: null }],
+    labels: [], pipelineStages: [], activities: [],
+    deals: [
+      deal({ id: 1, stage: "Qualified", value: "10000", currency: "EUR" }),
+      deal({ id: 2, stage: "Qualified", value: "20000", currency: "CHF" }),
+      deal({ id: 3, status: "Gewonnen", value: "30000", currency: "USD", closedAt: iso(-3) }),
+      deal({ id: 4, status: "Gewonnen", value: "5000", currency: "EUR", closedAt: iso(-3) }),
+    ],
+  });
+
+  test("a sum is reported per currency, in a stable order", () => {
+    const metrics = insightMetrics(mixedDoc(), scope(), NOW);
+    expect(metrics.currencies).toEqual(["EUR", "CHF", "USD"]);
+    expect(metrics.won.money.parts).toEqual([{ currency: "EUR", amount: 5000 }, { currency: "USD", amount: 30000 }]);
+    expect(metrics.won.money.mixed).toBe(true);
+    expect(metrics.openPipeline.gross.parts).toEqual([{ currency: "EUR", amount: 10000 }, { currency: "CHF", amount: 20000 }]);
+    // Weighting happens inside each currency, never across them: 20 % of Qualified.
+    expect(metrics.openPipeline.money.parts).toEqual([{ currency: "EUR", amount: 2000 }, { currency: "CHF", amount: 4000 }]);
+  });
+
+  test("a mixed figure is LABELLED as mixed and spells out every amount", () => {
+    const metrics = insightMetrics(mixedDoc(), scope(), NOW);
+    const head = moneyHeadline(metrics.won.money);
+    expect(head.value).toBe(MIXED_CURRENCY_LABEL);
+    expect(head.detail).toContain("5.000");
+    expect(head.detail).toContain("30.000");
+    expect(head.detail).toContain("€");
+    expect(head.detail).toContain("USD");
+    // Nothing anywhere claims 35.000 €.
+    expect(head.detail).not.toContain("35.000");
+  });
+
+  test("one currency reads as plain money, without the mixed wording", () => {
+    const head = moneyHeadline(insightMetrics(doc(), scope(), NOW).won.money);
+    expect(head.value).toContain("30.000");
+    expect(head.value).toContain("€");
+    expect(head.detail).toBe("");
+    expect(insightMetrics(doc(), scope(), NOW).currencies).toEqual(["EUR"]);
+  });
+
+  test("stage and owner reports carry the same per-currency reading", () => {
+    const qualified = stageDistribution(mixedDoc(), scope()).find(slice => slice.stage === "Qualified")!;
+    expect(qualified.money.parts).toEqual([{ currency: "EUR", amount: 10000 }, { currency: "CHF", amount: 20000 }]);
+    expect(formatMoney(qualified.money)).toContain("CHF");
+    const jannes = ownerBreakdown(mixedDoc(), scope())[0];
+    expect(jannes.wonMoney.mixed).toBe(true);
+    expect(jannes.openMoney.parts.map(part => part.currency)).toEqual(["EUR", "CHF"]);
+  });
+
+  test("an empty set is empty money, and a missing currency falls back to EUR", () => {
+    expect(moneyOf([])).toEqual(EMPTY_MONEY);
+    expect(formatMoney(EMPTY_MONEY)).toContain("0");
+    expect(moneyOf([deal({ id: 9, value: "1000", currency: undefined }) as any]).parts)
+      .toEqual([{ currency: "EUR", amount: 1000 }]);
+  });
 });

@@ -129,7 +129,7 @@ export default function CrmActivities(props: {
     <Show when={mode() === "list"}>
       <div class="crm-activity-table" role="table" aria-label="Aktivitätenliste">
         <div class="crm-activity-head" role="row">
-          <span role="columnheader">Erledigt</span><span role="columnheader">Art</span><span role="columnheader">Betreff</span>
+          <span role="columnheader" aria-label="Erledigt"><Icon name="check" size={13} /></span><span role="columnheader">Art</span><span role="columnheader">Betreff</span>
           <span role="columnheader">Deal</span><span role="columnheader">Organisation</span><span role="columnheader">Verantwortlich</span>
           <span role="columnheader">Fällig</span><span role="columnheader">Dauer</span><span role="columnheader">Priorität</span>
           <span role="columnheader">Aktionen</span>
