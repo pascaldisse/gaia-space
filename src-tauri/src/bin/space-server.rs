@@ -12130,12 +12130,23 @@ mod tests {
         c.execute("INSERT INTO document_files(document_id,filename,mime,size,stored_path,uploaded_by) VALUES('file-acl','spec.pdf','application/pdf',7,'/var/space/blobs/file-acl.pdf','pa')", []).unwrap();
         drop(c);
 
-        let (status, value) = call(
-            cookie("ta"),
-            "get_document_file",
-            json!({"document_id":"file-acl"}),
-        )
-        .await;
+        // Through the real router: `/api/cmd/{command}` with the production
+        // cookie header, not a direct handler call.
+        let post = |session: Option<&str>, body: Value| {
+            let mut request = axum::http::Request::builder()
+                .method("POST")
+                .uri("/api/cmd/get_document_file")
+                .header(header::CONTENT_TYPE, "application/json");
+            if let Some(token) = session {
+                request = request.header(header::COOKIE, format!("space_session={token}"));
+            }
+            let request = request.body(Body::from(body.to_string())).unwrap();
+            async move {
+                status_and_body(app_router().oneshot(request).await.unwrap().into_response()).await
+            }
+        };
+
+        let (status, value) = post(Some("ta"), json!({"document_id":"file-acl"})).await;
         assert_eq!(status, StatusCode::OK, "{value}");
         assert_eq!(value["value"]["filename"], json!("spec.pdf"));
         assert_eq!(value["value"]["mime"], json!("application/pdf"));
@@ -12145,27 +12156,17 @@ mod tests {
             "the on-disk location never leaves the server: {rendered}"
         );
 
-        let (status, _) = call(cookie("ta"), "get_document_file", json!({"id":"file-acl"})).await;
+        let (status, _) = post(Some("ta"), json!({"id":"file-acl"})).await;
         assert_eq!(
             status,
             StatusCode::BAD_REQUEST,
             "a generic `id` is not an accepted document id"
         );
 
-        let (status, _) = call(
-            cookie("tb"),
-            "get_document_file",
-            json!({"documentId":"file-acl"}),
-        )
-        .await;
+        let (status, _) = post(Some("tb"), json!({"documentId":"file-acl"})).await;
         assert_eq!(status, StatusCode::FORBIDDEN, "a stranger cannot read it");
 
-        let (status, _) = call(
-            HeaderMap::new(),
-            "get_document_file",
-            json!({"document_id":"file-acl"}),
-        )
-        .await;
+        let (status, _) = post(None, json!({"document_id":"file-acl"})).await;
         assert_eq!(status, StatusCode::UNAUTHORIZED, "no session, no read");
     }
 
