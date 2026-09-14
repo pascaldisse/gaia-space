@@ -13,6 +13,8 @@ export default function CRM() {
   const [query, setQuery] = createSignal("");
   const [newOpen, setNewOpen] = createSignal(false);
   const [filterOwner, setFilterOwner] = createSignal("Alle");
+  const [dragging, setDragging] = createSignal<string | null>(null);
+  const [dragOverStage, setDragOverStage] = createSignal<CrmStage | null>(null);
   createEffect(() => saveCrm(accounts()));
   const locations = createMemo(() => accounts().flatMap(account => account.locations.map(location => ({ account, location }))));
   const visible = () => locations().filter(({ account, location }) => {
@@ -33,15 +35,22 @@ export default function CRM() {
       <button class="primary" onClick={() => setNewOpen(true)}><Icon name="plus" size={16}/> Betrieb hinzufügen</button>
     </nav>
     <Show when={newOpen()}><NewAccount onClose={() => setNewOpen(false)} onSave={addAccount}/></Show>
-    <div class="crm-board" aria-label="Vertriebspipeline">
-      <For each={CRM_STAGES}>{stage => <section class="crm-column" onDragOver={e => e.preventDefault()} onDrop={e => { e.preventDefault(); const locationId = e.dataTransfer?.getData("text/crm-location"); if (locationId) move(locationId, stage); }}>
-        <header><strong>{stage}</strong><span>{visible().filter(x => x.location.stage === stage && x.location.status === "Aktiv").length}</span></header>
-        <div class="crm-column-cards"><For each={visible().filter(x => x.location.stage === stage && x.location.status === "Aktiv")}>{item => <button class="crm-card" draggable onDragStart={e => e.dataTransfer?.setData("text/crm-location", item.location.id)} onClick={() => setSelected(item.location.id)}>
-          <span class="crm-card-account">{item.account.name}</span><strong>{item.location.name}</strong>
-          <Show when={item.location.nextStep}><span class="crm-card-next"><Icon name="alert" size={14}/>{item.location.nextStep}</span></Show>
-          <footer><span>{item.account.owner || "Nicht zugeteilt"}</span><Show when={item.location.contacts.length}><span>{item.location.contacts.length} Kontakt{item.location.contacts.length === 1 ? "" : "e"}</span></Show></footer>
-        </button>}</For></div>
-      </section>}</For>
+    <div class="crm-workspace">
+      <aside class="crm-customers" aria-label="Kundenliste">
+        <header><strong>Kunden</strong><span>{visible().length}</span></header>
+        <p>Alle Standorte</p>
+        <div class="crm-customer-list"><For each={visible()}>{item => <button classList={{ active: selected() === item.location.id }} onClick={() => setSelected(item.location.id)}><span>{item.location.name}</span><small>{item.account.name} · {item.location.stage}</small></button>}</For></div>
+      </aside>
+      <div class="crm-board" aria-label="Vertriebspipeline">
+        <For each={CRM_STAGES}>{stage => <section class="crm-column" classList={{ "is-drop-target": dragOverStage() === stage }} onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; setDragOverStage(stage); }} onDragLeave={() => setDragOverStage(null)} onDrop={e => { e.preventDefault(); const locationId = e.dataTransfer?.getData("text/crm-location") || dragging(); if (locationId) move(locationId, stage); setDragging(null); setDragOverStage(null); }}>
+          <header><strong>{stage}</strong><span>{visible().filter(x => x.location.stage === stage && x.location.status === "Aktiv").length}</span></header>
+          <div class="crm-column-cards"><For each={visible().filter(x => x.location.stage === stage && x.location.status === "Aktiv")}>{item => <button class="crm-card" draggable="true" onDragStart={e => { setDragging(item.location.id); e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/crm-location", item.location.id); }} onDragEnd={() => { setDragging(null); setDragOverStage(null); }} onClick={() => setSelected(item.location.id)}>
+            <span class="crm-card-account">{item.account.name}</span><strong>{item.location.name}</strong>
+            <Show when={item.location.nextStep}><span class="crm-card-next"><Icon name="alert" size={14}/>{item.location.nextStep}</span></Show>
+            <footer><span>{item.account.owner || "Nicht zugeteilt"}</span><Show when={item.location.contacts.length}><span>{item.location.contacts.length} Kontakt{item.location.contacts.length === 1 ? "" : "e"}</span></Show></footer>
+          </button>}</For></div>
+        </section>}</For>
+      </div>
     </div>
     <Show when={selectedItem()}>{item => <Detail locationId={item().location.id} accounts={accounts} onSelect={setSelected} onClose={() => setSelected(null)} onMutate={mutate} onUpdate={updateLocation} onMove={move}/>}</Show>
   </section>;
