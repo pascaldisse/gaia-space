@@ -1,6 +1,7 @@
 import { createEffect, createSignal, For, Show, onCleanup, onMount } from "solid-js";
 import PageHeader, { Chip } from "../components/PageHeader";
 import { Icon } from "../components/Icon";
+import DateField from "../components/DateField";
 import { navigate, route } from "../router";
 import {
   ACTIVITY_KINDS, CRM_STAGES, PIPELINE_STAGES, activitiesOf, closeDeal, convertToDeal, customers as customerOrgs,
@@ -385,7 +386,7 @@ function DealPanel(props: { dealId: string; data: () => CrmData; onMutate: (fn: 
         <label>Gewinnwahrscheinlichkeit<div class="crm-percent-input"><input type="number" min="0" max="100" value={current().probability} onInput={e => patch({ probability: Math.max(0, Math.min(100, Number(e.currentTarget.value) || 0)) })} /><span>%</span></div><small>Gewichteter Deal-Wert: {money(dealAmount(current()) * current().probability / 100, current().currency)}</small></label>
         <Field label="Quelle" value={current().source} onChange={source => patch({ source })} />
         <label>Verantwortliche Person<select value={current().owner} onChange={e => patch({ owner: e.currentTarget.value })}><For each={CRM_OWNERS}>{owner => <option value={owner === "Nicht zugeteilt" ? "" : owner}>{owner}</option>}</For></select></label>
-        <label>Erwarteter Abschluss<input type="date" value={current().expectedClose} onInput={e => patch({ expectedClose: e.currentTarget.value })} /></label>
+        <label>Erwarteter Abschluss<DateField label="Erwarteter Abschluss" value={current().expectedClose} onChange={expectedClose => patch({ expectedClose })} placeholder="Datum wählen" /></label>
         <label>Standort<select value={current().locationId ?? ""} onChange={e => patch({ locationId: e.currentTarget.value || null })}>
           <option value="">Kein bestimmter Standort</option><For each={org()?.locations ?? []}>{loc => <option value={loc.id}>{loc.name || "Unbenannter Standort"}</option>}</For></select></label>
       </div>
@@ -395,7 +396,7 @@ function DealPanel(props: { dealId: string; data: () => CrmData; onMutate: (fn: 
       </div></section>
       <section class="crm-section"><h2>Nächster Schritt</h2><div class="crm-next-fields">
         <Field label="Aufgabe / nächster Kontakt" value={current().nextStep} onChange={nextStep => patch({ nextStep })} />
-        <label>Fällig am<input type="date" value={current().nextStepDate} onInput={e => patch({ nextStepDate: e.currentTarget.value })} /></label>
+        <label>Fällig am<DateField label="Fällig am" value={current().nextStepDate} onChange={nextStepDate => patch({ nextStepDate })} placeholder="Datum wählen" /></label>
       </div></section>
       <Notes notes={current().notes} onAdd={(title, body) => withDeal(draft => { if (body.trim()) draft.notes.unshift({ id: id("note"), title: title.trim() || "Notiz", body: body.trim(), author: "Team paloptic", createdAt: new Date().toISOString() }); })} />
     </div></Show>
@@ -522,7 +523,7 @@ function Activities(props: { activities: Activity[]; onAdd: (kind: ActivityKind,
       <form class="crm-activity-form" onSubmit={e => { e.preventDefault(); props.onAdd(kind(), title(), due(), outcome()); setTitle(""); setDue(""); setOutcome(""); }}>
         <select aria-label="Art" value={kind()} onChange={e => setKind(e.currentTarget.value as ActivityKind)}><For each={ACTIVITY_KINDS}>{x => <option>{x}</option>}</For></select>
         <input value={title()} onInput={e => setTitle(e.currentTarget.value)} placeholder="Was ist zu tun?" />
-        <input type="date" aria-label="Fällig am" value={due()} onInput={e => setDue(e.currentTarget.value)} />
+        <DateField label="Fällig am" value={due()} onChange={setDue} placeholder="Fällig am" class="crm-activity-date" />
         <textarea value={outcome()} onInput={e => setOutcome(e.currentTarget.value)} placeholder="Gesprächsergebnis oder Entscheidung – wird als Notiz gespeichert" />
         <button class="primary">Hinzufügen</button>
       </form></section>
