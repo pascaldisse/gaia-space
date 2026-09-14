@@ -341,3 +341,26 @@ test("documents without a stage stamp fall back to the creation date, never to j
   expect(v1.deals[0].stageEnteredAt).toBe(v1.deals[0].createdAt);
   expect(stageAge(v1.deals[0]).tone).toBe("warn");
 });
+
+// Regression: destroying a record's last deal in the trash left the ORGANIZATION behind
+// as "converted" — a record claiming an opportunity that no longer exists. It then stood
+// in no list at all: not the inbox (it counts as triaged), not the pipeline and not the
+// customers (it owns no deal), reachable only through an export. A record the app holds
+// must be a record the app shows.
+test("purging the last deal hands the organization back to the inbox instead of hiding it", () => {
+  const data = normalize(null);
+  const org = leadInbox(data)[0];
+  const deal = convertLead(data, org.id)!;
+  expect(leadInbox(data).map(item => item.id)).not.toContain(org.id);
+
+  softDeleteDeal(data, deal.id);
+  // Still converted while the deal is only in the trash: it can be restored unchanged.
+  expect(data.organizations.find(item => item.id === org.id)!.leadState).toBe("converted");
+
+  purge(data, deal.id);
+  expect(leadInbox(data).map(item => item.id)).toContain(org.id);
+  // And a document stored in the broken state is repaired on the next read.
+  const reread = normalize(JSON.parse(JSON.stringify({ ...data, organizations: data.organizations.map(item => ({ ...item, leadState: "converted" })) })));
+  expect(leadInbox(reread).map(item => item.id)).toContain(org.id);
+  expect(leadInvariantViolations(reread)).toEqual([]);
+});

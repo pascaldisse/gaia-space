@@ -423,9 +423,16 @@ export const restore = (data: CrmData, recordId: string) => {
   const org = data.organizations.find(item => item.id === recordId);
   if (org) { const stamp = org.deletedAt; org.deletedAt = null; data.deals.filter(item => item.organizationId === org.id && item.deletedAt === stamp).forEach(item => { item.deletedAt = null; }); }
 };
+/** Destroying the last deal of a record does not destroy the RECORD: the organization
+ *  stays, and it stops claiming an opportunity that no longer exists — otherwise it
+ *  reads as "converted" while owning no deal, which puts it in no list at all (not the
+ *  inbox, not the pipeline, not the customers) and makes it reachable only by export. */
 export const purge = (data: CrmData, recordId: string) => {
+  const orphaned = data.deals.find(deal => deal.id === recordId)?.organizationId;
   data.deals = data.deals.filter(deal => deal.id !== recordId && deal.organizationId !== recordId);
   data.organizations = data.organizations.filter(org => org.id !== recordId);
+  const org = orphaned ? data.organizations.find(item => item.id === orphaned) : undefined;
+  if (org && org.leadState === "converted" && !data.deals.some(deal => deal.organizationId === org.id)) org.leadState = "active";
 };
 /** Convert: a lead organization becomes a real opportunity without losing the record.
  *  LOSSLESS by construction — the organization (contacts, locations, files, labels,
@@ -540,7 +547,10 @@ export const applyLeadStates = (data: CrmData): CrmData => {
   for (const org of data.organizations) {
     const hasDeal = data.deals.some(deal => deal.organizationId === org.id);
     const stored = leadStateOf((org as any).leadState);
-    org.leadState = hasDeal ? "converted" : stored ?? "active";
+    // A record with no deal at all — not even a deleted one — cannot be "converted":
+    // whatever it produced has been destroyed, so it is an untriaged organization again
+    // rather than a record that hides from every list (§purge). Archived stays archived.
+    org.leadState = hasDeal ? "converted" : stored === "converted" ? "active" : stored ?? "active";
     org.nextStep = String(org.nextStep ?? "");
   }
   return data;
