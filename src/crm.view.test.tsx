@@ -178,3 +178,57 @@ test("pipeline settings rename a stage and set its probability; the deal panel o
   expect(panel.querySelector(".crm-readonly-field")?.textContent).toContain("35%");
   expect(panel.querySelector('input[type="number"]')).toBeNull();
 });
+
+// ── Aging is visible on the board and spelled out in the deal panel ──────────
+const stampDealStage = (daysAgo: number) => {
+  const stored = JSON.parse(localStorage.getItem("gaia.crm.prototype.v2") ?? "null");
+  stored.deals[0].stageEnteredAt = new Date(Date.now() - daysAgo * 86_400_000).toISOString();
+  localStorage.setItem("gaia.crm.prototype.v2", JSON.stringify(stored));
+};
+
+test("a pipeline card carries its stage age as a tone and as words", async () => {
+  navigate({ view: "CRM", tab: "pipeline" });
+  mount();
+  await settle();          // migration writes the v2 document
+  dispose?.(); dispose = undefined; document.body.innerHTML = "";
+  stampDealStage(19);
+  const host = mount();
+  await settle();
+  const card = host.querySelector(".crm-board .crm-card") as HTMLElement;
+  expect(card.dataset.stageAge).toBe("warn");           // subtle accent, no green for fresh
+  const age = card.querySelector(".crm-card-age") as HTMLElement;
+  expect(age.textContent).toContain("19 Tage in dieser Phase");
+  expect(age.querySelector("[aria-label]")?.getAttribute("aria-label")).toContain("19");
+});
+
+test("the deal panel shows a read-only stepper with the current phase and its age", async () => {
+  navigate({ view: "CRM", tab: "pipeline" });
+  mount();
+  await settle();
+  dispose?.(); dispose = undefined; document.body.innerHTML = "";
+  stampDealStage(44);
+  const host = mount();
+  await settle();
+  (host.querySelector(".crm-board .crm-card") as HTMLElement).click();
+  await settle();
+  const panel = host.querySelector(".crm-detail")!;
+  const steps = [...panel.querySelectorAll(".crm-step")];
+  // Display names from the pipeline configuration, one marked current, none clickable.
+  expect(steps.map(step => step.querySelector("span")?.textContent)).toEqual([
+    "Non-Qualified", "Qualified", "Kontakt hergestellt", "Gespräch vereinbart", "Angebot erstellt", "Abgeschlossen"]);
+  expect(steps.map(step => (step as HTMLElement).dataset.state)).toEqual(["done", "current", "todo", "todo", "todo", "todo"]);
+  expect(steps.find(step => step.getAttribute("aria-current") === "step")?.textContent).toContain("Qualified");
+  expect(panel.querySelector(".crm-stage-progress button, .crm-stepper button, .crm-stepper a")).toBeNull();
+  const line = panel.querySelector(".crm-stage-age") as HTMLElement;
+  expect(line.textContent).toContain("seit 44 Tagen in dieser Phase");
+  expect(line.dataset.stageAge).toBe("stale");
+  // Changing the phase stays the PillMenu's job, and it restarts the clock.
+  (panel.querySelector(".crm-stage-menu button") as HTMLElement).click();
+  await settle();
+  const option = [...document.querySelectorAll(".pill-menu-list [role='option']")]
+    .find(node => node.textContent?.startsWith("Angebot erstellt")) as HTMLElement;
+  option.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+  await settle();
+  expect((host.querySelector(".crm-detail .crm-stage-age") as HTMLElement).textContent).toContain("seit 0 Tagen");
+  expect(JSON.parse(localStorage.getItem("gaia.crm.prototype.v2")!).deals[0].stage).toBe("Angebot erstellt");
+});

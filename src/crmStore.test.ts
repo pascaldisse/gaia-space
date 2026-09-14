@@ -2,7 +2,8 @@ import { expect, test } from "bun:test";
 import {
   activitiesOf, closeDeal, convertToDeal, customers, dealProbability, dealsOf, defaultPipelineStages, ensureLabel, labelsOf,
   leads, migrateV1, moveDeal, normalize, openDeals, purge, restore, seed, setPipelineStages, softDeleteDeal,
-  softDeleteOrganization, stageName, stageProbability, trash, type CrmData,
+  softDeleteOrganization, stageAge, stageAgeTone, stageName, stageProbability, daysInStage, trash,
+  STAGE_AGE_STALE_DAYS, STAGE_AGE_WARN_DAYS, type CrmData,
 } from "./crmStore";
 
 const v1Account = (over: Record<string, unknown> = {}) => ({
@@ -195,4 +196,67 @@ test("a legacy per-deal probability is dropped on read: the stage is the only so
   const data = normalize(raw);
   expect("probability" in data.deals[0]).toBe(false);
   expect(dealProbability(data, data.deals[0])).toBe(20);
+});
+
+// ── Deal aging: the stage clock ─────────────────────────────────────────────
+const daysAgo = (days: number) => new Date(Date.now() - days * 86_400_000).toISOString();
+
+test("a deal's age counts from the stage it entered, and only a real change restarts it", () => {
+  const data = seed();
+  const deal = data.deals[0];
+  deal.stageEnteredAt = daysAgo(12);
+  expect(daysInStage(data.deals[0])).toBe(12);
+  // Dropping the card back into the column it already sits in must not launder it.
+  moveDeal(data, deal.id, "Qualified");
+  expect(daysInStage(data.deals[0])).toBe(12);
+  expect(data.deals[0].stageEnteredAt).toBe(deal.stageEnteredAt);
+  // An actual stage change is a fresh start.
+  moveDeal(data, deal.id, "Angebot erstellt");
+  expect(daysInStage(data.deals[0])).toBe(0);
+  expect(Date.parse(data.deals[0].stageEnteredAt)).toBeGreaterThan(Date.parse(daysAgo(1)));
+  // Reopening a closed deal in the same stage leaves the clock alone.
+  const stamped = data.deals[0].stageEnteredAt;
+  closeDeal(data, deal.id, "Verloren");
+  moveDeal(data, deal.id, "Angebot erstellt");
+  expect(data.deals[0].stageEnteredAt).toBe(stamped);
+  expect(data.deals[0].status).toBe("Offen");
+});
+
+test("aging tones: up to seven days is neutral, then amber, past thirty days red", () => {
+  expect([0, 1, 7].map(stageAgeTone)).toEqual(["fresh", "fresh", "fresh"]);
+  expect([8, 30].map(stageAgeTone)).toEqual(["warn", "warn"]);
+  expect([31, 400].map(stageAgeTone)).toEqual(["stale", "stale"]);
+  expect(STAGE_AGE_WARN_DAYS).toBe(7);
+  expect(STAGE_AGE_STALE_DAYS).toBe(30);
+});
+
+test("stageAge reads a fixed clock and speaks German singular and plural", () => {
+  const data = seed();
+  const deal = data.deals[0];
+  deal.stageEnteredAt = "2026-09-01T10:00:00.000Z";
+  const at = (iso: string) => stageAge(deal, new Date(iso));
+  expect(at("2026-09-01T23:00:00.000Z")).toMatchObject({ days: 0, tone: "fresh", label: "0 Tage in dieser Phase" });
+  expect(at("2026-09-02T10:00:00.000Z").label).toBe("1 Tag in dieser Phase");
+  expect(at("2026-09-08T10:00:00.000Z")).toMatchObject({ days: 7, tone: "fresh" });
+  expect(at("2026-09-09T10:00:00.000Z")).toMatchObject({ days: 8, tone: "warn", label: "8 Tage in dieser Phase" });
+  expect(at("2026-10-02T10:00:00.000Z").tone).toBe("stale");
+  // A clock that runs backwards (edited stamp, other timezone) never reports negatives.
+  expect(at("2026-08-20T10:00:00.000Z").days).toBe(0);
+});
+
+test("documents without a stage stamp fall back to the creation date, never to junk", () => {
+  const raw: any = JSON.parse(JSON.stringify(seed()));
+  raw.deals[0].createdAt = daysAgo(40);
+  delete raw.deals[0].stageEnteredAt;
+  const migrated = normalize(raw);
+  expect(migrated.deals[0].stageEnteredAt).toBe(raw.deals[0].createdAt);
+  expect(stageAge(migrated.deals[0]).tone).toBe("stale");
+  // Empty or unparseable stamps read as day zero instead of inventing an age.
+  const broken = normalize({ ...raw, deals: [{ ...raw.deals[0], stageEnteredAt: "" }] });
+  expect(broken.deals[0].stageEnteredAt).toBe(raw.deals[0].createdAt);
+  expect(daysInStage({ ...broken.deals[0], stageEnteredAt: "kaputt", createdAt: "" })).toBe(0);
+  // v1 records carry their creation date into the stage clock.
+  const v1 = migrateV1([v1Account({ deals: [{ id: "d1", title: "Optik Nord", stage: "Qualified", status: "Aktiv", createdAt: daysAgo(9) }] })]);
+  expect(v1.deals[0].stageEnteredAt).toBe(v1.deals[0].createdAt);
+  expect(stageAge(v1.deals[0]).tone).toBe("warn");
 });

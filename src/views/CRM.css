@@ -76,3 +76,26 @@
 .crm-stage-settings-row input{box-sizing:border-box;width:100%;font:inherit;font-size:12px;color:var(--text);background:var(--ctl-bg);border:1px solid var(--surface-border);border-radius:var(--ctl-radius-sm);padding:7px 8px}
 .crm-readonly-field{display:flex;align-items:baseline;gap:8px;padding:7px 8px;border:1px dashed var(--surface-border);border-radius:var(--ctl-radius-sm);background:var(--ctl-bg);color:var(--text);font-size:13px;font-weight:650}
 .crm-readonly-field small{font-weight:400;color:var(--text-muted);font-size:10px}
+
+/* ── Deal aging ──────────────────────────────────────────────────────────────
+   Waiting is a quiet fact: a hairline on the card edge and one line of text.
+   Fresh gets NO colour (young is not an achievement), amber means it has been
+   sitting, red means it has been forgotten. */
+.crm-card{border-left:3px solid transparent}
+.crm-card[data-stage-age="warn"]{border-left-color:var(--status-warning-ink)}
+.crm-card[data-stage-age="stale"]{border-left-color:var(--status-danger-ink)}
+.crm-card-age{order:5;display:flex;align-items:center;gap:4px;font-size:10px;color:var(--text-faint)}
+.crm-card-age[data-stage-age="warn"]{color:var(--status-warning-ink)}
+.crm-card-age[data-stage-age="stale"]{color:var(--status-danger-ink)}
+.crm-stage-progress{padding:12px 24px 0;background:#fff}
+.crm-stepper{display:flex;gap:6px;margin:0;padding:0;list-style:none}
+.crm-step{flex:1;min-width:0;display:grid;gap:5px;font-size:10px;color:var(--text-muted)}
+.crm-step i{display:block;height:3px;border-radius:2px;background:var(--surface-border)}
+.crm-step span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.crm-step[data-state="done"] i{background:var(--accent)}
+.crm-step[data-state="current"] i{background:var(--accent);height:5px;margin-top:-1px}
+.crm-step[data-state="current"]{color:var(--text);font-weight:650}
+.crm-stage-age{margin:8px 0 0;font-size:11px;color:var(--text-muted)}
+.crm-stage-age strong{color:var(--text)}
+.crm-stage-age[data-stage-age="warn"]{color:var(--status-warning-ink)}
+.crm-stage-age[data-stage-age="stale"]{color:var(--status-danger-ink)}

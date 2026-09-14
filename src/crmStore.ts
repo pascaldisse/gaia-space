@@ -38,7 +38,7 @@ export type Organization = {
 export type Deal = {
   id: string; organizationId: string; locationId: string | null; title: string; stage: CrmStage; status: DealStatus;
   owner: string; source: string; value: string; currency: "EUR" | "CHF" | "USD"; expectedClose: string; labels: string[]; nextStep: string; nextStepDate: string;
-  notes: Note[]; activities: Activity[]; files: CrmFile[]; createdAt: string; closedAt: string | null; deletedAt: string | null;
+  notes: Note[]; activities: Activity[]; files: CrmFile[]; createdAt: string; stageEnteredAt: string; closedAt: string | null; deletedAt: string | null;
 };
 export type CrmData = { version: 2; organizations: Organization[]; deals: Deal[]; labels: Label[]; pipelineStages: PipelineStage[] };
 
@@ -77,6 +77,36 @@ export const setPipelineStages = (data: CrmData, stages: PipelineStage[]) => {
   data.pipelineStages = normalizePipelineStages(stages);
 };
 
+/** ── Deal aging ──────────────────────────────────────────────────────────────
+ *  A deal that sits still is the cheapest warning a pipeline can give. The clock is
+ *  the STAGE clock (`stageEnteredAt`), not the creation date: a deal that moved
+ *  yesterday is fresh no matter how old the opportunity is, and only an actual stage
+ *  CHANGE resets it (see `moveDeal`). Being young is not an achievement, so the fresh
+ *  tone is neutral, never a green success — only the waiting is worth a colour. */
+export const STAGE_AGE_WARN_DAYS = 7;
+export const STAGE_AGE_STALE_DAYS = 30;
+export type StageAgeTone = "fresh" | "warn" | "stale";
+export type StageAge = { days: number; tone: StageAgeTone; label: string; hint: string };
+const DAY_MS = 86_400_000;
+/** Whole days since the deal entered its stage; missing or broken stamps read as day 0
+ *  rather than inventing an age from a record that never tracked one. */
+export const daysInStage = (deal: Deal, at: Date = new Date()): number => {
+  const entered = Date.parse(deal.stageEnteredAt || deal.createdAt || "");
+  if (!Number.isFinite(entered)) return 0;
+  return Math.max(0, Math.floor((at.getTime() - entered) / DAY_MS));
+};
+export const stageAgeTone = (days: number): StageAgeTone =>
+  days > STAGE_AGE_STALE_DAYS ? "stale" : days > STAGE_AGE_WARN_DAYS ? "warn" : "fresh";
+export const stageAgeLabel = (days: number) => `${days} ${days === 1 ? "Tag" : "Tage"} in dieser Phase`;
+export const stageAge = (deal: Deal, at?: Date): StageAge => {
+  const days = daysInStage(deal, at);
+  const tone = stageAgeTone(days);
+  return {
+    days, tone, label: stageAgeLabel(days),
+    hint: tone === "stale" ? `Seit ${days} Tagen unverändert – überfällig` : tone === "warn" ? `Seit ${days} Tagen unverändert – wartet` : `Seit ${days} ${days === 1 ? "Tag" : "Tagen"} in dieser Phase`,
+  };
+};
+
 export const LABEL_COLORS = ["#00C2A8", "#2F6BFF", "#6B3D8B", "#B2500F", "#0F1B33", "#118C5C", "#8B2E5A", "#5A6473"] as const;
 
 const KEY_V2 = "gaia.crm.prototype.v2";
@@ -89,7 +119,7 @@ export const emptyLocation = (name = ""): Location =>
 export const emptyOrganization = (name: string, owner = ""): Organization =>
   ({ id: id("org"), name, website: "", employees: "", decisionMaker: "", software: "", source: "", owner, labels: [], locations: [emptyLocation(name)], createdAt: now(), deletedAt: null });
 export const emptyDeal = (organizationId: string, title: string, owner = ""): Deal =>
-  ({ id: id("deal"), organizationId, locationId: null, title, stage: "Non-Qualified", status: "Offen", owner, source: "", value: "", currency: "EUR", expectedClose: "", labels: [], nextStep: "", nextStepDate: "", notes: [], activities: [], files: [], createdAt: now(), closedAt: null, deletedAt: null });
+  ({ id: id("deal"), organizationId, locationId: null, title, stage: "Non-Qualified", status: "Offen", owner, source: "", value: "", currency: "EUR", expectedClose: "", labels: [], nextStep: "", nextStepDate: "", notes: [], activities: [], files: [], createdAt: now(), stageEnteredAt: now(), closedAt: null, deletedAt: null });
 
 /** ── Label library ───────────────────────────────────────────────────────── */
 export const labelByName = (data: CrmData, name: string) =>
@@ -137,9 +167,13 @@ export const allActivities = (data: CrmData) =>
     .sort((a, b) => (a.activity.dueDate || "9999").localeCompare(b.activity.dueDate || "9999"));
 
 /** ── Mutations (pure on a draft) ─────────────────────────────────────────── */
+/** Re-dropping a card in the column it already sits in is a no-op for the clock: only
+ *  an actual stage CHANGE restarts the aging, so the board cannot launder a stale deal. */
 export const moveDeal = (data: CrmData, dealId: string, stage: CrmStage) => {
   const deal = data.deals.find(item => item.id === dealId);
-  if (deal) { deal.stage = stage; deal.status = "Offen"; deal.closedAt = null; }
+  if (!deal) return;
+  if (deal.stage !== stage) { deal.stage = stage; deal.stageEnteredAt = now(); }
+  deal.status = "Offen"; deal.closedAt = null;
 };
 export const closeDeal = (data: CrmData, dealId: string, status: Exclude<DealStatus, "Offen">) => {
   const deal = data.deals.find(item => item.id === dealId);
@@ -216,7 +250,7 @@ export const migrateV1 = (accounts: any[]): CrmData => {
           .map((note: any) => ({ id: note.id ?? id("note"), title: note.title ?? "Notiz", body: note.body ?? "", author: note.author ?? "", createdAt: note.createdAt ?? now() })),
         activities: [...(raw.activities ?? []), ...(index === 0 ? (account.locations ?? []).flatMap((loc: any) => loc.activities ?? []) : [])],
         files: [...(raw.files ?? []), ...(index === 0 ? (account.locations ?? []).flatMap((loc: any) => loc.files ?? []) : [])],
-        createdAt: raw.createdAt ?? now(), closedAt: wasWon || wasLost ? (raw.closedAt ?? now()) : null, deletedAt: null,
+        createdAt: raw.createdAt ?? now(), stageEnteredAt: raw.stageEnteredAt ?? raw.createdAt ?? now(), closedAt: wasWon || wasLost ? (raw.closedAt ?? now()) : null, deletedAt: null,
       });
     });
   }
@@ -250,7 +284,7 @@ export const normalize = (raw: any): CrmData => {
       organizations: raw.organizations.map((org: any) => ({ ...emptyOrganization(org.name ?? ""), ...org, labels: org.labels ?? [], locations: org.locations?.length ? org.locations : [emptyLocation(org.name ?? "")], deletedAt: org.deletedAt ?? null })),
       // `probability` was a manual per-deal field in early v2 documents; the stage owns
       // it now, so it is dropped on read rather than carried as dead weight.
-      deals: raw.deals.map(({ probability: _dropped, ...deal }: any) => ({ ...emptyDeal(deal.organizationId ?? "", deal.title ?? ""), ...deal, stage: stageOf(deal.stage), status: DEAL_STATUS.includes(deal.status) ? deal.status : "Offen", labels: deal.labels ?? [], notes: deal.notes ?? [], activities: deal.activities ?? [], files: deal.files ?? [], deletedAt: deal.deletedAt ?? null, closedAt: deal.closedAt ?? null })),
+      deals: raw.deals.map(({ probability: _dropped, ...deal }: any) => ({ ...emptyDeal(deal.organizationId ?? "", deal.title ?? ""), ...deal, stage: stageOf(deal.stage), status: DEAL_STATUS.includes(deal.status) ? deal.status : "Offen", labels: deal.labels ?? [], notes: deal.notes ?? [], activities: deal.activities ?? [], files: deal.files ?? [], deletedAt: deal.deletedAt ?? null, closedAt: deal.closedAt ?? null, stageEnteredAt: typeof deal.stageEnteredAt === "string" && deal.stageEnteredAt ? deal.stageEnteredAt : (deal.createdAt ?? now()) })),
     };
   }
   if (raw.accounts) return migrateV1(raw.accounts);

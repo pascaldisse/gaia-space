@@ -8,7 +8,7 @@ import {
   ACTIVITY_KINDS, CRM_STAGES, PIPELINE_STAGES, WON_PROBABILITY, activitiesOf, closeDeal, convertToDeal, customers as customerOrgs,
   dealProbability, dealsOf, emptyDeal, emptyLocation, emptyOrganization, ensureLabel, id, leads as leadOrgs, live, loadCrm,
   moveDeal, notesOf, openDeals, organizationOf, purge, restore, saveCrm, setPipelineStages, softDeleteDeal, softDeleteOrganization,
-  stageName, stageProbability, trash,
+  stageAge, stageName, stageProbability, trash,
   type Activity, type ActivityKind, type Contact, type CrmData, type CrmStage, type Deal, type Label, type Location,
   type Organization, type PipelineStage,
 } from "../crmStore";
@@ -304,12 +304,16 @@ function LabelPicker(props: { label: string; selected: string[]; library: Label[
   </div>;
 }
 
+/** Aging is shown, never shouted: a thin accent on the card edge carries the tone, the
+ *  same fact is spelled out in words for anyone who does not see colour. */
 function DealCard(props: { deal: Deal; org: Organization | undefined; library: Label[]; probability: number; onPointerDown: (event: PointerEvent) => void; onOpen: () => void }) {
-  return <div class="crm-card" role="button" tabindex="0" onPointerDown={props.onPointerDown} onClick={props.onOpen}>
+  const age = () => stageAge(props.deal);
+  return <div class="crm-card" data-stage-age={age().tone} role="button" tabindex="0" onPointerDown={props.onPointerDown} onClick={props.onOpen}>
     <strong>{props.deal.title}</strong>
     <span class="crm-card-account">{props.org?.name ?? "Ohne Organisation"}</span>
     <LabelChips ids={[...props.deal.labels, ...(props.org?.labels ?? []).filter(labelId => !props.deal.labels.includes(labelId))]} library={props.library} />
     <Show when={props.deal.nextStep}><span class="crm-card-next"><Icon name="alert" size={14} />{props.deal.nextStep}</span></Show>
+    <span class="crm-card-age" data-stage-age={age().tone}><Icon name="clock" size={12} /><span aria-label={age().hint}>{age().label}</span></span>
     <footer><span>{props.deal.owner || "Nicht zugeteilt"}</span><span>{money(dealAmount(props.deal), props.deal.currency)}<Show when={props.probability > 0}> · {props.probability}%</Show></span></footer>
   </div>;
 }
@@ -384,6 +388,29 @@ function PipelineSettings(props: { stages: PipelineStage[]; onClose: () => void;
   </form></div>;
 }
 
+/** A picture of where the deal stands, not a second set of controls: the stage is
+ *  CHANGED in one place only (the PillMenu below), so this is a read-only list — no
+ *  buttons, nothing that invites a click it cannot honour. Names come from the
+ *  pipeline configuration, so a renamed phase reads the same here as on the board. */
+function StageProgress(props: { data: () => CrmData; deal: Deal }) {
+  const index = () => PIPELINE_STAGES.indexOf(props.deal.stage);
+  const age = () => stageAge(props.deal);
+  const currentName = () => stageName(props.data(), props.deal.stage);
+  return <section class="crm-stage-progress" aria-label="Pipeline-Fortschritt">
+    <ol class="crm-stepper">
+      <For each={PIPELINE_STAGES}>{(stage, position) => {
+        const state = () => position() < index() ? "done" : position() === index() ? "current" : "todo";
+        return <li class="crm-step" data-state={state()} aria-current={state() === "current" ? "step" : undefined}>
+          <i aria-hidden="true" /><span>{stageName(props.data(), stage)}</span>
+        </li>;
+      }}</For>
+    </ol>
+    <p class="crm-stage-age" data-stage-age={age().tone}>
+      <strong>{currentName()}</strong> · seit {age().days} {age().days === 1 ? "Tag" : "Tagen"} in dieser Phase
+    </p>
+  </section>;
+}
+
 const Field = (props: { label: string; value: string; onChange: (value: string) => void }) =>
   <label>{props.label}<input value={props.value} onInput={e => props.onChange(e.currentTarget.value)} /></label>;
 
@@ -402,6 +429,7 @@ function DealPanel(props: { dealId: string; data: () => CrmData; onMutate: (fn: 
       <Show when={org()}><p><button class="crm-link" onClick={() => props.onOpenOrg(org()!.id)}>{org()!.name === current().title ? "Organisation öffnen" : `Organisation: ${org()!.name}`}</button></p></Show>
       <h1>{current().title}</h1><span class="crm-record-kind">Deal</span>
     </div><button class="icon-button" onClick={props.onClose} aria-label="Deal schließen"><Icon name="close" /></button></header>
+    <StageProgress data={props.data} deal={current()} />
     <div class="crm-stage-row">
       <PillMenu class="crm-field-menu crm-stage-menu" label="Pipeline-Phase" value={current().stage} options={CRM_STAGES.map(stage => ({ value: stage, label: `${stageName(props.data(), stage)} · ${stageProbability(props.data(), stage)}%` }))} onChange={stage => props.onMutate(draft => moveDeal(draft, props.dealId, stage as CrmStage))} />
       <button class="ghost success" style={{ background: "#e6f6e8", color: "#118c5c", "border-color": "#118c5c" }} onClick={() => { props.onMutate(draft => closeDeal(draft, props.dealId, "Gewonnen")); props.onClose(); navigate({ view: "CRM", tab: "won" }); }}>Gewonnen</button>
