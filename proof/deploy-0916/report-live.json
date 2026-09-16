@@ -1,0 +1,90 @@
+{
+  "login": {
+    "loggedIn": true,
+    "url": "https://paloptic.com/space/home"
+  },
+  "docs": {
+    "status": 200,
+    "ok": true,
+    "total": 136,
+    "files": 129,
+    "first": {
+      "id": "doc-4f3cd8b0f3a90a94340c21ffae6f19db",
+      "title": "[C] paloptic Marktpotenzial – Methodik & Herleitung.docx",
+      "project_id": null
+    }
+  },
+  "get_document_file": {
+    "status": 200,
+    "ok": true,
+    "value": {
+      "filename": "[C] paloptic Marktpotenzial – Methodik & Herleitung.docx",
+      "mime": "application/octet-stream",
+      "size": null,
+      "hasBytes": false
+    },
+    "error": null
+  },
+  "v1440": {
+    "library": {
+      "listUrl": "https://paloptic.com/space/documents",
+      "opened": "/space/documents/kb/organization-library",
+      "afterOpen": "https://paloptic.com/space/documents/kb/organization-library",
+      "afterBack": "https://paloptic.com/space/documents",
+      "backReturnedToList": true,
+      "errors": [
+        "log: Failed to load resource: the server responded with a status of 403 () https://paloptic.com/space/api/cmd/list_book_owners"
+      ]
+    },
+    "calendar": {
+      "geom": {
+        "totalDays": 42,
+        "withEvent": 0,
+        "sample": []
+      },
+      "errors": []
+    },
+    "knowledge": {
+      "card": {
+        "present": true,
+        "name": "[C] paloptic Marktpotenzial – Methodik & Herleitung.docx",
+        "meta": "Word document · 13 KB · Added 08/09/2026 · by Jannes",
+        "download": true,
+        "width": 510,
+        "noViewer": true
+      },
+      "errors": []
+    }
+  },
+  "v390": {
+    "library": {
+      "listUrl": "https://paloptic.com/space/documents",
+      "opened": "/space/documents/kb/organization-library",
+      "afterOpen": "https://paloptic.com/space/documents/kb/organization-library",
+      "afterBack": "https://paloptic.com/space/documents",
+      "backReturnedToList": true,
+      "errors": [
+        "log: Failed to load resource: the server responded with a status of 403 () https://paloptic.com/space/api/cmd/list_book_owners"
+      ]
+    },
+    "calendar": {
+      "geom": {
+        "totalDays": 42,
+        "withEvent": 0,
+        "sample": []
+      },
+      "errors": []
+    },
+    "knowledge": {
+      "card": {
+        "present": true,
+        "name": "[C] paloptic Marktpotenzial – Methodik & Herleitung.docx",
+        "meta": "Word document · 13 KB · Added 08/09/2026 · by Jannes",
+        "download": true,
+        "width": 354,
+        "noViewer": true
+      },
+      "errors": []
+    }
+  }
+}
