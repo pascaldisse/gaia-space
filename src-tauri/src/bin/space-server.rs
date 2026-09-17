@@ -11,7 +11,7 @@ use axum::{
 use gaia_space_lib::{
     app_rights, applications, blogs, budget, calendar_feeds, calls, channel_feeds, channel_notes,
     chat, chatbot, db, devenv, documents, events, git_hosting, issues, leads, meetings, oauth,
-    organization, package_registry, payload_dispatch, personal, pipelines, platform, review,
+    organization, package_registry, payload_dispatch, personal, pipelines, platform, review, vault,
 };
 use rand::RngCore;
 use rusqlite::{params, OptionalExtension};
@@ -2812,6 +2812,7 @@ enum CommandPolicy {
 fn command_policy(name: &str) -> Option<CommandPolicy> {
     Some(match name {
         "create_hosted_repo" | "delete_hosted_repo" | "list_hosted_repos" | "hosted_repo_clone_url" => CommandPolicy::Session,
+        "vault_invite" => CommandPolicy::Session,
 "create_project" => CommandPolicy::ProjectCreate,
         "update_project" => CommandPolicy::ProjectWrite,
         "delete_project" => CommandPolicy::ProjectDelete,
@@ -5737,6 +5738,7 @@ async fn cmd(
     "archive_cf_definition" => platform::archive_cf_definition(id: String, archived: bool),
     "budget_statement" => budget::budget_statement(document_id: String, month: Option<String>, profile_id: Option<String>),
     "budget_add_expense" => budget::budget_add_expense(document_id: String, input: budget::BudgetExpenseInput, actor: Option<String>),
+    "vault_invite" => vault::vault_invite(input: vault::VaultInviteInput),
     "budget_export_statement" => budget::budget_export_statement(document_id: String, month: String, profile_id: Option<String>),
     "archive_document" => documents::archive_document(id: String, archived: bool),
     "delete_document" => documents::delete_document(id: String, actor_id: String),
