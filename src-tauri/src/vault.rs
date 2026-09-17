@@ -15,6 +15,13 @@ use serde::{Deserialize, Serialize};
 type Result<T> = std::result::Result<T, String>;
 
 const DEFAULT_VAULTWARDEN_URL: &str = "http://127.0.0.1:8095";
+/// Vaultwarden's `DOMAIN` config is itself `https://paloptic.com/space/vault` (box install,
+/// see `deploy/vaultwarden/INSTALL.md`), and Rocket mounts every route group at
+/// `[domain_path, "/admin"|"/identity"|...]` concatenated — so the app expects this prefix on
+/// EVERY request, including loopback ones (`curl 127.0.0.1:8095/alive` -> 404,
+/// `curl 127.0.0.1:8095/space/vault/alive` -> 200, both proven in that file). Not hardcoded:
+/// overridable, defaults to the box's actual path.
+const DEFAULT_VAULTWARDEN_PATH: &str = "/space/vault";
 const ADMIN_COOKIE_NAME: &str = "VW_ADMIN";
 
 #[derive(Debug, Deserialize)]
@@ -30,6 +37,15 @@ pub struct VaultInviteResult {
 
 fn vaultwarden_url() -> String {
     std::env::var("VAULTWARDEN_URL").unwrap_or_else(|_| DEFAULT_VAULTWARDEN_URL.to_string())
+}
+
+fn vaultwarden_path() -> String {
+    std::env::var("VAULTWARDEN_PATH").unwrap_or_else(|_| DEFAULT_VAULTWARDEN_PATH.to_string())
+}
+
+/// `{VAULTWARDEN_URL}{VAULTWARDEN_PATH}`, e.g. `http://127.0.0.1:8095/space/vault`.
+fn vaultwarden_base() -> String {
+    format!("{}{}", vaultwarden_url(), vaultwarden_path())
 }
 
 /// `POST {base}/admin` with the shared admin token; Vaultwarden answers with a `Set-Cookie:
@@ -64,7 +80,7 @@ fn admin_session_cookie(client: &reqwest::blocking::Client, base: &str, token: &
 
 fn invite_off_the_async_runtime(email: String) -> Result<VaultInviteResult> {
     let token = std::env::var("VAULTWARDEN_ADMIN_TOKEN").map_err(|_| "vault not configured".to_string())?;
-    let base = vaultwarden_url();
+    let base = vaultwarden_base();
     let client = reqwest::blocking::Client::builder()
         .build()
         .map_err(|e| format!("could not start the vault client: {e}"))?;
@@ -126,5 +142,16 @@ mod tests {
         std::env::set_var("VAULTWARDEN_URL", "http://example.invalid:1234");
         assert_eq!(vaultwarden_url(), "http://example.invalid:1234");
         std::env::remove_var("VAULTWARDEN_URL");
+    }
+
+    #[test]
+    fn vaultwarden_base_defaults_to_the_boxs_domain_path() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        std::env::remove_var("VAULTWARDEN_URL");
+        std::env::remove_var("VAULTWARDEN_PATH");
+        assert_eq!(vaultwarden_base(), "http://127.0.0.1:8095/space/vault");
+        std::env::set_var("VAULTWARDEN_PATH", "/other");
+        assert_eq!(vaultwarden_base(), "http://127.0.0.1:8095/other");
+        std::env::remove_var("VAULTWARDEN_PATH");
     }
 }
