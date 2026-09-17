@@ -31,6 +31,8 @@ pub mod chat_links;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod chatbot;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
+pub mod crm;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod db;
 #[cfg(feature = "desktop")]
 mod debug_server;
@@ -560,6 +562,8 @@ pub fn run() {
             channel_notes::create_channel_note,
             channel_notes::update_channel_note,
             channel_notes::delete_channel_note,
+            crm::get_crm_document,
+            crm::save_crm_document,
             finance::finance_access_check,
             finance::list_finance_access,
             finance::grant_finance_access,
