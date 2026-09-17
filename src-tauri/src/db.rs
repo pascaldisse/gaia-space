@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 144;
+pub const SCHEMA_VERSION: i64 = 145;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -892,6 +892,12 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if version < 144 && table_exists(&tx, "todos")? {
         tx.execute_batch(SCHEMA_V144_TODO_SEARCH)?;
     }
+    // V145: CRM sales data moves out of browser localStorage into space.db so the
+    // production backup covers it (see crm.rs). One workspace-wide document plus a
+    // capped revision history for recovery from an accidental overwrite.
+    if version < 145 {
+        tx.execute_batch(SCHEMA_V145_CRM)?;
+    }
     // V141: durable hosted Git repository metadata; bare objects live under data_dir/git/.
     if version < 141 && table_exists(&tx, "projects")? {
         tx.execute_batch(SCHEMA_V141)?;
@@ -1322,6 +1328,24 @@ ALTER TABLE issue_links RENAME TO issue_links_legacy;
 ALTER TABLE issue_assignees RENAME TO issue_assignees_legacy;
 ALTER TABLE issue_board_positions RENAME TO issue_board_positions_legacy;
 ALTER TABLE issue_tags RENAME TO issue_tags_legacy;
+"#;
+/// V145: workspace CRM document + capped revision history. See crm.rs module docs.
+pub(crate) const SCHEMA_V145_CRM: &str = r#"
+CREATE TABLE IF NOT EXISTS crm_documents (
+    id TEXT PRIMARY KEY,
+    data TEXT NOT NULL,
+    revision INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    updated_by TEXT
+);
+CREATE TABLE IF NOT EXISTS crm_document_revisions (
+    document_id TEXT NOT NULL,
+    revision INTEGER NOT NULL,
+    data TEXT NOT NULL,
+    saved_at INTEGER NOT NULL,
+    saved_by TEXT,
+    PRIMARY KEY(document_id,revision)
+);
 "#;
 /// V141: durable hosted Git repository metadata.
 pub(crate) const SCHEMA_V141: &str = r#"
@@ -3748,5 +3772,48 @@ mod v133_contract_tests {
         assert!(conn.execute("INSERT INTO documents(id,container_type,doc_type,title,version,archived,source_entity_type) VALUES('partial','my-docs','text','partial',1,0,'message')", []).is_err());
         conn.execute("INSERT INTO documents(id,container_type,doc_type,title,version,archived,source_entity_type,source_entity_id) VALUES('anchored','my-docs','text','anchored',1,0,'message','m1')", []).unwrap();
         assert!(conn.execute("INSERT INTO documents(id,container_type,doc_type,title,version,archived,source_entity_type,source_entity_id) VALUES('duplicate','my-docs','text','duplicate',1,0,'message','m1')", []).is_err());
+    }
+}
+
+#[cfg(test)]
+mod v145_contract_tests {
+    use super::*;
+
+    #[test]
+    fn v145_upgrade_adds_crm_tables_and_preserves_existing_rows() {
+        let temp = TempDb::new("gaia-space-v145-crm");
+        let conn = open_at(&temp).unwrap();
+        migrate(&conn).unwrap();
+        seed(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO profiles(id,username,display_name,created_at) VALUES('legacy-pa','legacy','Legacy',0)",
+            [],
+        )
+        .unwrap();
+        // Simulate a database pinned at V144 and migrate forward again.
+        conn.pragma_update(None, "user_version", 144).unwrap();
+        migrate(&conn).expect("v145");
+        assert_eq!(
+            conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
+                .unwrap(),
+            SCHEMA_VERSION
+        );
+        let tables: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN ('crm_documents','crm_document_revisions')",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(tables, 2, "both CRM tables exist after the migration");
+        let kept: String = conn
+            .query_row(
+                "SELECT display_name FROM profiles WHERE id='legacy-pa'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(kept, "Legacy", "existing rows are untouched");
+        migrate(&conn).expect("idempotent");
     }
 }

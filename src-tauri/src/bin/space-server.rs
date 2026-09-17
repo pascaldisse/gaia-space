@@ -10,8 +10,9 @@ use axum::{
 };
 use gaia_space_lib::{
     app_rights, applications, blogs, budget, calendar_feeds, calls, channel_feeds, channel_notes,
-    chat, chatbot, db, devenv, documents, events, git_hosting, issues, leads, meetings, oauth,
-    organization, package_registry, payload_dispatch, personal, pipelines, platform, review,
+    chat, chatbot, crm, db, devenv, documents, events, git_hosting, issues, leads, meetings,
+    oauth, organization, package_registry, payload_dispatch, personal, pipelines, platform,
+    review,
 };
 use rand::RngCore;
 use rusqlite::{params, OptionalExtension};
@@ -2849,6 +2850,10 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         "create_channel_note" | "update_channel_note" | "delete_channel_note" => {
             CommandPolicy::ChannelNoteWrite
         }
+        // The CRM document is workspace-wide: any authenticated session may read or
+        // save it, exactly like `create_meeting` and the other plain `Session` writes.
+        // The optimistic-concurrency conflict check lives in crm.rs, not here.
+        "get_crm_document" | "save_crm_document" => CommandPolicy::Session,
         "mark_notification_read" => CommandPolicy::NotificationWrite,
         "create_absence" | "update_absence" | "delete_absence" => CommandPolicy::AbsenceWrite,
         "create_meeting" | "create_channel_call" => CommandPolicy::SessionIdentityWrite,
@@ -5803,6 +5808,8 @@ async fn cmd(
     "create_channel_note" => channel_notes::create_channel_note(input: channel_notes::ChannelNoteInput),
     "update_channel_note" => channel_notes::update_channel_note(note: channel_notes::ChannelNote),
     "delete_channel_note" => channel_notes::delete_channel_note(id: String, profile_id: String),
+    "get_crm_document" => crm::get_crm_document(profile_id: String),
+    "save_crm_document" => crm::save_crm_document(data: String, base_revision: i64, profile_id: String),
     "dry_run_merge" => review::dry_run_merge(id: String, repo_path: String, review_id: String, source_branch: String, target_branch: String),
     "emit_notification" => personal::emit_notification(input: personal::NotificationInput),
     "evaluate_quality_gate" => review::evaluate_quality_gate(review_id: String),
@@ -9590,6 +9597,79 @@ mod tests {
             .query_row("SELECT count(*) FROM channel_notes", [], |r| r.get(0))
             .unwrap();
         assert_eq!(left, 0);
+    }
+
+    #[test]
+    fn crm_commands_are_session_scoped() {
+        for name in ["get_crm_document", "save_crm_document"] {
+            assert!(
+                matches!(command_policy(name), Some(CommandPolicy::Session)),
+                "{name}"
+            );
+        }
+    }
+
+    /// The CRM document over HTTP: refused without a session, reachable with one, and
+    /// a stale save is refused as a conflict rather than silently overwriting.
+    #[tokio::test]
+    async fn crm_document_endpoints_require_a_session_and_reach_the_real_router() {
+        let _serial = test_lock();
+        setup();
+
+        let (status, _) = call(HeaderMap::new(), "get_crm_document", json!({})).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        let (status, _) = call(
+            HeaderMap::new(),
+            "save_crm_document",
+            json!({"data":"{}","base_revision":0}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+        // A logged-in session reaches the real router and sees the empty starting state.
+        let (status, value) = call(cookie("ta"), "get_crm_document", json!({})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        assert_eq!(value["value"]["revision"], json!(0));
+        assert_eq!(value["value"]["data"], json!(""));
+
+        // Alice saves while claiming Bob as the author; the session wins.
+        let (status, value) = call(
+            cookie("ta"),
+            "save_crm_document",
+            json!({"data":"{\"deals\":[]}","base_revision":0,"profile_id":"pb"}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        assert_eq!(value["value"]["revision"], json!(1));
+        assert_eq!(
+            value["value"]["updatedBy"],
+            json!("pa"),
+            "a forged author is replaced by the session"
+        );
+
+        // Bob still has the stale revision 0 and is refused a conflict, not a silent stomp.
+        let (status, value) = call(
+            cookie("tb"),
+            "save_crm_document",
+            json!({"data":"{}","base_revision":0}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(value["error"], json!("crm-conflict:1"), "{value}");
+
+        // Bob re-reads the current revision and saves cleanly on top of it.
+        let (status, value) = call(cookie("tb"), "get_crm_document", json!({})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        let current_revision = value["value"]["revision"].as_i64().unwrap();
+        let (status, value) = call(
+            cookie("tb"),
+            "save_crm_document",
+            json!({"data":"{\"deals\":[{\"id\":\"d1\"}]}","base_revision":current_revision}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        assert_eq!(value["value"]["revision"], json!(2));
+        assert_eq!(value["value"]["updatedBy"], json!("pb"));
     }
 
     #[tokio::test]
