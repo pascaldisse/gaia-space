@@ -9616,18 +9616,27 @@ mod tests {
         let _serial = test_lock();
         setup();
 
-        let (status, _) = call(HeaderMap::new(), "get_crm_document", json!({})).await;
+        // The real client always names itself; the session overwrites whatever it says
+        // (see the forged-author save below), but the key must be present for
+        // `bind_session_identity` to have something to rewrite — it patches existing
+        // keys, it does not invent missing ones.
+        let (status, _) = call(
+            HeaderMap::new(),
+            "get_crm_document",
+            json!({"profile_id":"pa"}),
+        )
+        .await;
         assert_eq!(status, StatusCode::UNAUTHORIZED);
         let (status, _) = call(
             HeaderMap::new(),
             "save_crm_document",
-            json!({"data":"{}","base_revision":0}),
+            json!({"data":"{}","base_revision":0,"profile_id":"pa"}),
         )
         .await;
         assert_eq!(status, StatusCode::UNAUTHORIZED);
 
         // A logged-in session reaches the real router and sees the empty starting state.
-        let (status, value) = call(cookie("ta"), "get_crm_document", json!({})).await;
+        let (status, value) = call(cookie("ta"), "get_crm_document", json!({"profile_id":"ta"})).await;
         assert_eq!(status, StatusCode::OK, "{value}");
         assert_eq!(value["value"]["revision"], json!(0));
         assert_eq!(value["value"]["data"], json!(""));
@@ -9651,20 +9660,20 @@ mod tests {
         let (status, value) = call(
             cookie("tb"),
             "save_crm_document",
-            json!({"data":"{}","base_revision":0}),
+            json!({"data":"{}","base_revision":0,"profile_id":"pb"}),
         )
         .await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
         assert_eq!(value["error"], json!("crm-conflict:1"), "{value}");
 
         // Bob re-reads the current revision and saves cleanly on top of it.
-        let (status, value) = call(cookie("tb"), "get_crm_document", json!({})).await;
+        let (status, value) = call(cookie("tb"), "get_crm_document", json!({"profile_id":"tb"})).await;
         assert_eq!(status, StatusCode::OK, "{value}");
         let current_revision = value["value"]["revision"].as_i64().unwrap();
         let (status, value) = call(
             cookie("tb"),
             "save_crm_document",
-            json!({"data":"{\"deals\":[{\"id\":\"d1\"}]}","base_revision":current_revision}),
+            json!({"data":"{\"deals\":[{\"id\":\"d1\"}]}","base_revision":current_revision,"profile_id":"pb"}),
         )
         .await;
         assert_eq!(status, StatusCode::OK, "{value}");
