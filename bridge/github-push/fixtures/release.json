@@ -1,0 +1,5 @@
+{
+  "action": "published",
+  "repository": { "full_name": "acme/widgets" },
+  "release": { "name": "Widgets 1.2.0", "tag_name": "v1.2.0", "html_url": "https://github.com/acme/widgets/releases/tag/v1.2.0" }
+}

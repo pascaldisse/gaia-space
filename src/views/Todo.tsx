@@ -17,8 +17,6 @@ import { humanError } from "../session";
 import { myTasks } from "../taskScope";
 import { stableBy, stableTasks } from "./taskIdentity";
 import { Icon } from "../components/Icon";
-import { planningApi, type Issue, type Status } from "../api/issues";
-import { linkProps } from "../router";
 import ContentHead from "../components/ContentHead";
 
 // Tokens, never HTML: a task body can style itself but can never inject markup.
@@ -39,18 +37,22 @@ export default function Todo() {
   /** Done is folded away by default — it is the part of the list you are finished
    *  with, and it only ever grows. */
   const [showDone,setShowDone]=createSignal(false);
+  /* MY TASKS SHOWS TASKS. Tracker work assigned to you is REAL work, but it is not a
+     task on this list: it lives in Development, is edited there, and cannot be ticked
+     off, dated or dragged here. Mixing both under one heading made the surface read as
+     a task ledger. It becomes a second pane instead — present, counted, one click
+     away, and never in front of the list this page is named after. */
   const [todos,{refetch}]=createResource(profileId,id=>id?personalApi.todos(id,true):Promise.resolve([]));
+  /* A FAILED READ IS NOT AN EMPTY LIST (mirrors TeamTasks/ProjectTasks, 6de55cc): a
+     rejected `list_todos` is carried as `todos.error` and shown as one alert below,
+     never silently rendered as zero rows. */
+  const loadError=()=>todos.error;
   /* A ROW IS THE TASK, NOT THE READ THAT DELIVERED IT (GS issue #2). Every read hands
      back freshly deserialised objects; `<For>` keys BY REFERENCE, so an unchanged task
      looked new and its row — with any OPEN editor in it — was disposed and rebuilt.
      `stableTasks` keeps the object a task already had when its content did not change. */
-  const stableTodos=stableTasks(()=>todos());
+  const stableTodos=stableTasks(()=>(todos.error?[]:todos()));
 const scopedTodos=()=>myTasks(stableTodos(),profileId());
-const [assignedIssues]=createResource(profileId,id=>id?planningApi.issues({assignee_id:id}):Promise.resolve([]));
-const [issueFacts]=createResource(()=>assignedIssues()?.map(issue=>issue.id).join(",")??"",async()=>Promise.all((assignedIssues()??[]).map(async issue=>({issue,detail:await planningApi.issue(issue.id)}))));
-const [issueStatuses]=createResource(()=>[...new Set((assignedIssues()??[]).map(issue=>issue.project_id))].sort().join(","),async()=>Promise.all([...new Set((assignedIssues()??[]).map(issue=>issue.project_id))].map(id=>planningApi.statuses(id))).then(groups=>groups.flat()));
-const statusName=(issue:Issue)=>issueStatuses()?.find((status:Status)=>status.id===issue.status_id)?.name??"No status";
-const issueKind=(issue:Issue)=>issueFacts()?.find(fact=>fact.issue.id===issue.id)?.detail?.tags.some(tag=>tag.name.toLowerCase()==="bug")?"Bug":"Ticket";
   /* The project-member read, the assignable-people list and the project list moved
      WITH the editor into components/TaskRowEdit.tsx — including the rule that a
      refused member read is carried as a value and said out loud, never shown as
@@ -108,18 +110,15 @@ const issueKind=(issue:Issue)=>issueFacts()?.find(fact=>fact.issue.id===issue.id
   const [menu,setMenu]=createSignal<{x:number;y:number;items:ContextMenuItem[]}|null>(null);
   const [pendingDelete,setPendingDelete]=createSignal<TodoItem|null>(null);
   const [deleting,setDeleting]=createSignal(false);
-  /* The row's old glyph buttons (+1d, +1w, → Ticket) are WORDS in this menu now.
-     Nothing was dropped: postponing and converting are still one click away, they
-     just no longer sit on every tile as unlabelled furniture. */
+  /* The row's old glyph buttons (+1d, +1w) are WORDS in this menu now. Nothing was
+     dropped: postponing is still one click away, it just no longer sits on every
+     tile as unlabelled furniture. */
   const taskMenuItems=(todo:TodoItem):ContextMenuItem[]=>[
     { label:"Open", onSelect:()=>startEdit(todo) },
     ...(todo.done?[]:[
       { label:"Postpone by a day", onSelect:()=>void postpone(todo,1) },
       { label:"Postpone by a week", onSelect:()=>void postpone(todo,7) },
     ]),
-    ...(!todo.done&&todo.project_id&&todo.source_entity_type!=="issue"
-      ?[{ label:"Convert to ticket", onSelect:()=>void convert(todo) }]
-      :[]),
     ...(ownsTask(todo)?[{ label:"Delete task…", danger:true, onSelect:()=>setPendingDelete(todo) }]:[]),
   ];
   const openTaskMenu=(event:MouseEvent,todo:TodoItem)=>{ event.preventDefault(); event.stopPropagation(); setMenu({x:event.clientX,y:event.clientY,items:taskMenuItems(todo)}); };
@@ -152,7 +151,7 @@ const issueKind=(issue:Issue)=>issueFacts()?.find(fact=>fact.issue.id===issue.id
    *  not 'nothing exists' and not 'a filter matched nothing' — 'you are finished'. */
   const openCount=()=>openTodos().length;
   /** True while an EmptyState on this surface is showing its own "New task". */
-  const showsEmptyPrimary=()=>!!profileId()&&!todos.loading&&(!scopedTodos().length||!openCount());
+  const showsEmptyPrimary=()=>!loadError()&&!!profileId()&&!todos.loading&&(!scopedTodos().length||!openCount());
   const doneList=()=>scopedTodos().filter(todo=>todo.done);
   const dayGroups=stableBy(
     ()=>[{ key:"today", label:"Today" },{ key:"later", label:"Later" },{ key:"someday", label:"No date" }],
@@ -161,8 +160,6 @@ const issueKind=(issue:Issue)=>issueFacts()?.find(fact=>fact.issue.id===issue.id
   );
   const rowsOf=(key:string)=>key==="today"?todayList:key==="later"?laterList:somedayList;
   const postpone=async(todo:TodoItem,days:number)=>{ try { await personalApi.postponeTodo(todo.id,days); refetch(); } catch(reason) { setError(humanError(reason)); } };
-  // Only a task that already belongs to a project can become that project's issue.
-  const convert=async(todo:TodoItem)=>{ try { if(!todo.project_id) throw new Error("Give the task a project before converting it into a ticket."); await personalApi.convertTodoToIssue(todo.id,todo.project_id); refetch(); } catch(reason) { setError(humanError(reason)); } };
   const editRow=(todo:TodoItem)=><article class="task-card task-card-editing">
     <div class="task-body">
       {/* My tasks is the surface that has always carried the markdown switch and the
@@ -292,6 +289,7 @@ const issueKind=(issue:Issue)=>issueFacts()?.find(fact=>fact.issue.id===issue.id
         </Show>
       }
     />
+    <Show when={loadError()}>{err=><p class="personal-error" role="alert">Could not load tasks: {String(err())}</p>}</Show>
     <Show when={error()}><p class="personal-error">{error()}</p></Show>
 
     <Show when={!showsEmptyPrimary()}>
@@ -306,6 +304,7 @@ const issueKind=(issue:Issue)=>issueFacts()?.find(fact=>fact.issue.id===issue.id
     </Show>
 
     <div class="task-board">
+    <div id="tasks-panel" role="tabpanel" aria-label="Your tasks">
       {/* A NEW TASK IS BORN WHERE IT WILL LIVE. It used to be made in a panel that slid
           in from the right — a different place, a different shape, for the same object
           the list edits in place. The editor opens at the top of the list instead, in
@@ -331,7 +330,7 @@ const issueKind=(issue:Issue)=>issueFacts()?.find(fact=>fact.issue.id===issue.id
         </div>
       </Show>
       <Show when={!profileId()}><p class="personal-empty">No profile selected — add one in Members.</p></Show>
-      <Show when={!todos.loading && !!profileId() && !scopedTodos().length}>
+      <Show when={!loadError() && !todos.loading && !!profileId() && !scopedTodos().length}>
         <EmptyState
           title="No tasks yet"
           hint="Tasks assigned to you appear here, including project work."
@@ -367,15 +366,6 @@ const issueKind=(issue:Issue)=>issueFacts()?.find(fact=>fact.issue.id===issue.id
         )}
       </For>
 
-      <Show when={assignedIssues()?.length}>
-        <p class="task-group-heading">Assigned work<span class="count">{assignedIssues()!.length}</span></p>
-        <div class="task-grid" aria-label="Assigned ticket work">
-          <For each={assignedIssues()}>{issue=><a class="task-tile task-ticket-tile" {...linkProps({view:"Issues",entityType:"issue",entityId:issue.id,projectId:issue.project_id})}>
-            <span class="task-tile-check"><Icon name={issueKind(issue)==="Bug"?"alert":"target"} size={15} /></span>
-            <span class="task-tile-body"><span class="task-tile-title">{issue.title}</span><span class="task-work-kind"><Icon name={issueKind(issue)==="Bug"?"alert":"target"} size={13} />{issueKind(issue)}</span><span class="task-tile-meta"><span>{projectName(issue.project_id)}</span><span class="sep">·</span><span>{statusName(issue)}</span><Show when={issue.priority}><span class="sep">·</span><span>{issue.priority!.toLowerCase()}</span></Show><span class="sep">·</span><span>#{issue.number}</span></span></span>
-          </a>}</For>
-        </div>
-      </Show>
       {/* Done is folded away by default: it is the part of the list you are finished
           with, and it grows forever. The count stays visible on the toggle. */}
       <Show when={showDone() && doneList().length}>
@@ -384,6 +374,7 @@ const issueKind=(issue:Issue)=>issueFacts()?.find(fact=>fact.issue.id===issue.id
           <For each={doneList()}>{todoRow}</For>
         </div>
       </Show>
+    </div>
     </div>
 
   </section>;

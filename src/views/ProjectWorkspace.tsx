@@ -2,7 +2,6 @@ import { For, Show, createEffect, createMemo, createResource, createSignal, onMo
 import { chatApi, type ChannelSummary } from "../api/chat";
 import { personalApi, type Todo } from "../api/personal";
 import { platformApi } from "../api/platform";
-import { planningApi } from "../api/issues";
 import { pipelinesApi } from "../api/pipelines";
 import { currentUser, humanError, profileId, profiles, projects, reloadProfiles, reloadProjects, setProjectId } from "../session";
 import { linkProps, navigate, projectTabs, route, type ProjectTab, type Route } from "../router";
@@ -20,8 +19,11 @@ import Chat from "./Chat";
 import ProjectTasks from "./ProjectTasks";
 import Calendar from "./Calendar";
 import Documents from "./Documents";
-import Boards from "./Boards";
+import TaskRowEdit, { blankTask, focusTaskRow } from "../components/TaskRowEdit";
 import "../components/paper.css";
+import "../components/TaskList.css";
+import "../components/TaskRowEdit.css";
+import "./taskCards.css";
 import "./ChatSpaceLight.css";
 import "./ProjectWorkspace.css";
 
@@ -54,7 +56,7 @@ import "./ProjectWorkspace.css";
  * overview and carries `aria-current` there; the five tabs are the five sections.
  *
  * THE FRAME IS ALSO THE FRAME FOR WHAT IS NOT A TAB. Steering, Settings and a single
- * ticket render as `props.children` inside this same header — one tab row on every
+ * task render as `props.children` inside this same header — one tab row on every
  * project address, never a second one, and never a page that forgets where it is.
  */
 
@@ -86,7 +88,7 @@ export default function ProjectWorkspace(props: { children?: JSX.Element }): JSX
     const value = route().tab;
     return projectTabs.includes(value as ProjectTab) ? (value as ProjectTab) : undefined;
   };
-  /** This frame owns a tab only on its OWN view. Steering / Settings / a ticket are
+  /** This frame owns a tab only on its OWN view. Steering / Settings / a task are
    *  guests: the header stays, no tab lights, and the guest renders below it. */
   const ownsBody = () => route().view === "Project Workspace";
   const onOverview = () => ownsBody() && !tab();
@@ -202,7 +204,7 @@ export default function ProjectWorkspace(props: { children?: JSX.Element }): JSX
         body={
           <>
             <strong>{project()?.name ?? "This project"}</strong> is deleted for everyone, with its
-            tasks, tickets, calendar entries and knowledge. This cannot be undone.
+            tasks, tasks, calendar entries and knowledge. This cannot be undone.
           </>
         }
         confirmLabel="Delete project"
@@ -306,7 +308,7 @@ export default function ProjectWorkspace(props: { children?: JSX.Element }): JSX
           }
         >
           <Show when={ownsBody()} fallback={
-            /* Steering, Settings, one ticket. Same frame, same tab row, no second header. */
+            /* Steering, Settings, one task. Same frame, same tab row, no second header. */
             <EmbeddedScopeProvider scope={embeddedScope()}>
               <div class="pw-guest">{props.children}</div>
             </EmbeddedScopeProvider>
@@ -388,7 +390,7 @@ function ProjectOverview(props: {
         <Show when={!props.tasksLoading && !props.tasksError && !props.tasks.length}>
           {/* The offer must answer the sentence above it. "No task is running" is
               answered by starting one — not by leaving for the Dev tab, which was a
-              leftover from the ticket bridge and sent the reader away from the very
+              leftover from the task bridge and sent the reader away from the very
               thing the card is about. */}
           <EmptyState
             title="Nothing is running in this project"
@@ -553,8 +555,12 @@ function ProjectChats(props: {
 }
 
 /** ── DEV ──────────────────────────────────────────────────────────────────────
- *  Tickets and boards for this project — and the honest answer about linking a
- *  repository.
+ *  Dev work is TASKS with `category === 'dev'` — the same entity every other tab
+ *  edits, filtered to the kind of work that belongs here (GitHub/external tracker
+ *  items are these tasks with a LINK, see TaskMeta's Links row). There is no
+ *  separate task/board store any more; "New task" here simply opens the shared
+ *  row editor with the category pre-set — and the honest answer about linking a
+ *  repository, below.
  *
  *  WHAT I FOUND ABOUT "LINK A REPOSITORY" (evidence, not a guess):
  *   - `src-tauri/src/git.rs` registers repo_list / repo_add / repo_remove / repo_info /
@@ -573,16 +579,19 @@ function ProjectChats(props: {
  *  So a git repository CANNOT be attached to a project today. This renders that as an
  *  honest empty state rather than a dead control, and says exactly what is missing. */
 function ProjectDev(props: { projectId: string }): JSX.Element {
-  const [tickets] = createResource(
-    () => props.projectId,
-    async (id) => {
-      if (!id) return { open: 0, total: 0 };
-      const [issues, statuses] = await Promise.all([planningApi.issues({ project_id: id }), planningApi.statuses(id)]);
-      const resolved = new Set(statuses.filter((status) => status.resolved).map((status) => status.id));
-      const live = issues.filter((issue) => !issue.archived);
-      return { open: live.filter((issue) => !resolved.has(issue.status_id ?? "")).length, total: live.length };
-    },
+  const actingProfileId = () => currentUser()?.profile_id ?? profileId();
+  const [devTasks, { refetch: reloadDevTasks }] = createResource(
+    () => [props.projectId, actingProfileId()] as const,
+    ([id, profile]) => (id && profile ? personalApi.projectTodos(id, profile, true) : Promise.resolve([] as Todo[])),
   );
+  const tasks = createMemo(() => (devTasks() ?? []).filter((task) => task.category === "dev"));
+  const openTasks = createMemo(() => tasks().filter((task) => !task.done));
+  const nameOf = (id: string) => { const person = profiles()?.find((item) => item.id === id); return person?.display_name || person?.username || id; };
+  const [creating, setCreating] = createSignal(false);
+  const [editingId, setEditingId] = createSignal<string | null>(null);
+  const [devError, setDevError] = createSignal("");
+  const owns = (task: Todo) => task.profile_id === actingProfileId();
+  const closeEdit = (id: string) => { setEditingId(null); focusTaskRow(id); };
   // Package repositories genuinely bind to a project, so this list is real data.
   const [packageRepos] = createResource(
     () => props.projectId,
@@ -593,12 +602,60 @@ function ProjectDev(props: { projectId: string }): JSX.Element {
     <div class="pw-dev">
       <section class="pw-card">
         <SectionHeading
-          title="Tickets and boards"
-          meta={tickets() ? `${tickets()!.open} open of ${tickets()!.total}` : undefined}
+          title="Dev tasks"
+          meta={tasks().length ? `${openTasks().length} open of ${tasks().length}` : undefined}
+          actions={<GhostPill onClick={() => setCreating(true)}>New task</GhostPill>}
         />
-        {/* The board that used to be stacked on the ALL-PROJECTS page. It belongs to
-            the project you opened, which is here. */}
-        <Boards />
+        <Show when={devError()}><p class="pw-error" role="alert">{devError()}</p></Show>
+        <Show when={creating()}>
+          <div class="task-grid task-create-grid" aria-label="New dev task">
+            <div class="task-open">
+              <div class="task-row-editing">
+                <TaskRowEdit
+                  mode="create"
+                  task={blankTask(actingProfileId() ?? "", props.projectId, "dev")}
+                  fixedProject
+                  canEdit
+                  canComplete={false}
+                  ownerName={nameOf(actingProfileId() ?? "")}
+                  onCancel={() => setCreating(false)}
+                  onSaved={() => { setCreating(false); void reloadDevTasks(); }}
+                  onError={setDevError} />
+              </div>
+            </div>
+          </div>
+        </Show>
+        <Show when={!devTasks.loading && !tasks().length && !creating()}>
+          <EmptyState
+            title="No dev tasks in this project yet"
+            hint="A GitHub issue or PR becomes a dev task with a link, added from the task's Links row."
+            actions={<button type="button" class="primary" onClick={() => setCreating(true)}>New task</button>}
+          />
+        </Show>
+        <div class="task-grid" aria-label="Dev tasks">
+          <For each={tasks()}>
+            {(task) => (
+              <Show when={editingId() === task.id} fallback={
+                <article class="task-tile" classList={{ done: task.done }}>
+                  <button type="button" class="task-tile-body" data-task-row={task.id} aria-label={`Edit ${task.content}`} onClick={() => setEditingId(task.id)}>
+                    <span class="task-tile-title">{task.content}</span>
+                    <span class="task-tile-meta">{task.assignee_ids.length ? task.assignee_ids.map(nameOf).join(", ") : "Unassigned"}<Show when={(task.links ?? []).length}><span class="sep">·</span>{(task.links ?? []).length} link{(task.links ?? []).length === 1 ? "" : "s"}</Show></span>
+                  </button>
+                </article>
+              }>
+                <div class="task-open">
+                  <div class="task-row-editing">
+                    <TaskRowEdit task={task} fixedProject canEdit={owns(task)} canComplete={owns(task) || task.assignee_ids.includes(actingProfileId() ?? "")}
+                      ownerName={nameOf(task.profile_id)}
+                      onCancel={() => closeEdit(task.id)}
+                      onSaved={() => { closeEdit(task.id); void reloadDevTasks(); }}
+                      onError={setDevError} />
+                  </div>
+                </div>
+              </Show>
+            )}
+          </For>
+        </div>
       </section>
 
       <section class="pw-card">
@@ -628,7 +685,7 @@ function ProjectDev(props: { projectId: string }): JSX.Element {
             this component's doc comment. The offer that IS real is the git client. */}
         <EmptyState
           title="A git repository cannot be linked to a project yet"
-          hint="Repositories are registered per machine by their filesystem path (repos.json) and carry no project. Binding one would need a stored project↔repository row and a command to write it; until then this tab shows the project's tickets, boards and package repositories, which are real."
+          hint="Repositories are registered per machine by their filesystem path (repos.json) and carry no project. Binding one would need a stored project↔repository row and a command to write it; until then this tab shows the project's tasks, boards and package repositories, which are real."
           actions={<GhostPill {...linkProps({ view: "Repos" })}>Open repositories →</GhostPill>}
         />
       </section>

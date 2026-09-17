@@ -9,6 +9,9 @@ import "./spaceLightOverrides.css";
 // Typography / control shape / spacing restatement (stage 5a). Imported AFTER
 // the generated colour layer: where both touch a control it must win.
 import "./spaceLightType.css";
+// Cross-app shared token source (see file header) — the pb-* Bloodborne
+// vocabulary, imported before palettes.css so `.palette-paleblood` can read it.
+import "./palettes/paleblood.tokens.css";
 // Palettes LAST: colour-only re-points of the base tokens the three sheets above
 // build on (src/theme.ts). Selector `.palette-x .theme-space-light` outranks them.
 import "./palettes.css";
@@ -17,13 +20,13 @@ import Dashboard from "./views/Dashboard";
 import Home from "./views/Home";
 import Development from "./views/Development";
 import Todo from "./views/Todo";
+import LedgerTodo from "./views/LedgerTodo";
+import { taskRoute, ledgerRoute } from "./taskRoutes";
 import Absences from "./views/Absences";
 import Projects from "./views/Projects";
 import Repos from "./views/Repos";
 import Reviews from "./views/Reviews";
 import DevEnvironments from "./views/DevEnvironments";
-import Issues from "./views/Issues";
-import Boards from "./views/Boards";
 import Chat from "./views/Chat";
 import Inbox from "./views/Inbox";
 import Documents from "./views/Documents";
@@ -60,15 +63,16 @@ import { isMobileSetup } from "./mobile";
 import { activeView, createHashAdapter, createPathAdapter, initRouter, linkEntity, linkProps, registerViews, route, setAvailableViews, setRoutePending } from "./router";
 import { defaultView, financeVisible, groupOfView, navLayout, setFinanceAllowed, viewLabel, visibleGroups, type NavGroup } from "./nav";
 
-type View = { name:string; icon:IconName; component:Component };
+type View = { name:string; icon:IconName; component:Component; slug?:string; aliases?:string[] };
 type AppProps = { online?: boolean };
 // Chat-first destinations. They are ordinary registered views: reachable from every nav
 // layout, deep-linkable, and normalized by the same router policy as the rest.
 const homeView:View={name:"Home",icon:"home",component:Home};
 const developmentView:View={name:"Development",icon:"target",component:Development};
-const personalViews:View[]=[homeView,{name:"Dashboard",icon:"home",component:Dashboard},{name:"To-Do",icon:"check",component:Todo},{name:"Absences",icon:"clock-nav",component:Absences}];
+
+const personalViews:View[]=[homeView,{name:"Dashboard",icon:"home",component:Dashboard},{...taskRoute,icon:"check",component:Todo},{...ledgerRoute,icon:"check",component:LedgerTodo},{name:"Absences",icon:"clock-nav",component:Absences}];
 const localOnlyViews:View[]=[{name:"Repos",icon:"repo",component:Repos},{name:"Code Reviews",icon:"review",component:Reviews},{name:"Pipelines",icon:"pipeline",component:Pipelines},{name:"CRM",icon:"columns",component:CRM}];
-const workspaceViews:View[]=[{name:"Projects",icon:"layers",component:Projects},...localOnlyViews,{name:"Issues",icon:"target",component:Issues},{name:"Boards",icon:"columns",component:Boards},{name:"Chat",icon:"chat",component:Chat},{name:"Inbox",icon:"inbox",component:Inbox},{name:"Documents",icon:"book-nav",component:Documents},{name:"Blogs",icon:"book",component:Blogs},{name:"Calendar",icon:"calendar-nav",component:Calendar},{name:"Meetings",icon:"calendar-nav",component:Meetings},{name:"Dev Environments",icon:"repo",component:DevEnvironments},{name:"Packages",icon:"package",component:Packages},{name:"Members",icon:"org",component:Members},{name:"Locations",icon:"org",component:Locations},{name:"Admin",icon:"settings",component:Admin},{name:"Applications",icon:"grid",component:Applications}];
+const workspaceViews:View[]=[{name:"Projects",icon:"layers",component:Projects},...localOnlyViews,{name:"Chat",icon:"chat",component:Chat},{name:"Inbox",icon:"inbox",component:Inbox},{name:"Documents",icon:"book-nav",component:Documents},{name:"Blogs",icon:"book",component:Blogs},{name:"Calendar",icon:"calendar-nav",component:Calendar},{name:"Meetings",icon:"calendar-nav",component:Meetings},{name:"Dev Environments",icon:"repo",component:DevEnvironments},{name:"Packages",icon:"package",component:Packages},{name:"Members",icon:"org",component:Members},{name:"Locations",icon:"org",component:Locations},{name:"Admin",icon:"settings",component:Admin},{name:"Applications",icon:"grid",component:Applications}];
 const usersView:View={name:"Users",icon:"users",component:Users};
 const settingsView:View={name:"Settings",icon:"settings",component:Settings};
 const leadsView:View={name:"Leads",icon:"inbox",component:Leads};
@@ -88,7 +92,7 @@ const projectSettingsView:View={name:"Project Settings",icon:"settings",componen
    statement that this view has no content OUTSIDE its frame. */
 const projectWorkspaceView:View={name:"Project Workspace",icon:"layers",component:()=>null};
 /* ONE FRAME FOR EVERY PROJECT ADDRESS. Any route carrying a project renders inside
-   ProjectWorkspace: its own five tabs, and Steering / Settings / a single ticket as
+   ProjectWorkspace: its own five tabs, and Steering / Settings / a single task as
    guests under the SAME tab row. That is what removes the double system — there is
    no longer a `ProjectContext` drawing a second, six-entry row above all of them. */
 const projectFramed=()=>!!route().projectId;

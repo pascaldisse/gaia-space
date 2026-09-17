@@ -1,21 +1,24 @@
-import { For, Show, createEffect, createMemo, createResource, createSignal, type JSX } from "solid-js";
+import { For, Show, createEffect, createMemo, createResource, createSignal, onCleanup, type JSX } from "solid-js";
 import { chatApi, type Channel } from "../api/chat";
 import { selectedChannel } from "../chatChannelSelection";
 import { isDirectMessage, dmLabel } from "../chatPartition";
 import { Avatar } from "../components/Avatar";
 import { bumpChannels } from "../chatIdentity";
-import { meetingsApi } from "../api/meetings";
+import { meetingsApi, type Meeting } from "../api/meetings";
+import { buildChannelCallMeeting, CALL_RING_SECONDS, channelCallLabel, findLiveChannelMeeting, resolveChannelCall } from "./channelCall";
+import { consumeChannelCallJoin, pendingChannelCallJoin } from "./channelCallJoin";
+import CallPanel from "./CallPanel";
 import { personalApi } from "../api/personal";
-import { currentUser, humanError, profileId, profiles, projects, reloadProfiles, reloadProjects } from "../session";
+import { currentUser, humanError, isWeb, profileId, profiles, projects, reloadProfiles, reloadProjects } from "../session";
 import { channelTabs, linkProps, navigate, route } from "../router";
 import { GhostPill, PillMenu } from "../components/controls";
 import ConfirmDialog from "../components/ConfirmDialog";
-import DeleteButton from "../components/DeleteButton";
+import ContextMenu from "../components/ContextMenu";
 import EmptyState from "../components/EmptyState";
 import Chat from "./Chat";
 import "./ChannelWorkspace.css";
+import "./Meetings.css";
 import { UI_LOCALE } from "../calendar";
-import { metricTone } from "../statusTone";
 
 /**
  * The channel as a workspace (GAIA Space redesign, stage 2).
@@ -69,6 +72,7 @@ const WORK_TABS: Partial<Record<TabKey, string | undefined>> = {
   notes: "chats",
 };
 
+const CHANNEL_CALL_REFRESH_MS = Number(import.meta.env.VITE_CHANNEL_CALL_REFRESH_MS) || 5_000;
 const hhmm = (seconds: number) =>
   new Date(seconds * 1000).toLocaleTimeString(UI_LOCALE, { hour: "2-digit", minute: "2-digit" });
 
@@ -121,7 +125,53 @@ export default function ChannelWorkspace(): JSX.Element {
   const [statusOpen, setStatusOpen] = createSignal(false);
   const [teamOpen, setTeamOpen] = createSignal(false);
   // Meetings carry `channel_id`, so "next meeting" is genuinely channel-scoped here.
-  const [meetings] = createResource(actingProfileId, (id) => (id ? meetingsApi.list(id) : Promise.resolve([])));
+  const [meetings, { refetch: refetchMeetings }] = createResource(actingProfileId, (id) =>
+ id ? meetingsApi.list(id) : Promise.resolve<Meeting[]>([]),
+);
+createEffect(() => {
+ if (!actingProfileId()) return;
+ const timer = window.setInterval(() => { void refetchMeetings(); }, CHANNEL_CALL_REFRESH_MS);
+ onCleanup(() => window.clearInterval(timer));
+});
+const [openCall, setOpenCall] = createSignal<{ meeting: Meeting; audioOnly: boolean; autoJoin?: boolean }>();
+const openExistingCall = (meeting: Meeting, audioOnly = false) => setOpenCall({ meeting, audioOnly, autoJoin: true });
+createEffect(() => {
+  // Global shell accepts on every route. Once its navigation lands here, this is the
+  // one existing CallPanel join path (and no duplicate LiveKit join implementation).
+  if (!pendingChannelCallJoin() || !channelId()) return;
+  const request = consumeChannelCallJoin(channelId());
+  if (request) openExistingCall(request.meeting, request.audioOnly);
+});
+const startCall = async (audioOnly: boolean) => {
+ const current = channel(); const organizer = actingProfileId();
+ setMemberError("");
+ if (!organizer) { setMemberError("Sign-in still loading"); return; }
+ if (!current) { setMemberError("Conversation still loading"); return; }
+ const existing = resolveChannelCall(meetings(), current.id);
+ if (existing) { openExistingCall(existing, audioOnly); return; }
+ const meeting = buildChannelCallMeeting(current, organizer);
+ try { const created = await meetingsApi.createChannelCall(meeting); setOpenCall({ meeting: created, audioOnly, autoJoin: true }); await refetchMeetings(); }
+ catch (reason) { setMemberError(humanError(reason)); }
+};
+const callUnavailable = () => !channel() || !actingProfileId();
+const callTitle = (label: "Call" | "Video") =>
+ callUnavailable() ? (!actingProfileId() ? "Sign-in still loading" : "Conversation still loading") : label;
+const liveMeeting = () => findLiveChannelMeeting(meetings(), channelId(), actingProfileId());
+const channelCall = () => resolveChannelCall(meetings(), channelId());
+const [callParticipants] = createResource(
+  () => [channelCall()?.id, actingProfileId()] as const,
+  ([meetingId, identity]) => meetingId && identity ? meetingsApi.participants(meetingId, identity) : Promise.resolve([]),
+);
+const callerCall = () => {
+  const meeting = channelCall();
+  return meeting?.organizer_id === actingProfileId() ? meeting : undefined;
+};
+const callerCallState = () => {
+  const meeting = callerCall();
+  if (!meeting) return "";
+  const started = meeting.video_started_at ?? meeting.starts_at;
+  return (callParticipants()?.length ?? 0) <= 1 && Math.floor(Date.now() / 1_000) - started <= CALL_RING_SECONDS ? "Ringing…" : "No answer";
+};
 
   const memberCount = () => members()?.length ?? 0;
   /** "Replies needed" = unread mentions of me IN THIS CHANNEL. */
@@ -202,6 +252,10 @@ export default function ChannelWorkspace(): JSX.Element {
   // a stale copy, or the name and description would travel back in time with it.
   const [binding, setBinding] = createSignal(false);
   const [bindError, setBindError] = createSignal("");
+  // Revealed only from the `⋯` menu's "Attach to project…" item — the picker used to
+  // sit permanently in the header for every project-less channel, whether or not
+  // anyone had asked for it.
+  const [showAttach, setShowAttach] = createSignal(false);
   const attachToProject = async (projectId: string) => {
     const current = channel();
     if (!current || !projectId) return;
@@ -209,12 +263,18 @@ export default function ChannelWorkspace(): JSX.Element {
     try {
       await chatApi.updateChannel({ ...current, project_id: projectId });
       await refetchChannel();
+      setShowAttach(false);
     } catch (reason) {
       setBindError(humanError(reason));
     } finally {
       setBinding(false);
     }
   };
+  const canAttach = () => !project() && channel()?.content_type !== "dm";
+  // The header's one overflow menu (same component and pattern as views/Chat.tsx's
+  // `channelMenu`) — Call and Video stay as their own buttons (frequent, one click),
+  // everything else moves behind `⋯`.
+  const [channelMenu, setChannelMenu] = createSignal<{ x: number; y: number }>();
 
 
   /* ── DELETING A CONVERSATION ──────────────────────────────────────────────
@@ -267,17 +327,16 @@ export default function ChannelWorkspace(): JSX.Element {
         <div class="cw-title-row">
           <div class="cw-title">
             <Show when={project()}>{(value) => <div class="cw-kicker">{value().name}</div>}</Show>
-            <Show when={channel()?.content_type === "dm"} fallback={<h1># {channelTitle()}</h1>}>
-            <div class="cw-dm-title"><Avatar name={channelTitle()} avatarUrl={selectedChannel()?.avatarUrl} size={30} /><h1>{channelTitle()}</h1><span class="cw-presence" aria-label="Available" /></div>
-          </Show>
-            <Show when={channel()?.description}>{(text) => <p class="cw-subtitle">{text()}</p>}</Show>
-            {/* A FACT IS NOT A LABEL ON A CONTROL. "Not part of a project yet" used to
-                be glued to the left of the picker in a row of its own; it belongs with
-                the channel's other facts, and the ACT belongs in the action row below —
-                the same rule every other surface follows. */}
-            <Show when={!project() && channel()?.content_type !== "dm"}>
-              <p class="cw-subtitle">Not part of a project yet</p>
-            </Show>
+            <div class="cw-title-line">
+              <Show when={channel()?.content_type === "dm"} fallback={<h1># {channelTitle()}</h1>}>
+                <div class="cw-dm-title"><Avatar name={channelTitle()} avatarUrl={selectedChannel()?.avatarUrl} size={30} /><h1>{channelTitle()}</h1><span class="cw-presence" aria-label="Available" /></div>
+              </Show>
+              {/* THE CHANNEL'S KIND, in one word, where the title already is — a fact,
+                  not a control. DMs already say who they are with a face and a name. */}
+              <Show when={channel() && channel()?.content_type !== "dm"}>
+                <span class="cw-type-chip">{channel()?.content_type}</span>
+              </Show>
+            </div>
           </div>
           <div class="cw-metrics">
             {/* THE COUNT AND THE TEAM RAIL ARE NOW THE SAME PEOPLE. `list_channel_members`
@@ -319,34 +378,33 @@ export default function ChannelWorkspace(): JSX.Element {
                 )}
               </Show>
             </Show>
-            {/* Waiting on me -> amber, but ONLY when there is something to wait for:
-                `metricTone` refuses a tone to zero, so this chip can never become a
-                coloured warning about nothing (audit §3.7). */}
-            <Show when={repliesNeeded() > 0}>
-              <span class="cw-pill" classList={{ [metricTone(repliesNeeded(), "amber") || "untoned"]: true }}>
-                <strong>{repliesNeeded()}</strong> replies needed
-              </span>
-            </Show>
-            {/* No channel-bound meeting -> no chip. The prototype's "14:30 Meeting" has no
-                other honest source: meetings bind to a channel, never to a project. */}
-            <Show when={nextMeeting()}>
-              {(meeting) => <span class="cw-pill"><strong>{hhmm(meeting().starts_at)}</strong> Meeting</span>}
-            </Show>
-            {/* The same red button every other surface uses — red at rest, so the act
-                is recognised before it is read. It was this view's own grey control,
-                which is exactly the inconsistency the shared button exists to end. */}
-            <DeleteButton label="Delete conversation" onRequest={() => setConfirmDelete(true)} />
+            {/* Call and Video stay direct buttons — the two acts reached from here most
+                often. Everything else (attach, delete) now lives behind `⋯`. */}
+            <button type="button" class="ghost small" aria-label="Call" title={callTitle("Call")} disabled={callUnavailable()} onClick={() => void startCall(true)}>Call</button>
+<button type="button" class="ghost small" aria-label="Video" title={callTitle("Video")} disabled={callUnavailable()} onClick={() => void startCall(false)}>Video</button>
+<button type="button" class="ghost small" aria-label="Channel actions" onClick={(event) => setChannelMenu({ x: event.clientX, y: event.clientY })}>⋯</button>
           </div>
         </div>
+        <Show when={channelMenu()}>{(menu) => <ContextMenu x={menu().x} y={menu().y} onClose={() => setChannelMenu(undefined)} items={[
+          ...(canAttach() ? [{ label: "Attach to project…", onSelect: () => setShowAttach(true) }] : []),
+          { label: "Delete conversation", danger: true, onSelect: () => setConfirmDelete(true) },
+        ]} />}</Show>
+
+        {/* A fact, not a control: shown only when the channel actually has one, and
+            never the placeholder "Not part of a project yet" that used to sit here
+            whether or not there was anything to say. */}
+        <Show when={channel()?.description}>{(text) => <p class="cw-subtitle">{text()}</p>}</Show>
+        <Show when={memberError()}>
+          <p class="cw-error" role="alert">{memberError()}</p>
+        </Show>
 
         <Show when={deleteError()}>
           <p class="cw-error" role="alert">{deleteError()}</p>
         </Show>
 
-        {/* A channel without a project has no work surfaces. The one act that would
-            create them lives where every act lives: the action row under the
-            introduction, in the one size system, not floating in the header. */}
-        <Show when={!project() && channel()?.content_type !== "dm"}>
+        {/* The attach flow: revealed on request from the `⋯` menu, not permanently
+            rendered under every project-less channel's header. */}
+        <Show when={canAttach() && showAttach()}>
           <nav class="page-actionbar cw-actionbar">
             <PillMenu
               label="Attach to project"
@@ -364,6 +422,7 @@ export default function ChannelWorkspace(): JSX.Element {
             <Show when={bindError()}><span class="cw-attach-error" role="alert">{bindError()}</span></Show>
           </nav>
         </Show>
+
         {/* NO TAB ROW. The one link out is to the project this conversation belongs
             to — where its tasks, calendar, knowledge and overview all live, under the
             project's own single row of tabs. */}
@@ -377,10 +436,13 @@ export default function ChannelWorkspace(): JSX.Element {
             </div>
           )}
         </Show>
+        <Show when={liveMeeting()}>{(meeting) => <div class="cw-live-call" role="status">{channelCallLabel(meeting())} <span aria-hidden="true">·</span> <button type="button" class="ghost small" onClick={() => openExistingCall(meeting())}>Join</button></div>}</Show>
+        <Show when={callerCall()}>{(meeting) => <div class="cw-live-call cw-caller-call" role="status"><strong>{callerCallState()}</strong><span aria-hidden="true">·</span><span>{meeting().title}</span></div>}</Show>
       </header>
 
       <div class="cw-body" classList={{ "with-rail": !!channelProjectId() || teamOpen() }}>
         <section class="cw-panel cw-chat">
+          <Show when={openCall()}>{(call) => <div class="cw-call-panel"><CallPanel meeting={call().meeting} audioOnly={call().audioOnly} autoJoin={call().autoJoin} identity={isWeb() ? currentUser()?.profile_id ?? "" : actingProfileId() ?? ""} displayName={isWeb() ? currentUser()?.display_name ?? "" : nameOf(actingProfileId())}/></div>}</Show>
           {/* THE ONLY BODY THIS SURFACE HAS NOW: the messages. The five guest views
               that used to be mounted here are mounted by views/ProjectWorkspace.tsx
               instead, under the project's single tab row — one home each, not two.
@@ -455,7 +517,7 @@ export default function ChannelWorkspace(): JSX.Element {
                 <section id="cw-project-status" class="cw-card">
                   <h2>{project()?.name ?? "Project"} · Project status</h2>
                   <div class="cw-stat"><span>Open tasks</span><strong>{dashboard()?.open_todos ?? "—"}</strong></div>
-                  <div class="cw-stat"><span>Tickets</span><strong>{dashboard()?.open_issues ?? "—"}</strong></div>
+                  <div class="cw-stat"><span>Tasks</span><strong>{dashboard()?.open_issues ?? "—"}</strong></div>
                   <div class="cw-stat"><span>Next meeting</span><strong>{nextMeeting() ? hhmm(nextMeeting()!.starts_at) : "—"}</strong></div>
                   <div class="cw-stat"><span>Replies needed</span><strong>{repliesNeeded()}</strong></div>
                 </section>

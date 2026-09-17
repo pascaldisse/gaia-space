@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 140;
+pub const SCHEMA_VERSION: i64 = 144;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -871,17 +871,42 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if version < 132 && table_exists(&tx, "projects")? {
         add_column_if_missing(&tx, "projects", "lead_id", "TEXT REFERENCES profiles(id)")?;
     }
+    // V142: project visibility gates anonymous hosted Git reads. Existing projects remain private.
+    if version < 142 && table_exists(&tx, "projects")? {
+        add_column_if_missing(
+            &tx,
+            "projects",
+            "visibility",
+            "TEXT NOT NULL DEFAULT 'private' CHECK(visibility IN ('private','public'))",
+        )?;
+    }
+    // V143: tickets become tasks; legacy ticket records remain queryable under *_legacy.
+    // Historical partial fixtures may claim a newer version without the complete work schema;
+    // do not invent or rename tables in those deliberately incomplete databases.
+    if version < 143 {
+        tx.execute_batch(SCHEMA_V143_TODO_LINKS)?;
+        if v143_ready(&tx)? { v143_migrate(&tx)?; }
+    }
+    // V144: task unification owns the live work search corpus. V143 renamed issue
+    // tables; remove stale index rows/triggers without touching *_legacy evidence.
+    if version < 144 && table_exists(&tx, "todos")? {
+        tx.execute_batch(SCHEMA_V144_TODO_SEARCH)?;
+    }
+    // V141: durable hosted Git repository metadata; bare objects live under data_dir/git/.
+    if version < 141 && table_exists(&tx, "projects")? {
+        tx.execute_batch(SCHEMA_V141)?;
+    }
     // V140: completion is distinct from archival. Existing projects are open by default;
-// no row is moved or rewritten during this additive migration.
-if version < 140 && table_exists(&tx, "projects")? {
-add_column_if_missing(
-&tx,
-"projects",
-"status",
-"TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','done'))",
-)?;
-}
-// V133: work created out of a conversation must keep pointing back at it. Todos
+    // no row is moved or rewritten during this additive migration.
+    if version < 140 && table_exists(&tx, "projects")? {
+        add_column_if_missing(
+            &tx,
+            "projects",
+            "status",
+            "TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','done'))",
+        )?;
+    }
+    // V133: work created out of a conversation must keep pointing back at it. Todos
     // already carry the generic `(source_entity_type, source_entity_id)` anchor; issues
     // and meetings did not, so a ticket or a date born in a channel lost its origin the
     // moment it was saved. Two nullable TEXT columns each, deliberately UNCONSTRAINED
@@ -1218,7 +1243,100 @@ pub(crate) const SCHEMA_V98: &str = r#"
 CREATE TABLE IF NOT EXISTS profile_email_statuses (profile_id TEXT PRIMARY KEY REFERENCES profiles(id) ON DELETE CASCADE, status TEXT NOT NULL DEFAULT 'unverified' CHECK(status IN ('unverified','verified','bounced')), verified_at INTEGER);
 CREATE TABLE IF NOT EXISTS profile_messenger_contacts (id TEXT PRIMARY KEY, profile_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE, contact_type TEXT NOT NULL, login TEXT NOT NULL, deep_link TEXT, UNIQUE(profile_id,contact_type,login));
 "#;
-/// V99: durable principal identity abstraction.
+pub(crate) const SCHEMA_V143_TODO_LINKS: &str = r#"
+CREATE TABLE IF NOT EXISTS todo_links (
+ id TEXT PRIMARY KEY,
+ todo_id TEXT NOT NULL REFERENCES todos(id) ON DELETE CASCADE,
+ kind TEXT NOT NULL CHECK(kind IN ('EXTERNAL','TASK')),
+ url TEXT,
+ target_id TEXT,
+ title TEXT,
+ created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+ CHECK((kind='EXTERNAL' AND url IS NOT NULL AND target_id IS NULL) OR (kind='TASK' AND target_id IS NOT NULL AND url IS NULL)),
+ UNIQUE(todo_id,kind,target_id),
+ UNIQUE(todo_id,url)
+);
+CREATE INDEX IF NOT EXISTS todo_links_todo ON todo_links(todo_id);
+"#;
+/// V144: rebuild live work search from todos after V143 retired issues.
+pub(crate) const SCHEMA_V144_TODO_SEARCH: &str = r#"
+DROP TRIGGER IF EXISTS search_issues_ai;
+DROP TRIGGER IF EXISTS search_issues_au;
+DROP TRIGGER IF EXISTS search_issues_ad;
+DELETE FROM search_index WHERE entity_type='issue';
+INSERT INTO search_index(entity_type,entity_id,title,body,breadcrumb)
+SELECT 'todo',id,content,coalesce(notes,''),'Task · ' || coalesce(project_id,'personal') FROM todos WHERE done=0;
+CREATE TRIGGER IF NOT EXISTS search_todos_ai AFTER INSERT ON todos WHEN new.done=0 BEGIN
+  INSERT INTO search_index(entity_type,entity_id,title,body,breadcrumb) VALUES('todo',new.id,new.content,coalesce(new.notes,''),'Task · ' || coalesce(new.project_id,'personal'));
+END;
+CREATE TRIGGER IF NOT EXISTS search_todos_au AFTER UPDATE ON todos BEGIN
+  DELETE FROM search_index WHERE entity_type='todo' AND entity_id=old.id;
+  INSERT INTO search_index(entity_type,entity_id,title,body,breadcrumb) SELECT 'todo',new.id,new.content,coalesce(new.notes,''),'Task · ' || coalesce(new.project_id,'personal') WHERE new.done=0;
+END;
+CREATE TRIGGER IF NOT EXISTS search_todos_ad AFTER DELETE ON todos BEGIN
+  DELETE FROM search_index WHERE entity_type='todo' AND entity_id=old.id;
+END;
+"#;
+/// V143: one work entity = todo. Copy before renaming so every legacy fact survives.
+pub(crate) const SCHEMA_V143: &str = r#"
+
+INSERT INTO todos(id,profile_id,content,notes,due_date,project_id,done,category,content_kind,created_at)
+SELECT i.id,COALESCE(i.created_by,p.created_by,(SELECT id FROM profiles ORDER BY created_at, rowid LIMIT 1)),i.title,NULLIF(i.description,''),i.due_date,i.project_id,
+ CASE WHEN COALESCE(s.resolved,0)=1 OR i.archived=1 THEN 1 ELSE 0 END,
+ CASE WHEN EXISTS(SELECT 1 FROM issue_tracker_links itl WHERE itl.issue_id=i.id AND itl.target_kind='EXTERNAL') THEN 'dev' ELSE NULL END,
+ 'markdown',i.created_at
+FROM issues i
+JOIN projects p ON p.id=i.project_id
+LEFT JOIN issue_statuses s ON s.id=i.status_id
+WHERE NOT EXISTS(SELECT 1 FROM todos t WHERE t.id=i.id);
+
+INSERT OR IGNORE INTO todo_assignees(todo_id,profile_id)
+SELECT ia.issue_id,ia.profile_id FROM issue_assignees ia JOIN todos t ON t.id=ia.issue_id;
+INSERT OR IGNORE INTO todo_assignees(todo_id,profile_id)
+SELECT i.id,i.assignee_id FROM issues i JOIN todos t ON t.id=i.id WHERE i.assignee_id IS NOT NULL;
+
+INSERT OR IGNORE INTO todo_links(id,todo_id,kind,url,target_id,title)
+SELECT id,issue_id,'EXTERNAL',url,NULL,title FROM issue_tracker_links WHERE target_kind='EXTERNAL';
+INSERT OR IGNORE INTO todo_links(id,todo_id,kind,url,target_id,title)
+SELECT id,issue_id,'TASK',NULL,target_id,title FROM issue_tracker_links WHERE target_kind='ISSUE';
+INSERT OR IGNORE INTO todo_links(id,todo_id,kind,url,target_id,title)
+SELECT id,issue_id,'EXTERNAL','/reviews/' || target_id,NULL,'Review' FROM issue_tracker_links WHERE target_kind='REVIEW';
+INSERT OR IGNORE INTO todo_links(id,todo_id,kind,url,target_id,title)
+SELECT id,issue_id,'TASK',NULL,linked_issue_id,NULL FROM issue_links;
+
+UPDATE todos
+SET notes=NULLIF(COALESCE(notes,'') || COALESCE((
+ SELECT group_concat(rendered,'') FROM (
+  SELECT '\n\n---\n**' || COALESCE((SELECT display_name FROM profiles WHERE id=ic.author_id),ic.author_id,'unknown') || ' · ' || datetime(ic.created_at,'unixepoch') || '**\n' || ic.body AS rendered
+  FROM issue_comments ic WHERE ic.issue_id=todos.id ORDER BY ic.created_at,ic.id
+ )
+),''),'')
+WHERE id IN (SELECT id FROM issues);
+
+ALTER TABLE issues RENAME TO issues_legacy;
+ALTER TABLE issue_comments RENAME TO issue_comments_legacy;
+ALTER TABLE issue_activities RENAME TO issue_activities_legacy;
+ALTER TABLE issue_attachments RENAME TO issue_attachments_legacy;
+ALTER TABLE issue_tracker_links RENAME TO issue_tracker_links_legacy;
+ALTER TABLE issue_links RENAME TO issue_links_legacy;
+ALTER TABLE issue_assignees RENAME TO issue_assignees_legacy;
+ALTER TABLE issue_board_positions RENAME TO issue_board_positions_legacy;
+ALTER TABLE issue_tags RENAME TO issue_tags_legacy;
+"#;
+/// V141: durable hosted Git repository metadata.
+pub(crate) const SCHEMA_V141: &str = r#"
+CREATE TABLE IF NOT EXISTS hosted_repositories (
+ id TEXT PRIMARY KEY,
+ project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+ name TEXT NOT NULL,
+ description TEXT,
+ default_branch TEXT NOT NULL,
+ created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+ created_by TEXT REFERENCES profiles(id),
+ UNIQUE(project_id,name)
+);
+CREATE INDEX IF NOT EXISTS hosted_repositories_project ON hosted_repositories(project_id, name);
+"#;
 /// V130: per-profile document favourites (pointer rows, cascade with both sides).
 pub(crate) const SCHEMA_V130: &str = r#"
 CREATE TABLE IF NOT EXISTS document_favorites (
@@ -1246,6 +1364,7 @@ CREATE INDEX IF NOT EXISTS applications_owner_profile ON applications(owner_prof
 CREATE INDEX IF NOT EXISTS applications_owner_application ON applications(owner_application_id);
 "#;
 
+/// V99: durable principal identity abstraction.
 pub(crate) const SCHEMA_V99: &str = r#"
 CREATE TABLE IF NOT EXISTS principals (id TEXT PRIMARY KEY, kind TEXT NOT NULL CHECK(kind IN ('profile','application','external')), profile_id TEXT REFERENCES profiles(id) ON DELETE CASCADE, label TEXT NOT NULL, UNIQUE(profile_id));
 INSERT OR IGNORE INTO principals(id,kind,profile_id,label) SELECT 'profile:'||id,'profile',id,display_name FROM profiles;
@@ -2063,6 +2182,32 @@ fn table_exists(conn: &Connection, table: &str) -> Result<bool> {
     )?;
     Ok(n > 0)
 }
+fn v143_ready(conn: &Connection) -> Result<bool> {
+    for table in ["issues", "todos", "projects", "issue_statuses", "issue_assignees", "issue_tracker_links", "issue_links", "issue_comments", "issue_activities", "issue_attachments", "issue_board_positions", "issue_tags"] {
+        if !table_exists(conn, table)? { return Ok(false); }
+    }
+    let mut statement = conn.prepare("PRAGMA table_info(todos)")?;
+    let columns = statement.query_map([], |row| row.get::<_, String>(1))?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    Ok(["notes", "project_id", "content_kind", "category"].iter().all(|column| columns.iter().any(|name| name == column)))
+}
+/// V143 requires a non-null todo owner. A legacy row without either owner adopts
+/// the oldest profile; if none exists, reject the exact row before any V143 write.
+fn v143_migrate(conn: &Connection) -> Result<()> {
+    let missing_owner: std::result::Result<String, rusqlite::Error> = conn.query_row(
+        "SELECT i.id FROM issues i JOIN projects p ON p.id=i.project_id
+         WHERE i.created_by IS NULL AND p.created_by IS NULL
+           AND NOT EXISTS(SELECT 1 FROM profiles)
+           AND NOT EXISTS(SELECT 1 FROM todos t WHERE t.id=i.id)
+         ORDER BY i.rowid LIMIT 1", [], |row| row.get(0));
+    match missing_owner {
+        Ok(issue_id) => return Err(rusqlite::Error::InvalidParameterName(format!(
+            "V143 migration cannot assign profile to issue {issue_id}: profiles table is empty"))),
+        Err(rusqlite::Error::QueryReturnedNoRows) => {},
+        Err(error) => return Err(error),
+    }
+    conn.execute_batch(SCHEMA_V143)
+}
 fn add_column_if_missing(
     conn: &Connection,
     table: &str,
@@ -2087,6 +2232,53 @@ fn add_column_if_missing(
 mod tests {
     use super::*;
     use std::collections::BTreeSet;
+
+    #[test]
+    fn v143_null_owner_falls_back_to_oldest_profile() {
+        let temp = TempDb::new("gaia-space-v143-null-owner");
+        let conn = open_at(&temp).expect("owned schema-142 fixture");
+        conn.execute_batch("CREATE TABLE profiles(id TEXT PRIMARY KEY, username TEXT, display_name TEXT, created_at INTEGER);
+CREATE TABLE projects(id TEXT PRIMARY KEY, created_by TEXT, name TEXT, key TEXT, description TEXT, created_at INTEGER);
+CREATE TABLE todos(id TEXT PRIMARY KEY, profile_id TEXT NOT NULL, content TEXT NOT NULL, notes TEXT, due_date TEXT, project_id TEXT, done INTEGER NOT NULL DEFAULT 0, category TEXT, content_kind TEXT, created_at INTEGER);
+CREATE TABLE todo_assignees(todo_id TEXT, profile_id TEXT);
+CREATE TABLE issues(id TEXT PRIMARY KEY, project_id TEXT NOT NULL, created_by TEXT, title TEXT NOT NULL, description TEXT, due_date TEXT, status_id TEXT, archived INTEGER NOT NULL DEFAULT 0, assignee_id TEXT, created_at INTEGER);
+CREATE TABLE issue_statuses(id TEXT PRIMARY KEY, resolved INTEGER);
+CREATE TABLE issue_assignees(issue_id TEXT, profile_id TEXT);
+CREATE TABLE issue_tracker_links(id TEXT PRIMARY KEY, issue_id TEXT, target_kind TEXT, url TEXT, target_id TEXT, title TEXT);
+CREATE TABLE issue_links(id TEXT PRIMARY KEY, issue_id TEXT, linked_issue_id TEXT);
+CREATE TABLE issue_comments(id TEXT PRIMARY KEY, issue_id TEXT, author_id TEXT, created_at INTEGER, body TEXT);
+CREATE TABLE issue_activities(id TEXT PRIMARY KEY); CREATE TABLE issue_attachments(id TEXT PRIMARY KEY);
+CREATE TABLE issue_board_positions(id TEXT PRIMARY KEY); CREATE TABLE issue_tags(id TEXT PRIMARY KEY);
+CREATE TABLE search_index(entity_type TEXT, entity_id TEXT, title TEXT, body TEXT, breadcrumb TEXT);")
+            .expect("schema-142 fixture");
+        conn.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('first','first','First',1)", []).expect("first profile");
+        conn.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('later','later','Later',2)", []).expect("second profile");
+        conn.execute("INSERT INTO projects(id,created_by,name,key,description,created_at) VALUES('project',NULL,'Project','PRJ','',1)", []).expect("ownerless project");
+        conn.execute("INSERT INTO issues(id,project_id,created_by,title,description,due_date,status_id,archived,assignee_id,created_at) VALUES('issue-null-owner','project',NULL,'Legacy issue',NULL,NULL,NULL,0,NULL,3)", []).expect("ownerless issue");
+        conn.pragma_update(None, "user_version", 142).expect("schema-142 version");
+        migrate(&conn).expect("V143 fallback migration");
+        let owner: String = conn.query_row("SELECT profile_id FROM todos WHERE id='issue-null-owner'", [], |row| row.get(0)).expect("migrated todo");
+        assert_eq!(owner, "first");
+        let version: i64 = conn.query_row("PRAGMA user_version", [], |row| row.get(0)).expect("schema version");
+        assert!(version >= 144);
+        migrate(&conn).expect("already migrated is a no-op");
+    }
+
+    #[test]
+    fn v143_empty_profiles_names_the_unmigrated_issue() {
+        let conn = open_in_memory().expect("owned in-memory fixture");
+        conn.execute_batch("CREATE TABLE profiles(id TEXT PRIMARY KEY, created_at INTEGER);
+CREATE TABLE projects(id TEXT PRIMARY KEY, created_by TEXT);
+CREATE TABLE issues(id TEXT PRIMARY KEY, project_id TEXT, created_by TEXT);
+CREATE TABLE todos(id TEXT PRIMARY KEY, profile_id TEXT NOT NULL);")
+            .expect("minimal V143 fixture");
+        conn.execute("INSERT INTO projects(id,created_by) VALUES('project',NULL)", []).expect("ownerless project");
+        conn.execute("INSERT INTO issues(id,project_id,created_by) VALUES('issue-no-profile','project',NULL)", []).expect("ownerless issue");
+        let error = v143_migrate(&conn).expect_err("empty profiles returns a migration error");
+        assert!(error.to_string().contains("issue-no-profile"));
+        let todos: i64 = conn.query_row("SELECT count(*) FROM todos", [], |row| row.get(0)).expect("atomic check");
+        assert_eq!(todos, 0);
+    }
 
     // --- one database per process: path resolution ---------------------------
 
@@ -2257,36 +2449,17 @@ mod tests {
             .unwrap();
         assert_eq!(version, SCHEMA_VERSION);
         // The single assignee that existed before is now a row in the junction.
-        let carried: i64 = conn.query_row("SELECT count(*) FROM issue_assignees WHERE issue_id='legacy-issue' AND profile_id='pa'", [], |r| r.get(0)).unwrap();
+        let carried: i64 = conn.query_row("SELECT count(*) FROM todo_assignees WHERE todo_id='legacy-issue' AND profile_id='pa'", [], |r| r.get(0)).unwrap();
         assert_eq!(carried, 1, "the existing assignee survives the migration");
-        // A second person can now work the same issue.
-        conn.execute(
-            "INSERT INTO profiles(id,username,display_name,created_at) VALUES('pb','pb','Pb',0)",
-            [],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO issue_assignees(issue_id,profile_id) VALUES('legacy-issue','pb')",
-            [],
-        )
-        .unwrap();
-        let people: i64 = conn
-            .query_row(
-                "SELECT count(*) FROM issue_assignees WHERE issue_id='legacy-issue'",
-                [],
-                |r| r.get(0),
-            )
-            .unwrap();
+        // A second person can now work the same task.
+        conn.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('pb','pb','Pb',0)", []).unwrap();
+        conn.execute("INSERT INTO todo_assignees(todo_id,profile_id) VALUES('legacy-issue','pb')", []).unwrap();
+        let people: i64 = conn.query_row("SELECT count(*) FROM todo_assignees WHERE todo_id='legacy-issue'", [], |r| r.get(0)).unwrap();
         assert_eq!(people, 2);
-        // Deleting the issue takes its assignment rows with it.
-        conn.execute("DELETE FROM issues WHERE id='legacy-issue'", [])
-            .unwrap();
+        // Deleting the task takes its assignment rows with it.
+        conn.execute("DELETE FROM todos WHERE id='legacy-issue'", []).unwrap();
         let orphans: i64 = conn
-            .query_row(
-                "SELECT count(*) FROM issue_assignees WHERE issue_id='legacy-issue'",
-                [],
-                |r| r.get(0),
-            )
+            .query_row("SELECT count(*) FROM todo_assignees WHERE todo_id='legacy-issue'", [], |r| r.get(0))
             .unwrap();
         assert_eq!(orphans, 0, "junction rows never survive their issue");
         migrate(&conn).expect("idempotent");
@@ -2468,10 +2641,18 @@ mod tests {
         let conn = open_at(&temp).expect("database");
         migrate(&conn).expect("migrate to head");
         seed(&conn).expect("seed");
-        conn.execute("INSERT INTO projects(id,name,key,created_at) VALUES('legacy','Legacy','LEG',1)", []).unwrap();
+        conn.execute(
+            "INSERT INTO projects(id,name,key,created_at) VALUES('legacy','Legacy','LEG',1)",
+            [],
+        )
+        .unwrap();
         conn.pragma_update(None, "user_version", 139).unwrap();
         migrate(&conn).expect("v140");
-        let status: String = conn.query_row("SELECT status FROM projects WHERE id='legacy'", [], |r| r.get(0)).unwrap();
+        let status: String = conn
+            .query_row("SELECT status FROM projects WHERE id='legacy'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
         assert_eq!(status, "open");
         migrate(&conn).expect("v140 idempotent");
     }
@@ -2495,7 +2676,6 @@ mod tests {
             version, SCHEMA_VERSION,
             "schema version is monotonic and lands on head"
         );
-        assert_eq!(SCHEMA_VERSION, 140);
         let notes: Option<String> = conn
             .query_row("SELECT notes FROM todos WHERE id='legacy'", [], |r| {
                 r.get(0)
@@ -2536,12 +2716,11 @@ mod tests {
             println!("MIGRATION PROOF {label}: user_version={version}");
             version
         };
-        assert_eq!(head("after climb from 100"), 140);
-        assert_eq!(SCHEMA_VERSION, 140);
+        assert_eq!(head("after climb from 100"), SCHEMA_VERSION);
         // Every rung the merge touched exists exactly once, and by name.
         for (table, column) in [
             ("projects", "lead_id"),
-            ("issues", "source_entity_type"),
+            ("issues_legacy", "source_entity_type"),
             ("meetings", "source_entity_type"),
             ("todos", "category"),
             ("documents", "source_entity_type"),
@@ -2558,7 +2737,7 @@ mod tests {
         }
         assert!(table_exists(&conn, "channel_notes").expect("channel_notes"));
         migrate(&conn).expect("migrate() is idempotent at head");
-        assert_eq!(head("after second run at head"), 140);
+        assert_eq!(head("after second run at head"), SCHEMA_VERSION);
     }
 
     #[test]
@@ -2890,7 +3069,7 @@ mod tests {
         migrate(&conn).expect("V133 migration");
         let (title, kind, anchor): (String, Option<String>, Option<String>) = conn
             .query_row(
-                "SELECT title,source_entity_type,source_entity_id FROM issues WHERE id='legacy-issue'",
+                "SELECT title,source_entity_type,source_entity_id FROM issues_legacy WHERE id='legacy-issue'",
                 [],
                 |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
             )
@@ -3551,7 +3730,7 @@ mod v133_contract_tests {
         assert_eq!(
             conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
                 .unwrap(),
-            140
+            SCHEMA_VERSION
         );
         let before: String = conn.query_row("SELECT group_concat(sql, '\n') FROM sqlite_master WHERE type IN ('index','trigger') ORDER BY name", [], |r| r.get(0)).unwrap();
         migrate(&conn).unwrap();

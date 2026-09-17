@@ -1,10 +1,11 @@
-import { For, Show, createEffect, type JSX } from "solid-js";
-import { meetingLinkError, type Meeting } from "../api/meetings";
+import { For, Show, createEffect, createSignal, type JSX } from "solid-js";
+import { type Meeting } from "../api/meetings";
 import { localInput } from "../calendar";
 import { PillMenu } from "./controls";
 import DateTimeField from "./DateTimeField";
 import { ProfilePicker } from "./Pickers";
 import { profileId, profiles, reloadProfiles } from "../session";
+import MeetingWhereField, { meetingWhereKindOf, type MeetingWhereKind } from "../views/MeetingWhereField";
 import "./MeetingDrawer.css";
 
 /** ── WHY A DRAWER ───────────────────────────────────────────────────────────
@@ -32,7 +33,7 @@ import "./MeetingDrawer.css";
 
 export type MeetingForm = Pick<
   Meeting,
-  "title" | "description" | "starts_at" | "ends_at" | "rrule" | "location" | "organizer_id" | "channel_id" | "visibility" | "modification_preference" | "meeting_url"
+  "title" | "description" | "starts_at" | "ends_at" | "rrule" | "location" | "organizer_id" | "channel_id" | "visibility" | "modification_preference" | "meeting_url" | "video_provider"
 >;
 
 /** The repeats a person picks from a menu, each paired with the RRULE it means.
@@ -73,6 +74,19 @@ export default function MeetingDrawer(props: MeetingDrawerProps): JSX.Element {
   // The menu reflects the rule, so a hand-written RRULE shows as "Custom" rather
   // than snapping the display back to one of the presets.
   const preset = () => repeatPresetOf(props.form.rrule);
+  /* The choice itself lives here, seeded ONCE from whatever the form already carries
+   *  (editing a meeting booked before this control existed) — not re-derived on every
+   *  render, or picking "In person" and then typing nothing yet would snap the pill
+   *  back to "Video call" the instant the still-empty location is read. Each mount of
+   *  this dialog is one meeting's composer session, so mount-scoped state is enough. */
+  const [whereKind, setWhereKind] = createSignal<MeetingWhereKind>(meetingWhereKindOf(props.form));
+  const whereValue = () => ({ kind: whereKind(), meeting_url: props.form.meeting_url ?? "", location: props.form.location ?? "" });
+  const setWhere = (value: { kind: MeetingWhereKind; meeting_url: string; location: string }) => {
+    setWhereKind(value.kind);
+    props.setField("video_provider", value.kind === "video" ? "livekit" : null);
+    props.setField("meeting_url", value.kind === "link" ? (value.meeting_url || null) : null);
+    props.setField("location", value.kind === "in_person" ? (value.location || null) : null);
+  };
   /* Anyone in the workspace may be invited to a meeting — unlike a task assignee, whom
      the owning project's membership limits. So the list is the profiles minus archived
      ones, in TaskDrawer's control: pick people from a list, never type their ids. */
@@ -86,11 +100,6 @@ export default function MeetingDrawer(props: MeetingDrawerProps): JSX.Element {
   /** Only people who are not already coming — a menu that offers what is already true
    *  makes the reader check the list twice. */
   const addable = () => invitable().filter((person) => !props.invitees.includes(person.id));
-  /* Said while it is typed, not at submit: a link that will be refused must not look
-     accepted for the rest of the form. `meetings::normalize_meeting_url` enforces the
-     same rule natively, so this is the early word, not the only guard. */
-  const linkError = () => meetingLinkError(props.form.meeting_url);
-
   return (
     <div class="mtd-root" role="dialog" aria-modal="true" aria-label="New meeting">
       <div class="mtd-backdrop" onClick={() => props.onClose()} />
@@ -136,29 +145,12 @@ export default function MeetingDrawer(props: MeetingDrawerProps): JSX.Element {
             </div>
           </div>
 
-          <label class="mtd-field">
-            <span>Location</span>
-            <input class="mtd-input" placeholder="Room or building — where people physically go"
-              value={props.form.location ?? ""}
-              onInput={(event) => props.setField("location", event.currentTarget.value || null)} />
-          </label>
-
-          {/* THE MEETING HAPPENS ON SOMEBODY ELSE'S SERVICE. This product runs no
-              conferencing of its own for these dates, so the honest field is the plain
-              URL a person pastes out of Google Calendar, Zoom or Teams. No vendor is
-              parsed out of it: a URL is a URL, and a guessed provider would only be a
+          {/* THE MEETING HAPPENS ON THIS PRODUCT'S OWN CALL, SOMEBODY ELSE'S SERVICE, OR
+              NOWHERE ON A SCREEN AT ALL — one choice, exclusive by construction
+              (see MeetingWhereField / meetingWherePayload). No vendor is parsed out of
+              a pasted link: a URL is a URL, and a guessed provider would only be a
               second, wrong truth beside `video_provider`. */}
-          <label class="mtd-field">
-            <span>Meeting link</span>
-            <input class="mtd-input" type="url" inputmode="url" aria-label="Meeting link"
-              aria-invalid={linkError() ? "true" : undefined}
-              placeholder="https://meet.google.com/abc-defg-hij"
-              value={props.form.meeting_url ?? ""}
-              onInput={(event) => props.setField("meeting_url", event.currentTarget.value || null)} />
-            <Show when={linkError()} fallback={<span class="mtd-hint">Paste the Google Meet, Zoom or Teams address — the meeting then shows a Join button.</span>}>
-              <span class="mtd-field-error" role="alert">{linkError()}</span>
-            </Show>
-          </label>
+          <MeetingWhereField value={whereValue()} onChange={setWhere} />
 
           {/* Invitees are collected here but sent after the meeting exists: the invite
               command needs a meeting id, which create() mints. WHO IS COMING and WHO CAN

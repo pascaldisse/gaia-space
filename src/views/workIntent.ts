@@ -16,7 +16,7 @@ import { createSignal } from "solid-js";
  *  nobody should be able to bookmark or share "the tasks page with an open
  *  form", and the router stays free of view intent.
  */
-export type WorkIntent = "new-task" | "new-issue";
+export type WorkIntent = "new-task";
 
 const [intent, setIntent] = createSignal<WorkIntent | undefined>();
 

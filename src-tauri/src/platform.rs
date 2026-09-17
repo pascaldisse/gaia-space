@@ -1642,7 +1642,6 @@ const PROJECT_CLEARED: &[&str] = &[
 const PROJECT_SCOPED: &[&str] = &[
     // A gone entity must not leave a claim on anyone's attention behind.
     "notifications WHERE (entity_type='project' AND entity_id=?1) \
-     OR (entity_type='issue' AND entity_id IN (SELECT id FROM issues WHERE project_id=?1)) \
      OR (entity_type='todo' AND entity_id IN (SELECT id FROM todos WHERE project_id=?1)) \
      OR (entity_type='document' AND entity_id IN (SELECT id FROM documents WHERE container_type='project' AND container_id=?1))",
     // Documents of the project, then the folders they were filed in.
@@ -1657,24 +1656,7 @@ const PROJECT_SCOPED: &[&str] = &[
     "kb_book_owners WHERE book_id IN (SELECT id FROM document_folders WHERE container_type='project' AND container_id=?1)",
     "TREE document_folders WHERE container_type='project' AND container_id=?1 \
      AND NOT EXISTS(SELECT 1 FROM document_folders child WHERE child.parent_id=document_folders.id)",
-    // Issue tracker: attachments of an issue, then the issues, then their statuses.
-    "TREE checklist_items WHERE checklist_id IN (SELECT ck.id FROM checklists ck JOIN issues i ON i.id=ck.issue_id WHERE i.project_id=?1) \
-     AND NOT EXISTS(SELECT 1 FROM checklist_items child WHERE child.parent_id=checklist_items.id)",
-    "checklists WHERE issue_id IN (SELECT id FROM issues WHERE project_id=?1)",
-    "issue_activities WHERE issue_id IN (SELECT id FROM issues WHERE project_id=?1)",
-    "issue_assignees WHERE issue_id IN (SELECT id FROM issues WHERE project_id=?1)",
-    "issue_attachments WHERE issue_id IN (SELECT id FROM issues WHERE project_id=?1)",
-    "issue_comments WHERE issue_id IN (SELECT id FROM issues WHERE project_id=?1)",
-    "issue_links WHERE issue_id IN (SELECT id FROM issues WHERE project_id=?1) \
-     OR linked_issue_id IN (SELECT id FROM issues WHERE project_id=?1)",
-    "issue_tags WHERE issue_id IN (SELECT id FROM issues WHERE project_id=?1) \
-     OR tag_id IN (SELECT id FROM planning_tags WHERE project_id=?1)",
-    "issue_tracker_links WHERE issue_id IN (SELECT id FROM issues WHERE project_id=?1)",
-    "time_tracking_entries WHERE issue_id IN (SELECT id FROM issues WHERE project_id=?1)",
-    "cf_values WHERE entity_id=?1 OR entity_id IN (SELECT id FROM issues WHERE project_id=?1)",
-    // Boards before the issues they place, statuses before the issues that hold them.
-    "issue_board_positions WHERE board_id IN (SELECT id FROM boards WHERE project_id=?1) \
-     OR issue_id IN (SELECT id FROM issues WHERE project_id=?1)",
+    // Boards and statuses remain project-scoped; migrated issue rows remain legacy.
     "board_card_settings WHERE board_id IN (SELECT id FROM boards WHERE project_id=?1)",
     "swimlanes WHERE board_id IN (SELECT id FROM boards WHERE project_id=?1)",
     "sprints WHERE board_id IN (SELECT id FROM boards WHERE project_id=?1)",
@@ -1682,17 +1664,16 @@ const PROJECT_SCOPED: &[&str] = &[
      OR status_id IN (SELECT id FROM issue_statuses WHERE project_id=?1)",
     "board_columns WHERE board_id IN (SELECT id FROM boards WHERE project_id=?1)",
     "boards WHERE project_id=?1",
-    "issues WHERE project_id=?1",
     "issue_statuses WHERE project_id=?1",
     "TREE planning_tags WHERE project_id=?1 \
      AND NOT EXISTS(SELECT 1 FROM planning_tags child WHERE child.parent_id=planning_tags.id)",
     // Tasks of the project.
+    "todo_links WHERE todo_id IN (SELECT id FROM todos WHERE project_id=?1)",
     "todo_assignees WHERE todo_id IN (SELECT id FROM todos WHERE project_id=?1)",
     "todos WHERE project_id=?1",
     // Code review.
     "review_discussions WHERE review_id IN (SELECT id FROM reviews WHERE project_id=?1)",
     "review_external_checks WHERE review_id IN (SELECT id FROM reviews WHERE project_id=?1)",
-    "review_external_issue_links WHERE review_id IN (SELECT id FROM reviews WHERE project_id=?1)",
     "review_file_states WHERE review_id IN (SELECT id FROM reviews WHERE project_id=?1)",
     "review_merge_preferences WHERE review_id IN (SELECT id FROM reviews WHERE project_id=?1)",
     "review_participants WHERE review_id IN (SELECT id FROM reviews WHERE project_id=?1)",
@@ -3714,8 +3695,6 @@ mod delete_project_tests {
             [],
         )
         .unwrap();
-        c.execute("INSERT INTO issues(id,project_id,number,title,status_id) VALUES('is','pr',1,'Issue','st')", []).unwrap();
-        c.execute("INSERT INTO issue_comments(id,issue_id,author_id,body,created_at) VALUES('ic','is','own','Comment',1)", []).unwrap();
         c.execute(
             "INSERT INTO todos(id,profile_id,content,project_id) VALUES('td','own','Task','pr')",
             [],
@@ -3740,7 +3719,7 @@ mod delete_project_tests {
         )
         .unwrap();
         c.execute("INSERT INTO devfiles(id,project_id,path,name,content) VALUES('df','pr','.space/dev.yaml','Dev','x')", []).unwrap();
-        c.execute("INSERT INTO notifications(id,recipient_id,event_type,title,entity_type,entity_id,created_at) VALUES('nt','other','issue.created','Issue','issue','is',1)", []).unwrap();
+        c.execute("INSERT INTO notifications(id,recipient_id,event_type,title,entity_type,entity_id,created_at) VALUES('nt','other','todo.created','Task','todo','td',1)", []).unwrap();
         // Rows that carry their own meaning: the conversation and the article survive.
         c.execute("INSERT INTO channels(id,content_type,name,project_id) VALUES('ch','public','general','pr')", []).unwrap();
         c.execute("INSERT INTO blog_posts(id,draft_id,title,body,author_id,project_id) VALUES('bp','doc','Post','Body','own','pr')", []).unwrap();
@@ -3779,7 +3758,7 @@ mod delete_project_tests {
             "SELECT count(*) FROM reviews WHERE project_id='pr'",
             "SELECT count(*) FROM pipeline_scripts WHERE project_id='pr'",
             "SELECT count(*) FROM devfiles WHERE project_id='pr'",
-            "SELECT count(*) FROM notifications WHERE entity_id='is'",
+            "SELECT count(*) FROM notifications WHERE entity_id='td'",
         ] {
             assert_eq!(count(&c, probe), 0, "left behind: {probe}");
         }
@@ -3817,7 +3796,7 @@ mod delete_project_tests {
         seed(&c);
         let before = count(
             &c,
-            "SELECT (SELECT count(*) FROM projects) + (SELECT count(*) FROM issues) + (SELECT count(*) FROM todos) \
+            "SELECT (SELECT count(*) FROM projects) + (SELECT count(*) FROM todos) \
              + (SELECT count(*) FROM documents) + (SELECT count(*) FROM boards) + (SELECT count(*) FROM channels)",
         );
 
@@ -3826,7 +3805,7 @@ mod delete_project_tests {
         assert_eq!(
             count(
                 &c,
-                "SELECT (SELECT count(*) FROM projects) + (SELECT count(*) FROM issues) + (SELECT count(*) FROM todos) \
+                "SELECT (SELECT count(*) FROM projects) + (SELECT count(*) FROM todos) \
                  + (SELECT count(*) FROM documents) + (SELECT count(*) FROM boards) + (SELECT count(*) FROM channels)",
             ),
             before,

@@ -8,8 +8,8 @@
  * Nothing else may carry those three colours, and — the rule this module exists to
  * enforce — **one element expresses exactly ONE fact**.
  *
- * The bug that motivated this file: a ticket's STATUS pill read "No status" while its
- * colour was computed from the ticket's DUE DATE. Two rows with identical text ("No
+ * The bug that motivated this file: a task's STATUS pill read "No status" while its
+ * colour was computed from the task's DUE DATE. Two rows with identical text ("No
  * status") came out red and teal, because the reader was being shown urgency in the
  * place that claims to show status. A colour that contradicts its own label is worse
  * than no colour at all.
@@ -32,7 +32,7 @@ export type Tone = "" | "teal" | "amber" | "red" | "done";
 export type Urgency = "none" | "overdue" | "today" | "soon" | "later";
 
 /** Default window for "soon". Callers with a different horizon pass their own:
- *  a project deadline looks a week ahead, a ticket only three days. */
+ *  a project deadline looks a week ahead, a task only three days. */
 export const SOON_DAYS = 3;
 /** Steering's project-deadline horizon, kept as a named constant so the one surface
  *  that legitimately differs says so out loud instead of hard-coding a 7. */

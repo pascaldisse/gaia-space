@@ -13,7 +13,7 @@
  */
 import { createSignal, createEffect } from "solid-js";
 
-export type PaletteId = "paper" | "sand" | "dusk" | "lagoon" | "deep";
+export type PaletteId = "paper" | "sand" | "dusk" | "lagoon" | "deep" | "paleblood";
 
 /* Two axes: the CANVAS (light or dark) and the CHROME (the rail, sidebar and
    command bar: purple or teal). Every entry says both, because that is the whole
@@ -24,6 +24,7 @@ export const PALETTES: { id: PaletteId; label: string; hint: string }[] = [
   { id: "dusk", label: "Dusk", hint: "Dark canvas, light text, purple navigation." },
   { id: "lagoon", label: "Lagoon", hint: "Light canvas, teal navigation — one colour family throughout." },
   { id: "deep", label: "Deep", hint: "Dark canvas, teal navigation." },
+  { id: "paleblood", label: "Paleblood", hint: "Dark ink canvas, parchment text, gold frames, blood accent — the Bloodborne palette shared with Paloptic." },
 ];
 
 const KEY = "space.theme.palette";
@@ -47,7 +48,7 @@ export function applyPalette(id: PaletteId) {
   for (const entry of IDS) root.classList.toggle(`palette-${entry}`, entry === id);
   /* The OS draws scrollbars and form furniture from this, so a dark palette that
      forgot it would keep white scrollbars. */
-  root.style.colorScheme = id === "dusk" || id === "deep" ? "dark" : "light";
+  root.style.colorScheme = id === "dusk" || id === "deep" || id === "paleblood" ? "dark" : "light";
 }
 
 export function setPalette(next: PaletteId) {

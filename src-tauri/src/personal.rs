@@ -23,6 +23,15 @@ fn err<T>(result: rusqlite::Result<T>) -> Result<T> {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct TodoLink {
+    pub id: String,
+    pub todo_id: String,
+    pub kind: String,
+    pub url: Option<String>,
+    pub target_id: Option<String>,
+    pub title: Option<String>,
+}
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Todo {
     pub id: String,
     pub profile_id: String,
@@ -44,6 +53,8 @@ pub struct Todo {
     /// which is the NORMAL case: most tasks are just tasks.
     #[serde(default)]
     pub category: Option<String>,
+    #[serde(default)]
+    pub links: Vec<TodoLink>,
 }
 #[derive(Debug, Deserialize)]
 pub struct TodoInput {
@@ -65,6 +76,8 @@ pub struct TodoInput {
     /// See [`Todo::category`]. Absent in a payload = uncategorised.
     #[serde(default)]
     pub category: Option<String>,
+    #[serde(default)]
+    pub links: Vec<TodoLink>,
 }
 fn default_content_kind() -> String {
     "text".into()
@@ -74,7 +87,7 @@ fn default_content_kind() -> String {
 /// free field immediately yields five spellings of the same word ("Review", "review",
 /// "reviewing", …) and then nothing can be grouped or counted. The frontend mirror lives
 /// in `src/api/personal.ts` (`TODO_CATEGORIES`) and must stay identical.
-pub const TODO_CATEGORIES: [&str; 5] = ["create", "improve", "review", "decide", "admin"];
+pub const TODO_CATEGORIES: [&str; 6] = ["create", "improve", "review", "decide", "admin", "dev"];
 /// Blank category normalizes to NULL — no empty-string variant ever reaches storage — and
 /// anything outside [`TODO_CATEGORIES`] is REFUSED instead of silently dropped: a client
 /// sending a category the server does not know is a bug that must be visible.
@@ -113,6 +126,7 @@ fn read_todo(row: &rusqlite::Row<'_>) -> rusqlite::Result<Todo> {
         assignee_ids: Vec::new(),
         content_kind: row.get(9)?,
         category: row.get(10)?,
+        links: Vec::new(),
     })
 }
 /// Blank notes normalize to NULL: no empty-string variant ever reaches storage.
@@ -148,6 +162,31 @@ fn assignees_on(c: &Connection, todo_id: &str) -> Result<Vec<String>> {
         .collect::<std::result::Result<Vec<_>, _>>()
         .map_err(|error| error.to_string())?;
     Ok(ids)
+}
+fn links_on(c: &Connection, todo_id: &str) -> Result<Vec<TodoLink>> {
+    let mut statement = err(c.prepare("SELECT id,todo_id,kind,url,target_id,title FROM todo_links WHERE todo_id=?1 ORDER BY created_at,id"))?;
+    let rows = err(statement.query_map([todo_id], |row| Ok(TodoLink {
+        id: row.get(0)?, todo_id: row.get(1)?, kind: row.get(2)?, url: row.get(3)?, target_id: row.get(4)?, title: row.get(5)?,
+    })))?;
+    rows.collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())
+}
+fn replace_links(c: &Connection, todo_id: &str, links: &[TodoLink]) -> Result<()> {
+    err(c.execute("DELETE FROM todo_links WHERE todo_id=?1", [todo_id]))?;
+    for link in links {
+        let kind = link.kind.trim().to_ascii_uppercase();
+        let id = if link.id.trim().is_empty() { new_id("todo-link") } else { link.id.clone() };
+        err(c.execute("INSERT INTO todo_links(id,todo_id,kind,url,target_id,title) VALUES(?1,?2,?3,?4,?5,?6)", params![id, todo_id, kind, link.url, link.target_id, link.title]))?;
+    }
+    Ok(())
+}
+#[derive(Debug, Deserialize)]
+pub struct TodoLinkInput {
+    pub todo_id: String,
+    pub kind: String,
+    pub url: Option<String>,
+    pub target_id: Option<String>,
+    pub title: Option<String>,
 }
 /// An assignee must be a live profile; if that profile is backed by login accounts,
 /// at least one of them must still be active. Deactivated people cannot be assigned.
@@ -238,7 +277,13 @@ pub fn todo_readable_by(id: &str, profile_id: &str) -> Result<bool> {
 }
 pub fn todo_assigned_by(id: &str, profile_id: &str) -> Result<bool> {
     let c = db::conn()?;
+    todo_assigned_by_on(&c, id, profile_id)
+}
+fn todo_assigned_by_on(c: &Connection, id: &str, profile_id: &str) -> Result<bool> {
     err(c.query_row("SELECT EXISTS(SELECT 1 FROM todos t JOIN todo_assignees a ON a.todo_id=t.id WHERE t.id=?1 AND t.project_id IS NOT NULL AND a.profile_id=?2)", params![id, profile_id], |row| row.get(0)))
+}
+fn todo_owned_by(id: &str, profile_id: &str) -> Result<bool> {
+    err(db::conn()?.query_row("SELECT EXISTS(SELECT 1 FROM todos WHERE id=?1 AND profile_id=?2)", params![id, profile_id], |row| row.get(0)))
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_project_member_ids(project_id: String) -> Result<Vec<String>> {
@@ -302,6 +347,7 @@ fn todo_on(c: &Connection, id: &str) -> Result<Option<Todo>> {
     match todo {
         Some(mut todo) => {
             todo.assignee_ids = assignees_on(c, id)?;
+            todo.links = links_on(c, id)?;
             Ok(Some(todo))
         }
         None => Ok(None),
@@ -320,8 +366,42 @@ pub fn list_todos(profile_id: String, include_done: Option<bool>) -> Result<Vec<
     drop(statement);
     for todo in todos.iter_mut() {
         todo.assignee_ids = assignees_on(&c, &todo.id)?;
+        todo.links = links_on(&c, &todo.id)?;
     }
     Ok(todos)
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn list_todo_links(todo_id: String) -> Result<Vec<TodoLink>> {
+    links_on(&db::conn()?, &todo_id)
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn add_todo_link(input: TodoLinkInput) -> Result<TodoLink> {
+    let c = db::conn()?;
+    if todo_on(&c, &input.todo_id)?.is_none() {
+        return Err("Todo not found".into());
+    }
+    let link = TodoLink {
+        id: new_id("todo-link"),
+        todo_id: input.todo_id,
+        kind: input.kind.trim().to_ascii_uppercase(),
+        url: input.url,
+        target_id: input.target_id,
+        title: input.title,
+    };
+    err(c.execute("INSERT INTO todo_links(id,todo_id,kind,url,target_id,title) VALUES(?1,?2,?3,?4,?5,?6)", params![link.id, link.todo_id, link.kind, link.url, link.target_id, link.title]))?;
+    Ok(link)
+}
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn delete_todo_link(id: String, actor_id: String) -> Result<()> {
+    let c = db::conn()?;
+    let todo_id: String = err(c.query_row("SELECT todo_id FROM todo_links WHERE id=?1", [&id], |row| row.get(0)).optional())?
+        .ok_or_else(|| "Todo link not found".to_string())?;
+    let permitted = todo_owned_by(&todo_id, &actor_id)?
+        || todo_assigned_by(&todo_id, &actor_id)?
+        || crate::platform::is_admin_on(&c, &actor_id)?;
+    if !permitted { return Err("todo link write access denied".into()); }
+    err(c.execute("DELETE FROM todo_links WHERE id=?1", [&id]))?;
+    Ok(())
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn create_todo(input: TodoInput) -> Result<Todo> {
@@ -342,6 +422,7 @@ fn create_todo_on(c: &mut Connection, input: TodoInput) -> Result<Todo> {
     let category = normalized_category(input.category)?;
     err(tx.execute("INSERT INTO todos(id,profile_id,content,due_date,project_id,done,source_entity_type,source_entity_id,notes,content_kind,category) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)", params![id, input.profile_id, input.content.trim(), input.due_date, project_id, input.done, input.source_entity_type, input.source_entity_id, normalized_notes(input.notes), content_kind, category]))?;
     replace_assignees(&tx, &id, project_id.as_deref(), &input.assignee_ids)?;
+    replace_links(&tx, &id, &input.links)?;
     err(tx.commit())?;
     let todo = todo_on(c, &id)?.ok_or_else(|| "Created todo was not found".to_string())?;
     // After the row is durable, never inside the transaction: a feed problem must
@@ -430,42 +511,32 @@ fn update_todo_on(c: &mut Connection, todo: Todo) -> Result<Todo> {
         return Err("Todo not found".into());
     }
     replace_assignees(&tx, &todo.id, project_id.as_deref(), &todo.assignee_ids)?;
+    replace_links(&tx, &todo.id, &todo.links)?;
     err(tx.commit())?;
     todo_on(c, &todo.id)?.ok_or_else(|| "Todo not found".into())
 }
-fn visible_project_todos_on(
-    c: &Connection,
-    project_id: Option<&str>,
-    profile_id: &str,
-    include_done: bool,
-) -> Result<Vec<Todo>> {
-    let sql = format!("SELECT {TODO_COLUMNS} FROM todos t WHERE t.project_id IS NOT NULL AND (:project_id IS NULL OR t.project_id=:project_id) AND (:include_done=1 OR t.done=0) AND {PROJECT_TODO_VISIBILITY} ORDER BY t.done,t.due_date IS NULL,t.due_date,t.created_at");
-    let mut statement = err(c.prepare(&sql))?;
-    let mut todos = err(statement.query_map(
-        rusqlite::named_params! {
-            ":project_id": project_id,
-            ":profile_id": profile_id,
-            ":include_done": include_done,
-        },
-        read_todo,
-    ))?
-    .collect::<std::result::Result<Vec<_>, _>>()
-    .map_err(|error| error.to_string())?;
-    drop(statement);
-    for todo in &mut todos {
-        todo.assignee_ids = assignees_on(c, &todo.id)?;
-    }
-    Ok(todos)
-}
-
 #[cfg_attr(feature = "desktop", tauri::command)]
+/// `admin`: GlobalAdmin bypass of the visibility predicate below, mirroring
+/// `project_readable` in space-server.rs (`role==GlobalAdmin || owner || member`) —
+/// an admin reads every project's todos the same way it reads every project. The HTTP
+/// command layer resolves this itself from the SESSION user's role and never trusts a
+/// client-sent value (see `CommandPolicy::ProjectTodoRead`); the desktop Tauri command
+/// has no session role to ask, so a caller that omits the argument gets the safe
+/// default of `false` (not an admin), same as any other unspecified caller.
 pub fn list_project_todos(
     project_id: String,
     profile_id: String,
     include_done: Option<bool>,
+    admin: Option<bool>,
 ) -> Result<Vec<Todo>> {
     let c = db::conn()?;
-    list_project_todos_on(&c, &project_id, &profile_id, include_done.unwrap_or(false))
+    list_project_todos_on(
+        &c,
+        &project_id,
+        &profile_id,
+        include_done.unwrap_or(false),
+        admin.unwrap_or(false),
+    )
 }
 /// The ONE project-todo visibility rule, written once. `{p}` is the placeholder for the
 /// bound parameter holding the reading profile, so per-project and cross-project reads
@@ -478,28 +549,39 @@ pub fn list_project_todos(
 const PROJECT_TODO_VISIBILITY: &str = "(t.profile_id={p} OR EXISTS(SELECT 1 FROM projects p WHERE p.id=t.project_id AND (p.created_by={p} OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id={p}))) OR EXISTS(SELECT 1 FROM todo_assignees a WHERE a.todo_id=t.id AND a.profile_id={p}))";
 const TODO_COLUMNS: &str = "t.id,t.profile_id,t.content,t.due_date,t.project_id,t.done,t.source_entity_type,t.source_entity_id,t.notes,t.content_kind,t.category";
 const TODO_ORDER: &str = "ORDER BY t.done,t.due_date IS NULL,t.due_date,t.created_at";
-fn project_todo_visibility(profile_param: &str) -> String {
-    PROJECT_TODO_VISIBILITY.replace("{p}", profile_param)
+/// `admin_param` bypasses [`PROJECT_TODO_VISIBILITY`] entirely when true — the same
+/// shape as `project_readable`'s `role==GlobalAdmin || …`. Non-admin reads are
+/// untouched: the OR short-circuits straight into the unchanged predicate.
+fn project_todo_visibility(profile_param: &str, admin_param: &str) -> String {
+    format!(
+        "({admin_param}=1 OR {})",
+        PROJECT_TODO_VISIBILITY.replace("{p}", profile_param)
+    )
 }
-/// Todos of ONE project, as seen by `profile_id`. See [`PROJECT_TODO_VISIBILITY`].
+/// Todos of ONE project, as seen by `profile_id` (or, if `admin`, by everyone). See
+/// [`PROJECT_TODO_VISIBILITY`] and [`project_todo_visibility`].
 pub(crate) fn list_project_todos_on(
     c: &Connection,
     project_id: &str,
     profile_id: &str,
     include_done: bool,
+    admin: bool,
 ) -> Result<Vec<Todo>> {
     let sql = format!(
         "SELECT {TODO_COLUMNS} FROM todos t WHERE t.project_id=?1 AND (?3=1 OR t.done=0) AND {} {TODO_ORDER}",
-        project_todo_visibility("?2")
+        project_todo_visibility("?2", "?4")
     );
     let mut statement = err(c.prepare(&sql))?;
-    let mut todos =
-        err(statement.query_map(params![project_id, profile_id, include_done], read_todo))?
-            .collect::<std::result::Result<Vec<_>, _>>()
-            .map_err(|error| error.to_string())?;
+    let mut todos = err(statement.query_map(
+        params![project_id, profile_id, include_done, admin],
+        read_todo,
+    ))?
+    .collect::<std::result::Result<Vec<_>, _>>()
+    .map_err(|error| error.to_string())?;
     drop(statement);
     for todo in &mut todos {
         todo.assignee_ids = assignees_on(c, &todo.id)?;
+        todo.links = links_on(c, &todo.id)?;
     }
     Ok(todos)
 }
@@ -507,27 +589,42 @@ pub(crate) fn list_project_todos_on(
 /// every project this profile can see, in one list. Project-less personal todos are
 /// excluded — this is the team surface, not "my tasks".
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn list_team_todos(profile_id: String, include_done: Option<bool>) -> Result<Vec<Todo>> {
+/// `admin`: see [`list_project_todos`] — same GlobalAdmin bypass, same default.
+pub fn list_team_todos(
+    profile_id: String,
+    include_done: Option<bool>,
+    admin: Option<bool>,
+) -> Result<Vec<Todo>> {
     let c = db::conn()?;
-    list_team_todos_on(&c, &profile_id, include_done.unwrap_or(false))
+    list_team_todos_on(
+        &c,
+        &profile_id,
+        include_done.unwrap_or(false),
+        admin.unwrap_or(false),
+    )
 }
 pub(crate) fn list_team_todos_on(
     c: &Connection,
     profile_id: &str,
     include_done: bool,
+    admin: bool,
 ) -> Result<Vec<Todo>> {
     let sql = format!(
         "SELECT {TODO_COLUMNS} FROM todos t WHERE t.project_id IS NOT NULL AND (?2=1 OR t.done=0) AND {} {TODO_ORDER}",
-        project_todo_visibility("?1")
+        project_todo_visibility("?1", "?3")
     );
     let mut statement = err(c.prepare(&sql))?;
-    let mut todos = err(statement.query_map(params![profile_id, include_done], read_todo))?
-        .collect::<std::result::Result<Vec<_>, _>>()
-        .map_err(|error| error.to_string())?;
+    let mut todos = err(statement.query_map(
+        params![profile_id, include_done, admin],
+        read_todo,
+    ))?
+    .collect::<std::result::Result<Vec<_>, _>>()
+    .map_err(|error| error.to_string())?;
     drop(statement);
     // Same per-row assignee fill as `list_project_todos`: consistency over cleverness.
     for todo in &mut todos {
         todo.assignee_ids = assignees_on(c, &todo.id)?;
+        todo.links = links_on(c, &todo.id)?;
     }
     Ok(todos)
 }
@@ -633,48 +730,6 @@ fn postponed_due(current: Option<&str>, today: chrono::NaiveDate, days: i64) -> 
         .filter(|date| *date > today)
         .unwrap_or(today);
     (base + Duration::days(days)).format("%Y-%m-%d").to_string()
-}
-/// Promote a personal to-do into a tracked issue. The to-do survives as a closed row
-/// anchored to the issue it became, so the bookmark trail stays intact; the issue owns
-/// the work from here on.
-#[cfg_attr(feature = "desktop", tauri::command)]
-pub fn convert_todo_to_issue(
-    id: String,
-    project_id: String,
-    status_id: Option<String>,
-) -> Result<crate::issues::Issue> {
-    if project_id.trim().is_empty() {
-        return Err("Converting a to-do needs a target project".into());
-    }
-    let c = db::conn()?;
-    let todo = todo_on(&c, &id)?.ok_or_else(|| "Todo not found".to_string())?;
-    if todo.source_entity_type.as_deref() == Some("issue") {
-        return Err("This to-do was already converted into an issue".into());
-    }
-    drop(c);
-    let issue = crate::issues::create_issue(crate::issues::IssueInput {
-        id: None,
-        project_id: project_id.trim().to_string(),
-        title: todo.content.clone(),
-        description: todo.notes.clone(),
-        status_id,
-        assignee_id: None,
-        assignee_ids: todo.assignee_ids.clone(),
-        created_by: Some(todo.profile_id.clone()),
-        due_date: todo.due_date.clone(),
-        priority: None,
-        archived: Some(false),
-        // The conversion inherits the to-do's origin: a task raised in a channel that
-        // becomes a ticket was still raised by that message.
-        source_entity_type: todo.source_entity_type.clone(),
-        source_entity_id: todo.source_entity_id.clone(),
-    })?;
-    let c = db::conn()?;
-    err(c.execute(
-        "UPDATE todos SET done=1,source_entity_type='issue',source_entity_id=?2,updated_at=unixepoch() WHERE id=?1",
-        params![id, issue.id],
-    ))?;
-    Ok(issue)
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -1612,7 +1667,7 @@ pub struct ProjectDashboard {
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn project_dashboard_aggregate(project_id: String) -> Result<ProjectDashboard> {
     let c = db::conn()?;
-    let open_issues:i64=err(c.query_row("SELECT count(*) FROM issues i LEFT JOIN issue_statuses s ON s.id=i.status_id WHERE i.project_id=?1 AND i.archived=0 AND coalesce(s.resolved,0)=0",[&project_id],|r|r.get(0)))?;
+    let open_issues:i64=err(c.query_row("SELECT count(*) FROM todos WHERE project_id=?1 AND done=0",[&project_id],|r|r.get(0)))?;
     let open_todos: i64 = err(c.query_row(
         "SELECT count(*) FROM todos WHERE project_id=?1 AND done=0",
         [&project_id],
@@ -1670,7 +1725,7 @@ fn goto_search_on(c: &Connection, query: &str, limit: i64) -> Result<Vec<GotoRes
     let mut statement = err(c.prepare("SELECT id,entity_type,title,details,score FROM (
       SELECT id,'profile' entity_type,display_name title,username details,CASE WHEN lower(display_name)=?2 THEN 100 ELSE 50 END score FROM profiles WHERE lower(display_name) LIKE ?1 OR lower(username) LIKE ?1
       UNION ALL SELECT id,'project',name,key,CASE WHEN lower(name)=?2 OR lower(key)=?2 THEN 100 ELSE 50 END FROM projects WHERE archived=0 AND (lower(name) LIKE ?1 OR lower(key) LIKE ?1 OR lower(coalesce(description,'')) LIKE ?1)
-      UNION ALL SELECT id,'issue',title,project_id || ' #' || number,CASE WHEN lower(title)=?2 THEN 100 ELSE 45 END FROM issues WHERE archived=0 AND (lower(title) LIKE ?1 OR lower(coalesce(description,'')) LIKE ?1)
+      UNION ALL SELECT id,'todo',content,coalesce(project_id,'personal'),CASE WHEN lower(content)=?2 THEN 100 ELSE 45 END FROM todos WHERE done=0 AND (lower(content) LIKE ?1 OR lower(coalesce(notes,'')) LIKE ?1)
       UNION ALL SELECT id,'channel',coalesce(name,''),description,CASE WHEN lower(coalesce(name,''))=?2 THEN 100 ELSE 40 END FROM channels WHERE archived=0 AND (lower(coalesce(name,'')) LIKE ?1 OR lower(coalesce(description,'')) LIKE ?1)
       UNION ALL SELECT id,'document',title,container_type,CASE WHEN lower(title)=?2 THEN 100 ELSE 45 END FROM documents WHERE archived=0 AND (lower(title) LIKE ?1 OR lower(coalesce(body,'')) LIKE ?1)
       UNION ALL SELECT id,'blog',title,'Blog',CASE WHEN lower(title)=?2 THEN 100 ELSE 45 END FROM blog_posts WHERE archived=0 AND (lower(title) LIKE ?1 OR lower(body) LIKE ?1)
@@ -1712,7 +1767,7 @@ pub fn goto_search_scoped(
     let mut s=err(c.prepare("SELECT id,entity_type,title,details,score FROM (
 SELECT id,'profile' entity_type,display_name title,username details,CASE WHEN lower(display_name)=?2 THEN 100 ELSE 50 END score FROM profiles WHERE lower(display_name) LIKE ?1 OR lower(username) LIKE ?1
 UNION ALL SELECT id,'project',name,key,CASE WHEN lower(name)=?2 OR lower(key)=?2 THEN 100 ELSE 50 END FROM projects WHERE archived=0 AND (lower(name) LIKE ?1 OR lower(key) LIKE ?1 OR lower(coalesce(description,'')) LIKE ?1) AND (?4 OR created_by=?3 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=projects.id AND pm.profile_id=?3))
-UNION ALL SELECT i.id,'issue',i.title,i.project_id || ' #' || i.number,CASE WHEN lower(i.title)=?2 THEN 100 ELSE 45 END FROM issues i WHERE i.archived=0 AND (lower(i.title) LIKE ?1 OR lower(coalesce(i.description,'')) LIKE ?1) AND EXISTS(SELECT 1 FROM projects p WHERE p.id=i.project_id AND (?4 OR p.created_by=?3 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?3)))
+UNION ALL SELECT t.id,'todo',t.content,coalesce(t.project_id,'personal'),CASE WHEN lower(t.content)=?2 THEN 100 ELSE 45 END FROM todos t WHERE t.done=0 AND (lower(t.content) LIKE ?1 OR lower(coalesce(t.notes,'')) LIKE ?1) AND (t.profile_id=?3 OR EXISTS(SELECT 1 FROM todo_assignees ta WHERE ta.todo_id=t.id AND ta.profile_id=?3) OR (t.project_id IS NOT NULL AND EXISTS(SELECT 1 FROM projects p WHERE p.id=t.project_id AND (?4 OR p.created_by=?3 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?3)))))
 UNION ALL SELECT ch.id,'channel',coalesce(ch.name,''),ch.description,CASE WHEN lower(coalesce(ch.name,''))=?2 THEN 100 ELSE 40 END FROM channels ch WHERE ch.archived=0 AND (lower(coalesce(ch.name,'')) LIKE ?1 OR lower(coalesce(ch.description,'')) LIKE ?1) AND (ch.id NOT LIKE 'entity:meeting:%' OR EXISTS(SELECT 1 FROM meetings m WHERE m.id=substr(ch.id,16) AND m.visibility='public') OR EXISTS(SELECT 1 FROM meetings m WHERE m.id=substr(ch.id,16) AND m.organizer_id=?3) OR EXISTS(SELECT 1 FROM meetings m JOIN meeting_participants mp ON mp.meeting_id=m.id WHERE m.id=substr(ch.id,16) AND m.visibility='participants' AND mp.profile_id=?3))
 UNION ALL SELECT d.id,'document',d.title,d.container_type,CASE WHEN lower(d.title)=?2 THEN 100 ELSE 45 END FROM documents d WHERE d.archived=0 AND (lower(d.title) LIKE ?1 OR lower(coalesce(d.body,'')) LIKE ?1) AND (d.created_by=?3 OR (d.container_type='project' AND EXISTS(SELECT 1 FROM projects p WHERE p.id=d.container_id AND (?4 OR p.created_by=?3 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?3)))))
 UNION ALL SELECT id,'blog',title,'Blog',CASE WHEN lower(title)=?2 THEN 100 ELSE 45 END FROM blog_posts WHERE archived=0 AND (lower(title) LIKE ?1 OR lower(body) LIKE ?1)
@@ -2014,18 +2069,7 @@ pub fn dashboard_aggregate(profile_id: String) -> Result<Dashboard> {
         return Err("Dashboard profile is required".into());
     }
     let c = db::conn()?;
-    let mut statement = err(c.prepare("SELECT i.id,i.project_id,i.number,i.title,i.due_date FROM issues i LEFT JOIN issue_statuses s ON s.id=i.status_id WHERE i.assignee_id=?1 AND i.archived=0 AND coalesce(s.resolved,0)=0 ORDER BY i.due_date IS NULL,i.due_date,i.number"))?;
-    let assigned_issues = err(statement.query_map([&profile_id], |row| {
-        Ok(AssignedIssue {
-            id: row.get(0)?,
-            project_id: row.get(1)?,
-            number: row.get(2)?,
-            title: row.get(3)?,
-            due_date: row.get(4)?,
-        })
-    }))?
-    .collect::<std::result::Result<Vec<_>, _>>()
-    .map_err(|error| error.to_string())?;
+    let assigned_issues = Vec::new();
     let now = Utc::now();
     let today = now.date_naive().to_string();
     let end = now + Duration::days(7);
@@ -2146,6 +2190,7 @@ mod tests {
             assignee_ids: assignees.iter().map(|x| x.to_string()).collect(),
             content_kind: default_content_kind(),
             category: None,
+        links: Vec::new(),
         }
     }
     /// Project work is a SHARED surface, and naming a lead changes nothing about it.
@@ -2178,7 +2223,7 @@ mod tests {
         create_todo_on(&mut c, personal).unwrap();
 
         let ids = |profile: &str, include_done: bool| -> Vec<String> {
-            list_team_todos_on(&c, profile, include_done)
+            list_team_todos_on(&c, profile, include_done, false)
                 .unwrap()
                 .into_iter()
                 .map(|t| t.id)
@@ -2202,12 +2247,12 @@ mod tests {
         // Refactor safety: both reads run the SAME predicate, so for a single project
         // they must agree exactly — the day they diverge, this fails.
         for profile in ["p", "q", "r", "outsider"] {
-            let per_project: Vec<String> = list_project_todos_on(&c, "project", profile, true)
+            let per_project: Vec<String> = list_project_todos_on(&c, "project", profile, true, false)
                 .unwrap()
                 .into_iter()
                 .map(|t| t.id)
                 .collect();
-            let team: Vec<String> = list_team_todos_on(&c, profile, true)
+            let team: Vec<String> = list_team_todos_on(&c, profile, true, false)
                 .unwrap()
                 .into_iter()
                 .filter(|t| t.project_id.as_deref() == Some("project"))
@@ -2215,6 +2260,69 @@ mod tests {
                 .collect();
             assert_eq!(per_project, team, "predicates drifted for {profile}");
         }
+    }
+
+    /// The bug this closes: an admin with zero memberships got `count=0` from both
+    /// project and team reads, though `project_readable` (space-server.rs) already
+    /// shows it every project. `admin=true` must reach exactly as far as ownership or
+    /// membership already would — never further (a done row still needs `include_done`).
+    #[test]
+    fn admin_bypasses_membership_like_project_readable_does() {
+        let mut c = conn();
+        c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('outsider-admin','oa','Outsider Admin',1)", []).unwrap();
+        create_todo_on(&mut c, todo_input("owner-task", "p", &["p"])).unwrap();
+        let mut finished = todo_input("finished", "q", &[]);
+        finished.done = true;
+        create_todo_on(&mut c, finished).unwrap();
+
+        // Not a member, not an owner, not an assignee, no admin flag: sees nothing —
+        // the exact live-bug shape (bridge admin, 0 memberships, count=0).
+        assert!(list_project_todos_on(&c, "project", "outsider-admin", true, false)
+            .unwrap()
+            .is_empty());
+        assert!(list_team_todos_on(&c, "outsider-admin", true, false)
+            .unwrap()
+            .is_empty());
+
+        // Same profile, admin=true: sees every project todo, exactly as `project_readable`
+        // would let it read the project itself.
+        let admin_project: Vec<String> =
+            list_project_todos_on(&c, "project", "outsider-admin", true, true)
+                .unwrap()
+                .into_iter()
+                .map(|t| t.id)
+                .collect();
+        assert_eq!(
+            admin_project,
+            vec!["owner-task".to_string(), "finished".to_string()]
+        );
+        let admin_team: Vec<String> = list_team_todos_on(&c, "outsider-admin", true, true)
+            .unwrap()
+            .into_iter()
+            .map(|t| t.id)
+            .collect();
+        assert_eq!(
+            admin_team,
+            vec!["owner-task".to_string(), "finished".to_string()]
+        );
+
+        // The bypass does not also waive `include_done`: a done row still needs it asked for.
+        assert!(!list_project_todos_on(&c, "project", "outsider-admin", false, true)
+            .unwrap()
+            .iter()
+            .any(|t| t.id == "finished"));
+        assert!(!list_team_todos_on(&c, "outsider-admin", false, true)
+            .unwrap()
+            .iter()
+            .any(|t| t.id == "finished"));
+
+        // A genuine member's own reach is untouched by the admin plumbing existing at all.
+        assert_eq!(
+            list_project_todos_on(&c, "project", "p", true, false)
+                .unwrap()
+                .len(),
+            2
+        );
     }
 
     #[test]
@@ -2231,7 +2339,7 @@ mod tests {
 
         // Every member sees every member's project todos — lead, owner, or neither.
         for member in ["p", "q", "r"] {
-            let ids: Vec<String> = list_project_todos_on(&c, "project", member, false)
+            let ids: Vec<String> = list_project_todos_on(&c, "project", member, false, false)
                 .unwrap()
                 .into_iter()
                 .map(|t| t.id)
@@ -2243,14 +2351,14 @@ mod tests {
             );
         }
         // Someone outside the project sees none of it.
-        assert!(list_project_todos_on(&c, "project", "outsider", false)
+        assert!(list_project_todos_on(&c, "project", "outsider", false, false)
             .unwrap()
             .is_empty());
 
         // Clearing the lead changes nobody's reach either.
         crate::platform::set_project_lead_on(&c, "project", None).unwrap();
         assert_eq!(
-            list_project_todos_on(&c, "project", "r", false)
+            list_project_todos_on(&c, "project", "r", false, false)
                 .unwrap()
                 .len(),
             2
@@ -2442,6 +2550,7 @@ mod tests {
                 assignee_ids: vec!["q".into()],
                 content_kind: "text".into(),
                 category: None,
+            links: Vec::new(),
             },
         )
         .unwrap();
@@ -2500,6 +2609,7 @@ mod tests {
                 assignee_ids: vec![],
                 content_kind: "text".into(),
                 category: None,
+            links: Vec::new(),
             },
         )
         .unwrap();
@@ -2699,11 +2809,11 @@ mod tests {
     fn goto_search_hits_three_entity_types() {
         let c = conn();
         c.execute("INSERT INTO projects(id,name,key,created_at) VALUES('search-project','Search alpha','SEA',1)", []).unwrap();
-        c.execute("INSERT INTO issues(id,project_id,number,title,archived) VALUES('issue','search-project',1,'Search issue',0)", []).unwrap();
+        c.execute("INSERT INTO todos(id,profile_id,project_id,content,done) VALUES('todo','p','search-project','Search task',0)", []).unwrap();
         c.execute("INSERT INTO channels(id,content_type,name,archived) VALUES('channel','public','Search channel',0)", []).unwrap();
         let results = goto_search_on(&c, "search", 20).unwrap();
         assert!(results.iter().any(|result| result.entity_type == "project"));
-        assert!(results.iter().any(|result| result.entity_type == "issue"));
+        assert!(results.iter().any(|result| result.entity_type == "todo"));
         assert!(results.iter().any(|result| result.entity_type == "channel"));
     }
     #[test]
@@ -3112,7 +3222,7 @@ fn full_text_search_on(
         return Ok(Vec::new());
     }
     let profile = profile_id.unwrap_or("");
-    let sql = "SELECT CASE WHEN si.entity_type='message' THEN (SELECT channel_id FROM messages WHERE id=si.entity_id) ELSE si.entity_id END,CASE WHEN si.entity_type='message' THEN 'channel' ELSE si.entity_type END,si.title,snippet(search_index,3,'<mark>','</mark>','…',14),si.breadcrumb,bm25(search_index,0.0,0.0,8.0,0.0,0.0) FROM search_index si WHERE search_index MATCH ?1 AND (si.entity_type='issue' AND EXISTS(SELECT 1 FROM issues i JOIN projects p ON p.id=i.project_id WHERE i.id=si.entity_id AND (?2 OR p.created_by=?3 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?3))) OR si.entity_type='document' AND EXISTS(SELECT 1 FROM documents d WHERE d.id=si.entity_id AND (d.created_by=?3 OR (d.container_type='project' AND EXISTS(SELECT 1 FROM projects p WHERE p.id=d.container_id AND (?2 OR p.created_by=?3 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?3)))))) OR si.entity_type='message' AND EXISTS(SELECT 1 FROM messages m JOIN channel_members cm ON cm.channel_id=m.channel_id WHERE m.id=si.entity_id AND cm.profile_id=?3) OR si.entity_type='blog' AND EXISTS(SELECT 1 FROM blog_posts b WHERE b.id=si.entity_id AND (b.project_id IS NULL OR ?2 OR EXISTS(SELECT 1 FROM projects p WHERE p.id=b.project_id AND (p.created_by=?3 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?3)))))) ORDER BY bm25(search_index,0.0,0.0,8.0,0.0,0.0) LIMIT ?4";
+    let sql = "SELECT CASE WHEN si.entity_type='message' THEN (SELECT channel_id FROM messages WHERE id=si.entity_id) ELSE si.entity_id END,CASE WHEN si.entity_type='message' THEN 'channel' ELSE si.entity_type END,si.title,snippet(search_index,3,'<mark>','</mark>','…',14),si.breadcrumb,bm25(search_index,0.0,0.0,8.0,0.0,0.0) FROM search_index si WHERE search_index MATCH ?1 AND (si.entity_type='todo' AND EXISTS(SELECT 1 FROM todos t WHERE t.id=si.entity_id AND (t.profile_id=?3 OR EXISTS(SELECT 1 FROM todo_assignees ta WHERE ta.todo_id=t.id AND ta.profile_id=?3) OR (t.project_id IS NOT NULL AND EXISTS(SELECT 1 FROM projects p WHERE p.id=t.project_id AND (?2 OR p.created_by=?3 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?3)))))) OR si.entity_type='document' AND EXISTS(SELECT 1 FROM documents d WHERE d.id=si.entity_id AND (d.created_by=?3 OR (d.container_type='project' AND EXISTS(SELECT 1 FROM projects p WHERE p.id=d.container_id AND (?2 OR p.created_by=?3 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?3)))))) OR si.entity_type='message' AND EXISTS(SELECT 1 FROM messages m JOIN channel_members cm ON cm.channel_id=m.channel_id WHERE m.id=si.entity_id AND cm.profile_id=?3) OR si.entity_type='blog' AND EXISTS(SELECT 1 FROM blog_posts b WHERE b.id=si.entity_id AND (b.project_id IS NULL OR ?2 OR EXISTS(SELECT 1 FROM projects p WHERE p.id=b.project_id AND (p.created_by=?3 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.profile_id=?3)))))) ORDER BY bm25(search_index,0.0,0.0,8.0,0.0,0.0) LIMIT ?4";
     let mut statement = err(c.prepare(sql))?;
     let results = err(statement.query_map(
         params![terms, allow_all, profile, limit.clamp(1, 100)],
@@ -3154,13 +3264,13 @@ pub fn full_text_search_scoped(
 mod full_text_tests {
     use super::*;
     #[test]
-    fn fts_indexes_issue_document_message_and_blog_with_live_triggers() {
+    fn fts_indexes_todo_document_message_and_blog() {
         let c = db::open_in_memory().unwrap();
         db::migrate(&c).unwrap();
-        c.execute_batch("INSERT INTO profiles(id,username,display_name,created_at) VALUES('p','person','Person',1); INSERT INTO projects(id,name,key,created_by,created_at) VALUES('project','Project','PROJ','p',1); INSERT INTO issue_statuses(id,project_id,name,color) VALUES('open','project','Open','#000'); INSERT INTO issues(id,project_id,number,title,description,status_id,created_by) VALUES('i','project',1,'Issue alpha','needle issue body','open','p'); INSERT INTO documents(id,container_type,container_id,doc_type,title,body,created_by) VALUES('d','my-docs','p','text','Document alpha','needle document body','p'); INSERT INTO channels(id,content_type,name) VALUES('c','public','General'); INSERT INTO channel_members(channel_id,profile_id) VALUES('c','p'); INSERT INTO messages(id,channel_id,author_id,text) VALUES('m','c','p','needle chat body'); INSERT INTO blog_posts(id,title,body,author_id) VALUES('b','Blog alpha','needle blog body','p');").unwrap();
+        c.execute_batch("INSERT INTO profiles(id,username,display_name,created_at) VALUES('p','person','Person',1); INSERT INTO projects(id,name,key,created_by,created_at) VALUES('project','Project','PROJ','p',1); INSERT INTO todos(id,profile_id,project_id,content,notes,done) VALUES('i','p','project','Task alpha','needle task body',0); INSERT INTO documents(id,container_type,container_id,doc_type,title,body,created_by) VALUES('d','my-docs','p','text','Document alpha','needle document body','p'); INSERT INTO channels(id,content_type,name) VALUES('c','public','General'); INSERT INTO channel_members(channel_id,profile_id) VALUES('c','p'); INSERT INTO messages(id,channel_id,author_id,text) VALUES('m','c','p','needle chat body'); INSERT INTO blog_posts(id,title,body,author_id) VALUES('b','Blog alpha','needle blog body','p');").unwrap();
         let hits = full_text_search_on(&c, "needle", 20, Some("p"), true).unwrap();
         let kinds: Vec<_> = hits.iter().map(|hit| hit.entity_type.as_str()).collect();
-        assert!(kinds.contains(&"issue"));
+        assert!(kinds.contains(&"todo"));
         assert!(kinds.contains(&"document"));
         assert!(
             kinds.contains(&"channel"),

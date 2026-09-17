@@ -1,0 +1,13 @@
+UTC=20260904T171732Z
+url=https://paloptic.com/space/channel/cw-calls-proof-1788542253418/messages
+master=bf3cf8c
+run=33898571636
+run_url=https://github.com/pascaldisse/gaia-space/actions/runs/33898571636
+bundle=index-BTwmh_8d.js
+header=proof/cw-calls-live-20260904T171732Z-header.png
+panel=proof/cw-calls-live-20260904T171732Z-panel.png
+header_harness=bun run shot --login
+panel_harness=bun Playwright; authenticated workspace settled; Video click
+pixels.visible=yes; Call|Video pixel-visible beside members pill
+panel.video-click=CallPanel pixel-visible; LIVEKIT MEETING; state=Disconnected
+fixture=ephemeral; cleanup=channel+user completed

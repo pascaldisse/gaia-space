@@ -8,8 +8,8 @@
 //   * DUPLICATION: a message can arrive twice (page N+1 overlapping a live refresh, or a
 //     double click). Merge is by id, last write wins, so a re-fetched row updates rather
 //     than doubling.
-//   * RACE: only the newest in-flight request may write. Each load takes a ticket; a
-//     late answer holding an old ticket is dropped, which is what stops a slow first page
+//   * RACE: only the newest in-flight request may write. Each load takes a seq; a
+//     late answer holding an old seq is dropped, which is what stops a slow first page
 //     from overwriting a fast second one.
 import type { MessagePage, MessageView } from "./api/chat";
 
@@ -21,37 +21,37 @@ export type PagingState = {
   hasMore: boolean;
   loading: boolean;
   error: string | null;
-  /// Ticket of the request allowed to write next.
-  ticket: number;
+  /// Seq of the request allowed to write next.
+  seq: number;
 };
 
 export function initialPaging(): PagingState {
-  return { older: [], cursor: null, hasMore: true, loading: false, error: null, ticket: 0 };
+  return { older: [], cursor: null, hasMore: true, loading: false, error: null, seq: 0 };
 }
 
 /// Switching channel (or profile) invalidates everything, including in-flight answers:
-/// the ticket moves, so a page requested for the previous channel can never land here.
+/// the seq moves, so a page requested for the previous channel can never land here.
 export function resetPaging(state: PagingState): PagingState {
-  return { ...initialPaging(), ticket: state.ticket + 1 };
+  return { ...initialPaging(), seq: state.seq + 1 };
 }
 
-/// Take a ticket. Returns the new state and the ticket the caller must present back.
+/// Take a seq. Returns the new state and the seq the caller must present back.
 /// A load already in flight is not started twice — `started` is false and the caller
 /// simply does nothing.
 export function beginLoad(state: PagingState): {
   state: PagingState;
-  ticket: number;
+  seq: number;
   started: boolean;
 } {
   if (state.loading || !state.hasMore) {
-    return { state, ticket: state.ticket, started: false };
+    return { state, seq: state.seq, started: false };
   }
-  const ticket = state.ticket + 1;
-  return { state: { ...state, loading: true, error: null, ticket }, ticket, started: true };
+  const seq = state.seq + 1;
+  return { state: { ...state, loading: true, error: null, seq }, seq, started: true };
 }
 
-export function applyPage(state: PagingState, ticket: number, page: MessagePage): PagingState {
-  if (ticket !== state.ticket) return state; // stale answer
+export function applyPage(state: PagingState, seq: number, page: MessagePage): PagingState {
+  if (seq !== state.seq) return state; // stale answer
   return {
     ...state,
     older: mergeHistory(page.messages, state.older),
@@ -64,8 +64,8 @@ export function applyPage(state: PagingState, ticket: number, page: MessagePage)
 
 /// A failed page leaves `cursor`/`hasMore` untouched: the position is still valid, so
 /// "retry" means re-asking for the same page rather than skipping it.
-export function failLoad(state: PagingState, ticket: number, error: unknown): PagingState {
-  if (ticket !== state.ticket) return state;
+export function failLoad(state: PagingState, seq: number, error: unknown): PagingState {
+  if (seq !== state.seq) return state;
   return { ...state, loading: false, error: describeError(error) };
 }
 

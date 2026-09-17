@@ -25,11 +25,11 @@ const grid = (): SheetDoc => ({
   ],
 });
 
-const mount = (initial: SheetDoc = grid()) => {
+const mount = (initial: SheetDoc = grid(), lockedColumnIds?: string[]) => {
   const host = document.createElement("div");
   document.body.appendChild(host);
   const [sheet, setSheet] = createSignal<SheetDoc>(initial);
-  dispose = render(() => <SheetEditor sheet={sheet()} onChange={setSheet} />, host);
+  dispose = render(() => <SheetEditor sheet={sheet()} onChange={setSheet} lockedColumnIds={lockedColumnIds} />, host);
   return { host, sheet };
 };
 
@@ -49,6 +49,9 @@ describe("the sheet body format", () => {
     });
     expect(parseSheet("{not json").columns.length).toBe(3);
     expect(parseSheet(null).rows.length).toBe(emptySheet().rows.length);
+    const v2 = parseSheet('{"columns":[{"id":"p","label":"Owner","type":"person"},{"id":"f","label":"Total","type":"formula","formula":"[Amount] * 2","aggregate":"sum"}],"rows":[{"id":"r","cells":{"p":"ada","f":"999"}}]}');
+    expect(v2).toEqual({ columns: [{ id: "p", label: "Owner", type: "person" }, { id: "f", label: "Total", type: "formula", formula: "[Amount] * 2", aggregate: "sum" }], rows: [{ id: "r", cells: { p: "ada" } }] });
+    expect(serializeSheet(v2)).not.toContain('"f":"999"');
     // A cell addressed to a column that does not exist is dropped, never handed on:
     // the server would refuse the whole grid for it.
     expect(parseSheet('{"columns":[{"id":"c1","label":"A","type":"text"}],"rows":[{"id":"r1","cells":{"ghost":"x"}}]}').rows)
@@ -138,6 +141,23 @@ describe("the sheet editor", () => {
     expect(document.activeElement).toBe(host.querySelector('button[aria-label="Column 1 options"]'));
   });
 
+  test("renders computed formula values read-only", () => {
+    const { host } = mount({ columns: [{ id: "amount", label: "Amount", type: "number" }, { id: "total", label: "Total", type: "formula", formula: "[amount] * 2" }], rows: [{ id: "r1", cells: { amount: "4", total: "999" } }] });
+    const value = host.querySelector<HTMLElement>('[aria-label="Total row 1"]')!;
+    expect(value.tagName).toBe("SPAN");
+    expect(value.textContent).toBe("8");
+  });
+  test("does not offer deletion or type changes for locked columns", () => {
+    const { host } = mount(grid(), ["c1"]);
+    openColumnMenu(host, 1);
+    expect(host.querySelector('[aria-label="Delete column 1"]')).toBeNull();
+    expect(host.querySelector('[aria-label="Column 1 type"]')).toBeNull();
+    expect(host.querySelector<HTMLInputElement>('[aria-label="Column 1 name"]')).not.toBeNull();
+  });
+  test("renders configured aggregate footer", () => {
+    const { host } = mount({ columns: [{ id: "amount", label: "Amount", type: "number", aggregate: "sum" }], rows: [{ id: "r1", cells: { amount: "2" } }, { id: "r2", cells: { amount: "3" } }] });
+    expect(host.querySelector('.sheet-aggregate-cell')?.textContent).toBe("5");
+  });
   test("Escape puts the stored value back into the cell", () => {
     const { host } = mount();
     const target = cell(host, "Vendor row 1");

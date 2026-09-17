@@ -1,0 +1,93 @@
+KB tables + budget live HTTP proof
+source_db=/Users/pascaldisse/projects/gaia-space/.live-check/space-copy.db
+port=59450
+
+REQUEST login
+POST /api/auth/login
+{"username":"admin","password":"[redacted]"}
+RESPONSE status=200
+{"user":{"display_name":"Administrator","id":"admin","profile_id":"profile-admin","role":"GlobalAdmin","username":"admin"}}
+
+REQUEST create_profile
+POST /api/cmd/create_profile
+{"profile":{"id":"budget-b","username":"budget-b","display_name":"Budget B","email":null,"avatar_url":null,"archived":false}}
+RESPONSE status=200
+{"ok":true,"value":null}
+
+REQUEST create_project
+POST /api/cmd/create_project
+{"project":{"id":"kb-budget-project","name":"KB Budget Project","key":"KBB","description":null,"created_by":"forged","archived":false,"deadline":null,"status":"open","lead_id":null}}
+RESPONSE status=200
+{"ok":true,"value":null}
+
+REQUEST add_project_member
+POST /api/cmd/add_project_member
+{"project_id":"kb-budget-project","member_id":"budget-b"}
+RESPONSE status=200
+{"ok":true,"value":["budget-b","profile-admin"]}
+
+REQUEST create_document
+POST /api/cmd/create_document
+{"document":{"id":"kb-budget-document","container_type":"project","container_id":"kb-budget-project","folder_id":null,"doc_type":"text","body_format":"text","kind":"budget","title":"KB Budget","body":"{\"currency\":\"EUR\",\"members\":[\"profile-admin\",\"budget-b\"],\"columns\":[{\"id\":\"date\",\"label\":\"Date\",\"type\":\"date\"},{\"id\":\"paid_by\",\"label\":\"Paid by\",\"type\":\"person\"},{\"id\":\"amount\",\"label\":\"Amount\",\"type\":\"number\"},{\"id\":\"description\",\"label\":\"Description\",\"type\":\"text\"},{\"id\":\"split\",\"label\":\"Split among\",\"type\":\"text\"}],\"rows\":[]}","version":1,"archived":false,"created_by":"forged","source_entity_type":null,"source_entity_id":null}}
+RESPONSE status=200
+{"ok":true,"value":null}
+
+REQUEST budget_add_expense
+POST /api/cmd/budget_add_expense
+{"document_id":"kb-budget-document","input":{"date":"2026-09-03","paid_by":"profile-admin","amount":"30.00","description":"A pays 30","split":[]}}
+RESPONSE status=200
+{"ok":true,"value":{"archived":false,"body":"{\"columns\":[{\"id\":\"date\",\"label\":\"Date\",\"type\":\"date\"},{\"id\":\"paid_by\",\"label\":\"Paid by\",\"type\":\"person\"},{\"id\":\"amount\",\"label\":\"Amount\",\"type\":\"number\"},{\"id\":\"description\",\"label\":\"Description\",\"type\":\"text\"},{\"id\":\"split\",\"label\":\"Split among\",\"type\":\"text\"}],\"currency\":\"EUR\",\"members\":[\"profile-admin\",\"budget-b\"],\"rows\":[{\"cells\":{\"amount\":\"30.00\",\"date\":\"2026-09-03\",\"description\":\"A pays 30\",\"paid_by\":\"profile-admin\",\"split\":\"\"},\"id\":\"r_17884580082586010\"}]}","body_format":"text","container_id":"kb-budget-project","container_type":"project","created_by":"profile-admin","doc_type":"text","folder_id":"project-doc-root-kb-budget-project","id":"kb-budget-document","kind":"budget","source_entity_id":null,"source_entity_type":null,"title":"KB Budget","version":2}}
+
+REQUEST budget_add_expense
+POST /api/cmd/budget_add_expense
+{"document_id":"kb-budget-document","input":{"date":"2026-09-03","paid_by":"budget-b","amount":"10.00","description":"B pays 10","split":[]}}
+RESPONSE status=200
+{"ok":true,"value":{"archived":false,"body":"{\"columns\":[{\"id\":\"date\",\"label\":\"Date\",\"type\":\"date\"},{\"id\":\"paid_by\",\"label\":\"Paid by\",\"type\":\"person\"},{\"id\":\"amount\",\"label\":\"Amount\",\"type\":\"number\"},{\"id\":\"description\",\"label\":\"Description\",\"type\":\"text\"},{\"id\":\"split\",\"label\":\"Split among\",\"type\":\"text\"}],\"currency\":\"EUR\",\"members\":[\"profile-admin\",\"budget-b\"],\"rows\":[{\"cells\":{\"amount\":\"30.00\",\"date\":\"2026-09-03\",\"description\":\"A pays 30\",\"paid_by\":\"profile-admin\",\"split\":\"\"},\"id\":\"r_17884580082586010\"},{\"cells\":{\"amount\":\"10.00\",\"date\":\"2026-09-03\",\"description\":\"B pays 10\",\"paid_by\":\"budget-b\",\"split\":\"\"},\"id\":\"r_17884580083002371\"}]}","body_format":"text","container_id":"kb-budget-project","container_type":"project","created_by":"profile-admin","doc_type":"text","folder_id":"project-doc-root-kb-budget-project","id":"kb-budget-document","kind":"budget","source_entity_id":null,"source_entity_type":null,"title":"KB Budget","version":3}}
+
+REQUEST budget_add_expense
+POST /api/cmd/budget_add_expense
+{"document_id":"kb-budget-document","input":{"date":"2026-09-03","paid_by":"profile-admin","amount":"5.01","description":"A pays 5.01","split":[]}}
+RESPONSE status=200
+{"ok":true,"value":{"archived":false,"body":"{\"columns\":[{\"id\":\"date\",\"label\":\"Date\",\"type\":\"date\"},{\"id\":\"paid_by\",\"label\":\"Paid by\",\"type\":\"person\"},{\"id\":\"amount\",\"label\":\"Amount\",\"type\":\"number\"},{\"id\":\"description\",\"label\":\"Description\",\"type\":\"text\"},{\"id\":\"split\",\"label\":\"Split among\",\"type\":\"text\"}],\"currency\":\"EUR\",\"members\":[\"profile-admin\",\"budget-b\"],\"rows\":[{\"cells\":{\"amount\":\"30.00\",\"date\":\"2026-09-03\",\"description\":\"A pays 30\",\"paid_by\":\"profile-admin\",\"split\":\"\"},\"id\":\"r_17884580082586010\"},{\"cells\":{\"amount\":\"10.00\",\"date\":\"2026-09-03\",\"description\":\"B pays 10\",\"paid_by\":\"budget-b\",\"split\":\"\"},\"id\":\"r_17884580083002371\"},{\"cells\":{\"amount\":\"5.01\",\"date\":\"2026-09-03\",\"description\":\"A pays 5.01\",\"paid_by\":\"profile-admin\",\"split\":\"\"},\"id\":\"r_17884580083411962\"}]}","body_format":"text","container_id":"kb-budget-project","container_type":"project","created_by":"profile-admin","doc_type":"text","folder_id":"project-doc-root-kb-budget-project","id":"kb-budget-document","kind":"budget","source_entity_id":null,"source_entity_type":null,"title":"KB Budget","version":4}}
+
+REQUEST budget_statement
+POST /api/cmd/budget_statement
+{"document_id":"kb-budget-document","month":"2026-09"}
+RESPONSE status=200
+{"ok":true,"value":{"currency":"EUR","members":[{"name":"Administrator","net_cents":1250,"paid_cents":3501,"profile_id":"profile-admin","share_cents":2251},{"name":"Budget B","net_cents":-1250,"paid_cents":1000,"profile_id":"budget-b","share_cents":2250}],"month":"2026-09","rows_counted":3,"total_cents":4501,"transfers":[{"cents":1250,"from":"budget-b","to":"profile-admin"}]}}
+{"ok":true,"value":{"currency":"EUR","members":[{"name":"Administrator","net_cents":1250,"paid_cents":3501,"profile_id":"profile-admin","share_cents":2251},{"name":"Budget B","net_cents":-1250,"paid_cents":1000,"profile_id":"budget-b","share_cents":2250}],"month":"2026-09","rows_counted":3,"total_cents":4501,"transfers":[{"cents":1250,"from":"budget-b","to":"profile-admin"}]}}
+ASSERT statement expected cents/transfers: PASS
+
+REQUEST budget_export_statement
+POST /api/cmd/budget_export_statement
+{"document_id":"kb-budget-document","month":"2026-09"}
+RESPONSE status=200
+{"ok":true,"value":"budget-statement-1788458008447773"}
+
+REQUEST get_document
+POST /api/cmd/get_document
+{"id":"budget-statement-1788458008447773"}
+RESPONSE status=200
+{"ok":true,"value":{"archived":false,"body":"| Member | Paid | Share | Net |\n| --- | ---: | ---: | ---: |\n| Administrator | 3501 | 2251 | 1250 |\n| Budget B | 1000 | 2250 | -1250 |\n\n## Who owes whom\n\n- budget-b owes profile-admin 1250 EUR\n","body_format":"text","container_id":"kb-budget-project","container_type":"project","created_by":"profile-admin","doc_type":"text","folder_id":"project-doc-root-kb-budget-project","id":"budget-statement-1788458008447773","kind":"markdown","source_entity_id":null,"source_entity_type":null,"title":"KB Budget — 2026-09 statement","version":1}}
+ASSERT export markdown table: PASS
+
+REQUEST create_document
+POST /api/cmd/create_document
+{"document":{"id":"kb-formula-sheet","container_type":"project","container_id":"kb-budget-project","folder_id":null,"doc_type":"text","body_format":"text","kind":"sheet","title":"Formula sheet","body":"{\"columns\":[{\"id\":\"qty\",\"label\":\"Qty\",\"type\":\"number\"},{\"id\":\"price\",\"label\":\"Price\",\"type\":\"number\"},{\"id\":\"total\",\"label\":\"Total\",\"type\":\"formula\",\"formula\":\"[Qty] * [Price]\",\"aggregate\":\"sum\"}],\"rows\":[{\"id\":\"r_formula\",\"cells\":{\"qty\":\"2\",\"price\":\"3\"}}]}","version":1,"archived":false,"created_by":"forged","source_entity_type":null,"source_entity_id":null}}
+RESPONSE status=200
+{"ok":true,"value":null}
+
+REQUEST save_document
+POST /api/cmd/save_document
+{"id":"kb-formula-sheet","title":"Formula sheet","body":"{\"columns\":[{\"id\":\"qty\",\"label\":\"Qty\",\"type\":\"number\"},{\"id\":\"price\",\"label\":\"Price\",\"type\":\"number\"},{\"id\":\"total\",\"label\":\"Total\",\"type\":\"formula\",\"formula\":\"[Qty] * [Price]\",\"aggregate\":\"sum\"}],\"rows\":[{\"id\":\"r_formula\",\"cells\":{\"qty\":\"2\",\"price\":\"3\"}}]}"}
+RESPONSE status=200
+{"ok":true,"value":{"archived":false,"body":"{\"columns\":[{\"id\":\"qty\",\"label\":\"Qty\",\"type\":\"number\"},{\"id\":\"price\",\"label\":\"Price\",\"type\":\"number\"},{\"id\":\"total\",\"label\":\"Total\",\"type\":\"formula\",\"formula\":\"[Qty] * [Price]\",\"aggregate\":\"sum\"}],\"rows\":[{\"id\":\"r_formula\",\"cells\":{\"qty\":\"2\",\"price\":\"3\"}}]}","body_format":"text","container_id":"kb-budget-project","container_type":"project","created_by":"profile-admin","doc_type":"text","folder_id":"project-doc-root-kb-budget-project","id":"kb-formula-sheet","kind":"sheet","source_entity_id":null,"source_entity_type":null,"title":"Formula sheet","version":2}}
+
+REQUEST save_document
+POST /api/cmd/save_document
+{"id":"kb-formula-sheet","title":"Formula sheet","body":"{\"columns\":[{\"id\":\"nope\",\"label\":\"Nope\",\"type\":\"bogus\"}],\"rows\":[]}"}
+RESPONSE status=400
+{"error":"sheet column 'nope' has unknown type 'bogus'","ok":false}
+ASSERT formula sheet save accepted; bogus type save refused: PASS
+
+server_pid=20532 stopped by proof cleanup

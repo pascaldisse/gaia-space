@@ -121,6 +121,10 @@ fn default_body_format() -> String {
 }
 pub const KIND_MARKDOWN: &str = "markdown";
 pub const KIND_SHEET: &str = "sheet";
+pub const KIND_BUDGET: &str = crate::budget::KIND_BUDGET;
+pub const MAX_SHEET_COLUMNS: usize = 64;
+pub const MAX_SHEET_ROWS: usize = 5000;
+pub const MAX_FORMULA_LEN: usize = 512;
 fn default_kind() -> String {
     KIND_MARKDOWN.into()
 }
@@ -160,15 +164,19 @@ fn ensure_sheet_schema(c: &rusqlite::Connection) -> Result<()> {
 }
 
 /// Every connection this module opens carries the sheet column.
-fn conn() -> Result<rusqlite::Connection> {
+pub(crate) fn document_connection() -> Result<rusqlite::Connection> {
     let c = db::conn()?;
     ensure_sheet_schema(&c)?;
     Ok(c)
 }
 
+fn conn() -> Result<rusqlite::Connection> {
+    document_connection()
+}
+
 fn validate_kind(kind: &str) -> Result<()> {
     match kind {
-        KIND_MARKDOWN | KIND_SHEET => Ok(()),
+        KIND_MARKDOWN | KIND_SHEET | KIND_BUDGET => Ok(()),
         other => Err(format!(
             "unknown document kind '{other}' (expected 'markdown' or 'sheet')"
         )),
@@ -185,11 +193,19 @@ pub fn validate_sheet_body(body: &str) -> Result<()> {
         .get("columns")
         .and_then(|v| v.as_array())
         .ok_or_else(|| "sheet body needs a 'columns' array".to_string())?;
+    if columns.len() > MAX_SHEET_COLUMNS {
+        return Err(format!(
+            "sheet body has more than {MAX_SHEET_COLUMNS} columns"
+        ));
+    }
     let rows = value
         .get("rows")
         .and_then(|v| v.as_array())
         .ok_or_else(|| "sheet body needs a 'rows' array".to_string())?;
-    let mut column_ids: Vec<&str> = Vec::with_capacity(columns.len());
+    if rows.len() > MAX_SHEET_ROWS {
+        return Err(format!("sheet body has more than {MAX_SHEET_ROWS} rows"));
+    }
+    let mut column_ids: Vec<(&str, &str)> = Vec::with_capacity(columns.len());
     for column in columns {
         let id = column
             .get("id")
@@ -197,23 +213,49 @@ pub fn validate_sheet_body(body: &str) -> Result<()> {
             .map(str::trim)
             .filter(|id| !id.is_empty())
             .ok_or_else(|| "every sheet column needs a non-empty id".to_string())?;
-        if column_ids.contains(&id) {
+        if column_ids.iter().any(|(known, _)| *known == id) {
             return Err(format!("duplicate sheet column id '{id}'"));
         }
         column
             .get("label")
             .and_then(|v| v.as_str())
             .ok_or_else(|| format!("sheet column '{id}' needs a label"))?;
-        match column.get("type").and_then(|v| v.as_str()) {
-            Some("text") | Some("number") | Some("date") => {}
-            Some(other) => {
+        let kind = match column.get("type").and_then(|v| v.as_str()) {
+            Some(kind @ ("text" | "number" | "date" | "person" | "formula")) => kind,
+            Some(other) => return Err(format!("sheet column '{id}' has unknown type '{other}'")),
+            None => return Err(format!("sheet column '{id}' needs a type")),
+        };
+        match column.get("formula") {
+            Some(_) if kind != "formula" => {
                 return Err(format!(
-                    "sheet column '{id}' has unknown type '{other}' (expected text, number or date)"
+                    "sheet column '{id}' may only have a formula when type is formula"
                 ))
             }
-            None => return Err(format!("sheet column '{id}' needs a type")),
+            Some(formula) => {
+                let formula = formula
+                    .as_str()
+                    .ok_or_else(|| format!("sheet formula '{id}' must be a string"))?;
+                if formula.trim().is_empty() {
+                    return Err(format!("sheet formula '{id}' must not be empty"));
+                }
+                if formula.len() > MAX_FORMULA_LEN {
+                    return Err(format!(
+                        "sheet formula '{id}' exceeds {MAX_FORMULA_LEN} characters"
+                    ));
+                }
+            }
+            None if kind == "formula" => {
+                return Err(format!("sheet formula column '{id}' needs a formula"))
+            }
+            None => {}
         }
-        column_ids.push(id);
+        if let Some(aggregate) = column.get("aggregate") {
+            match aggregate.as_str() {
+                Some("sum" | "avg" | "min" | "max" | "count" | "none") => {}
+                _ => return Err(format!("sheet column '{id}' has invalid aggregate")),
+            }
+        }
+        column_ids.push((id, kind));
     }
     let mut row_ids: Vec<&str> = Vec::with_capacity(rows.len());
     for row in rows {
@@ -232,9 +274,16 @@ pub fn validate_sheet_body(body: &str) -> Result<()> {
             .and_then(|v| v.as_object())
             .ok_or_else(|| format!("sheet row '{id}' needs a 'cells' object"))?;
         for (column_id, cell) in cells {
-            if !column_ids.contains(&column_id.as_str()) {
+            let kind = column_ids
+                .iter()
+                .find(|(known, _)| *known == column_id)
+                .map(|(_, kind)| *kind)
+                .ok_or_else(|| {
+                    format!("sheet row '{id}' addresses unknown column '{column_id}'")
+                })?;
+            if kind == "formula" {
                 return Err(format!(
-                    "sheet row '{id}' addresses unknown column '{column_id}'"
+                    "sheet row '{id}' must not store formula cell '{column_id}'"
                 ));
             }
             if !cell.is_string() {
@@ -246,7 +295,6 @@ pub fn validate_sheet_body(body: &str) -> Result<()> {
     }
     Ok(())
 }
-
 /// What a sheet says in plain words: column labels and every cell value, so full-text
 /// search finds a sheet by its content and not by its JSON punctuation.
 pub fn sheet_search_text(body: &str) -> String {
@@ -399,7 +447,15 @@ pub(crate) fn document_readable_by_on(
 }
 
 pub fn document_writable_by(id: &str, profile_id: &str, is_admin: bool) -> Result<bool> {
-    let c = conn()?;
+    document_writable_by_on(&conn()?, id, profile_id, is_admin)
+}
+
+pub(crate) fn document_writable_by_on(
+    c: &rusqlite::Connection,
+    id: &str,
+    profile_id: &str,
+    is_admin: bool,
+) -> Result<bool> {
     c.query_row(
         &format!(
             "SELECT EXISTS(SELECT 1 FROM documents d WHERE d.id=?3 AND {})",
@@ -756,7 +812,9 @@ pub fn ensure_organization_library_root() -> Result<DocumentFolder> {
     let c = db::conn()?;
     ensure_organization_library_root_on(&c)
 }
-pub(crate) fn ensure_organization_library_root_on(c: &rusqlite::Connection) -> Result<DocumentFolder> {
+pub(crate) fn ensure_organization_library_root_on(
+    c: &rusqlite::Connection,
+) -> Result<DocumentFolder> {
     c.execute(
         "INSERT OR IGNORE INTO document_folders(id,container_type,container_id,parent_id,name,description,archived) VALUES(?1,'kb',?1,NULL,'Library',NULL,0)",
         [ORGANIZATION_LIBRARY_ID],
@@ -764,7 +822,8 @@ pub(crate) fn ensure_organization_library_root_on(c: &rusqlite::Connection) -> R
     c.execute(
         "INSERT OR IGNORE INTO kb_book_owners(book_id,profile_id) VALUES(?1,'default-org')",
         [ORGANIZATION_LIBRARY_ID],
-    ).map_err(|e| e.to_string())?;
+    )
+    .map_err(|e| e.to_string())?;
     c.query_row(
         "SELECT id,container_type,container_id,parent_id,name,description,archived FROM document_folders WHERE id=?1",
         [ORGANIZATION_LIBRARY_ID], row_to_folder,
@@ -871,6 +930,10 @@ pub fn create_document(mut document: Document) -> Result<()> {
     if document.kind == KIND_SHEET {
         if let Some(body) = document.body.as_deref() {
             validate_sheet_body(body)?;
+        }
+    } else if document.kind == KIND_BUDGET {
+        if let Some(body) = document.body.as_deref() {
+            crate::budget::validate_budget_body(body)?;
         }
     }
     c.execute(
@@ -1030,17 +1093,47 @@ pub fn save_document(
     actor: Option<String>,
 ) -> Result<Document> {
     let mut c = conn()?;
-    let tx = c.transaction().map_err(|e| e.to_string())?;
+    save_document_on(&mut c, &id, &title, body, actor)
+}
+
+pub(crate) fn save_document_on(
+    c: &mut rusqlite::Connection,
+    id: &str,
+    title: &str,
+    body: Option<String>,
+    actor: Option<String>,
+) -> Result<Document> {
+    let (doc, kind) = {
+        let tx = c.transaction().map_err(|e| e.to_string())?;
+        let result = save_document_tx(&tx, id, title, body, actor)?;
+        tx.commit().map_err(|e| e.to_string())?;
+        result
+    };
+    if kind == KIND_SHEET {
+        reindex_sheet(c, &doc.id, doc.body.as_deref());
+    }
+    document_updated_event(&doc);
+    Ok(doc)
+}
+
+pub(crate) fn save_document_tx(
+    tx: &rusqlite::Transaction<'_>,
+    id: &str,
+    title: &str,
+    body: Option<String>,
+    actor: Option<String>,
+) -> Result<(Document, String)> {
     let (current_version, kind): (i64, String) = tx
         .query_row(
             "SELECT version,kind FROM documents WHERE id=?1",
-            [&id],
+            [id],
             |r| Ok((r.get(0)?, r.get(1)?)),
         )
         .map_err(|e| e.to_string())?;
-    // A broken grid is refused before anything is written: no body change, no version.
     if kind == KIND_SHEET {
         validate_sheet_body(body.as_deref().unwrap_or(""))?;
+    } else if kind == KIND_BUDGET {
+        crate::budget::validate_budget_body(body.as_deref().unwrap_or(""))?;
     }
     let next_version = current_version + 1;
     tx.execute(
@@ -1059,22 +1152,25 @@ pub fn save_document(
         ],
     )
     .map_err(|e| e.to_string())?;
-    tx.commit().map_err(|e| e.to_string())?;
-    if kind == KIND_SHEET {
-        reindex_sheet(&c, &id, body.as_deref());
-    }
-    let doc = get_document(id)?.ok_or_else(|| "document vanished after save".to_string())?;
-    // Taxonomy name first; the pre-taxonomy alias is re-emitted so subscriptions
-    // stored before `events.rs` existed keep firing.
-    document_event(crate::events::DOCUMENT_UPDATED, &doc);
-    document_event(crate::events::LEGACY_DOCUMENT_EVENT, &doc);
-    Ok(doc)
+    let doc = tx
+        .query_row(
+            &format!("SELECT {DOC_COLUMNS} FROM documents WHERE id=?1"),
+            [id],
+            row_to_document,
+        )
+        .map_err(|_| "document vanished after save".to_string())?;
+    Ok((doc, kind))
 }
 
 /// Webhook fan-out envelope: `{"event": …, "document": …}`; subscription filters address
 /// it by dot-path, e.g. `"document.title"`. Second domain in the cross-domain taxonomy
 /// (issues being the first). Best effort after commit — a subscriber problem must never
 /// undo a user's document edit.
+pub(crate) fn document_updated_event(doc: &Document) {
+    document_event(crate::events::DOCUMENT_UPDATED, doc);
+    document_event(crate::events::LEGACY_DOCUMENT_EVENT, doc);
+}
+
 fn document_event(event_type: &str, doc: &Document) {
     let payload = serde_json::json!({ "event": event_type, "document": doc });
     if let Err(e) = crate::applications::enqueue_event(event_type, &payload) {
@@ -1181,13 +1277,13 @@ pub fn list_doc_versions_scoped(
     document_id: String,
     profile_id: String,
 ) -> Result<Vec<DocVersion>> {
-    let c = conn()?;
-    let mut s = c.prepare(&format!("SELECT v.id,v.document_id,v.version,v.body,v.created_by,v.created_at FROM doc_versions v JOIN documents d ON d.id=v.document_id WHERE v.document_id=?2 AND {DOCUMENT_READ_SCOPE} ORDER BY v.version DESC")).map_err(|e| e.to_string())?;
-    let rows = s
-        .query_map(
-            rusqlite::params![profile_id, document_id],
-            row_to_doc_version,
-        )
+    list_doc_versions_scoped_on(&conn()?, &document_id, &profile_id)
+}
+
+fn list_doc_versions_scoped_on(c: &rusqlite::Connection, document_id: &str, profile_id: &str) -> Result<Vec<DocVersion>> {
+    let sql = format!("SELECT v.id,v.document_id,v.version,v.body,v.created_by,v.created_at FROM doc_versions v JOIN documents d ON d.id=v.document_id WHERE v.document_id=?2 AND {} ORDER BY v.version DESC", document_read_scope());
+    let mut s = c.prepare(&sql).map_err(|e| e.to_string())?;
+    let rows = s.query_map(rusqlite::params![profile_id, document_id], row_to_doc_version)
         .map_err(|e| e.to_string())?
         .collect::<std::result::Result<_, _>>()
         .map_err(|e| e.to_string());
@@ -1276,9 +1372,13 @@ pub fn list_document_folders_scoped(profile_id: String) -> Result<Vec<DocumentFo
     let c = db::conn()?;
     list_document_folders_scoped_on(&c, &profile_id)
 }
-pub(crate) fn list_document_folders_scoped_on(c: &rusqlite::Connection, profile_id: &str) -> Result<Vec<DocumentFolder>> {
+pub(crate) fn list_document_folders_scoped_on(
+    c: &rusqlite::Connection,
+    profile_id: &str,
+) -> Result<Vec<DocumentFolder>> {
     let mut s = c.prepare(&format!("SELECT id,container_type,container_id,parent_id,name,description,archived FROM document_folders f WHERE {FOLDER_READ_SCOPE} ORDER BY name")).map_err(|e|e.to_string())?;
-    let rows = s.query_map([profile_id], row_to_folder)
+    let rows = s
+        .query_map([profile_id], row_to_folder)
         .map_err(|e| e.to_string())?
         .collect::<std::result::Result<_, _>>()
         .map_err(|e| e.to_string());
@@ -2906,6 +3006,19 @@ mod tests {
     }
 
     #[test]
+    fn scoped_version_history_uses_the_complete_read_scope() {
+        let c = test_conn();
+        c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('history-owner','history-owner','Owner',0),('history-viewer','history-viewer','Viewer',0),('history-stranger','history-stranger','Stranger',0)", []).unwrap();
+        c.execute("INSERT INTO documents(id,container_type,container_id,doc_type,title,body,version,archived,created_by) VALUES('history-doc','my-docs','history-owner','text','History','body',1,0,'history-owner')", []).unwrap();
+        c.execute("INSERT INTO doc_versions(id,document_id,version,body,created_by) VALUES('history-doc-v1','history-doc',1,'body','history-owner')", []).unwrap();
+        c.execute("INSERT INTO document_permissions(document_id,recipient_type,recipient_id,access_level) VALUES('history-doc','profile','history-viewer','viewer')", []).unwrap();
+
+        assert_eq!(list_doc_versions_scoped_on(&c, "history-doc", "history-owner").unwrap().len(), 1);
+        assert_eq!(list_doc_versions_scoped_on(&c, "history-doc", "history-viewer").unwrap().len(), 1);
+        assert!(list_doc_versions_scoped_on(&c, "history-doc", "history-stranger").unwrap().is_empty());
+    }
+
+    #[test]
     fn version_save_and_restore_roundtrip() {
         let c = test_conn();
         insert_doc(&c, "doc1", "project", Some("demo-project"), None, "v1 body");
@@ -3211,15 +3324,22 @@ mod tests {
     fn organization_library_root_exists_once_and_every_active_member_can_list_it() {
         let c = test_conn();
         c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('member-a','a','A',1),('member-b','b','B',1),('former','f','Former',1)", []).unwrap();
-        c.execute("UPDATE profiles SET archived=1 WHERE id='former'", []).unwrap();
+        c.execute("UPDATE profiles SET archived=1 WHERE id='former'", [])
+            .unwrap();
         let root = ensure_organization_library_root_on(&c).unwrap();
         assert_eq!(root.id, ORGANIZATION_LIBRARY_ID);
         assert_eq!(root.name, "Library");
         assert_eq!(ensure_organization_library_root_on(&c).unwrap().id, root.id);
         for member in ["member-a", "member-b"] {
-            assert!(list_document_folders_scoped_on(&c, member).unwrap().iter().any(|folder| folder.id == ORGANIZATION_LIBRARY_ID));
+            assert!(list_document_folders_scoped_on(&c, member)
+                .unwrap()
+                .iter()
+                .any(|folder| folder.id == ORGANIZATION_LIBRARY_ID));
         }
-        assert!(!list_document_folders_scoped_on(&c, "former").unwrap().iter().any(|folder| folder.id == ORGANIZATION_LIBRARY_ID));
+        assert!(!list_document_folders_scoped_on(&c, "former")
+            .unwrap()
+            .iter()
+            .any(|folder| folder.id == ORGANIZATION_LIBRARY_ID));
     }
 
     /// A knowledge-base book is navigable to the profile that owns an article inside it,
@@ -3572,6 +3692,36 @@ mod tests {
     // ---- sheets ---------------------------------------------------------------
 
     const GRID: &str = r#"{"columns":[{"id":"c1","label":"Vendor","type":"text"},{"id":"c2","label":"Amount","type":"number"}],"rows":[{"id":"r1","cells":{"c1":"Contoso","c2":"120"}}]}"#;
+    #[test]
+    fn sheet_v2_validation_accepts_contract_and_refuses_each_limit() {
+        let valid = r#"{"columns":[{"id":"text","label":"Text","type":"text","aggregate":"none"},{"id":"number","label":"Number","type":"number","aggregate":"sum"},{"id":"date","label":"Date","type":"date"},{"id":"person","label":"Person","type":"person"},{"id":"formula","label":"Formula","type":"formula","formula":"[Number] * 2","aggregate":"avg"}],"rows":[{"id":"r1","cells":{"text":"hello","number":"2","date":"2026-01-01","person":"ada"}}]}"#;
+        assert!(validate_sheet_body(valid).is_ok());
+        for invalid in [
+            r#"{"columns":[{"id":"f","label":"F","type":"formula"}],"rows":[]}"#,
+            r#"{"columns":[{"id":"f","label":"F","type":"formula","formula":""}],"rows":[]}"#,
+            r#"{"columns":[{"id":"t","label":"T","type":"text","formula":"1"}],"rows":[]}"#,
+            r#"{"columns":[{"id":"f","label":"F","type":"formula","formula":7}],"rows":[]}"#,
+            r#"{"columns":[{"id":"t","label":"T","type":"text","aggregate":"total"}],"rows":[]}"#,
+            r#"{"columns":[{"id":"f","label":"F","type":"formula","formula":"1"}],"rows":[{"id":"r","cells":{"f":"1"}}]}"#,
+        ] {
+            assert!(validate_sheet_body(invalid).is_err(), "accepted {invalid}");
+        }
+        let long_formula = format!(
+            r#"{{"columns":[{{"id":"f","label":"F","type":"formula","formula":"{}"}}],"rows":[]}}"#,
+            "x".repeat(MAX_FORMULA_LEN + 1)
+        );
+        assert!(validate_sheet_body(&long_formula).is_err());
+        let columns = (0..=MAX_SHEET_COLUMNS)
+            .map(|i| format!(r#"{{"id":"c{i}","label":"C","type":"text"}}"#))
+            .collect::<Vec<_>>()
+            .join(",");
+        assert!(validate_sheet_body(&format!(r#"{{"columns":[{columns}],"rows":[]}}"#)).is_err());
+        let rows = (0..=MAX_SHEET_ROWS)
+            .map(|i| format!(r#"{{"id":"r{i}","cells":{{}}}}"#))
+            .collect::<Vec<_>>()
+            .join(",");
+        assert!(validate_sheet_body(&format!(r#"{{"columns":[],"rows":[{rows}]}}"#)).is_err());
+    }
 
     #[test]
     fn a_database_written_before_sheets_keeps_its_documents_and_gains_markdown() {

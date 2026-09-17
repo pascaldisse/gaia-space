@@ -1,0 +1,23 @@
+UTC=20260904T180213Z
+url=https://paloptic.com/space/channel/<ephemeral>/messages
+master=dcb66e1ddb68abb363422470ca33036961adcab8
+run=33902594320
+run_url=https://github.com/pascaldisse/gaia-space/actions/runs/33902594320
+bundle=index-BPTRIBat.js
+header=proof/cw-video-live-20260904T180213Z-header.png
+panel_video=proof/cw-video-live-20260904T180213Z-panel-video.png
+panel_audio=proof/cw-video-live-20260904T180213Z-panel-audio.png
+cause=previous screenshot clicked while channel() was unresolved; startCall silently returned before create_meeting
+harness=bun run shot --login header; Playwright production authenticated workspace settled; fresh ephemeral GlobalMember+public channel
+auth_me=200 /space/api/auth/me
+create_meeting_requests=2
+pixels.panel.video=yes
+pixels.panel.audio=yes
+console_errors=Failed to load resource: the server responded with a status of 403 () | Failed to load resource: the server responded with a status of 403 () | Failed to load resource: the server responded with a status of 403 ()
+fixture=ephemeral; cleanup=completed
+UNVERIFIED=none
+gate.check=bun run check: PASS
+gate.views=bun test src/views: 517 pass; 0 fail; 1774 expect(); 53.56s
+gate.deploy=run 33902594320: success; Gates/Deploy PASS
+pixels.eye=header Call|Video visible; video/audio screenshots each show LIVEKIT MEETING CallPanel
+orphan_sweep=completed; vite:5175 untouched

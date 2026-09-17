@@ -138,3 +138,103 @@
   --rail-gradient: linear-gradient(180deg, #04302b 0%, #05413a 56%, #032723 100%);
   --nav-top-gradient: linear-gradient(90deg, #053d36, #032b27);
 }
+
+/* ═══ PALEBLOOD — the Bloodborne palette, shared vocabulary with Paloptic ═════
+   A third axis, not a recombination of the other two: canvas AND chrome are
+   both unique to this palette (ink + gold + blood, not purple or teal), so
+   — unlike dusk/lagoon/deep — it gets ONE block instead of a shared canvas
+   split from its own chrome. Base colours are the `--pb-*` tokens from
+   `palettes/paleblood.tokens.css` (source: paloptic's atlas-ui.css `:root`);
+   values with no Paleblood source (the wash/hover steps a UI needs that a
+   game overlay never did) are interpolated FROM those tokens, never a new
+   hue. Teal/amber/green/blue keep dusk's already-tuned dark-mode ink so every
+   dark palette's status pills read alike; RED becomes the source's own blood,
+   because for this palette blood-red *is* the accent. */
+.palette-paleblood .theme-space-light {
+  --ink: var(--pb-bone);
+  --muted: var(--pb-parchment);
+  --quiet: var(--pb-muted);
+  --paper: var(--pb-ink-raised);
+  --wash: var(--pb-ink);
+  --wash-2: #16130e;
+  --line: var(--pb-gold-faint);
+  --line-strong: var(--pb-gold-dim);
+
+  /* action/open, waiting, success, external — same ink dusk already tuned for
+     a dark canvas; not sourced from paloptic, so re-hued, never re-invented. */
+  --teal-soft: #10312d;
+  --teal-ink: #5fdcc6;
+  --amber-soft: #33280f;
+  --amber-ink: #e8bd71;
+  --green-soft: #16301f;
+  --green: #4cb782;
+  --blue: #8899e8;
+
+  /* critical/blocked — the one status colour this palette's own source names:
+     Paloptic's --pt-danger, i.e. blood. */
+  --red: var(--pb-blood);
+  --red-soft: rgba(168, 43, 37, .18);
+  --red-ink: #e2897d;
+
+  /* THE accent. Atlas's own sheet already uses blood this way — gate-input
+     caret/focus/shake all key off `--atlas-blood`, never gold — so Paleblood's
+     one deliberate law-break is here: the app's primary interactive colour
+     decouples from `--teal` (which keeps meaning "action/open" in status
+     pills) and becomes the source's own accent instead. Overridden directly,
+     not through `--teal`, so the status law upstream is untouched. */
+  --accent: var(--pb-blood);
+  --accent-hover: #8f1e1a;
+  --accent-soft: rgba(168, 43, 37, .18);
+  --accent-text: var(--pb-blood);
+
+  --shadow: 0 18px 44px rgba(0, 0, 0, .55);
+  --shadow-card-sm: 0 12px 30px rgba(0, 0, 0, .40);
+  --shadow-side: 0 8px 22px rgba(0, 0, 0, .35);
+  --shadow-btn: 0 1px 0 rgba(0, 0, 0, .30);
+
+  --ctl-bg: #16130e;
+  --ctl-bg-hover: #1e1a12;
+  --ctl-bg-raised-hover: #1e1a12;
+  --surface-hover: #1a160f;
+
+  --avatar-person-ring: rgba(222, 212, 189, .14);
+  --status-success-ink: #79d3a1;
+  --status-risk-medium: #d4b25c;
+
+  --cal-task-bg: rgba(217, 155, 36, .20);
+  --cal-task-chip-bg: rgba(217, 155, 36, .30);
+  --cal-deadline-bg: rgba(168, 43, 37, .20);
+  --cal-deadline-chip-bg: rgba(168, 43, 37, .30);
+  --cal-external-bg: rgba(136, 153, 232, .18);
+  --cal-external-chip-bg: rgba(136, 153, 232, .28);
+  --cal-external-ink: #9fb0ff;
+
+  --mention-soft: #2b1c33;
+  --mention-ink: #cfaee8;
+  --mention-line: #6f4f8c;
+
+  --dk-icon-bg: rgba(0, 191, 166, .16);
+  --dk-icon-border: rgba(0, 191, 166, .38);
+
+  /* ── CHROME: gold, not purple or teal ── ink-raised furniture, gold-dim frame
+     lines instead of a saturated hue — the rail is the same near-black the
+     canvas is, so "chrome" reads as the game's own hairline-and-glow language,
+     not a fourth colour axis pretending to be one of the other two. */
+  --purple-0: #060504;
+  --purple-1: #0d0c09;
+  --purple-2: #141210;
+  --purple-3: #1d1a15;
+  --nav-text: var(--pb-bone);
+  --nav-muted: var(--pb-parchment);
+  --nav-faint: rgba(222, 212, 189, .55);
+  --rail-gradient: linear-gradient(180deg, #060504 0%, #0d0c09 56%, #060504 100%);
+  --nav-sidebar-gradient:
+    radial-gradient(circle at 12% 0%, rgba(169, 144, 90, .10), transparent 34%),
+    linear-gradient(180deg, #141210, #0d0c09 48%, #060504 100%);
+  --nav-top-gradient: linear-gradient(90deg, #0d0c09, #060504);
+  /* active row: the chrome's own light tint, gold not blood — an active
+     destination is where you are, not a warning. */
+  --nav-active-bg: #e8d5a0;
+  --nav-active-ink: #241d10;
+  --nav-chip-bg: #ddcda2;
+}

@@ -116,10 +116,29 @@
 .task-tile-cat { font-weight: 620; }
 
 /* Assigned tracker work is surfaced, not copied: its target keeps the ticket in Development. */
-.task-ticket-tile { text-decoration:none; color:inherit; }
-.task-work-kind { display:inline-flex; align-items:center; gap:3px; margin-top:4px; font-size:11px; color:var(--text-muted); }
-.task-ticket-tile .task-tile-body { cursor:pointer; }
 
 .task-ticket-tile { text-decoration:none; color:inherit; }
 .task-work-kind { display:inline-flex; align-items:center; gap:3px; margin-top:4px; font-size:11px; color:var(--text-muted); }
 .task-ticket-tile .task-tile-body { cursor:pointer; }
+
+/* THE TWO PANES OF "MY TASKS". Tasks first and selected by default; tracker work is
+   a second pane, never a group inside the list (a ticket cannot be ticked off, dated
+   or dragged here, so it must not wear the grammar of a row that can). */
+.task-panes { display:flex; gap:4px; margin:0 0 var(--dk-space-sm); }
+.task-panes button {
+  display:inline-flex; align-items:center; gap:7px; padding:7px 13px;
+  border:var(--dk-hairline) solid transparent; border-radius:999px; background:none;
+  color:var(--text-muted); font:600 13px/1 var(--font-body); cursor:pointer;
+}
+.task-panes button:hover { background:var(--surface-hover); }
+.task-panes button.active { border-color:var(--surface-border); background:var(--surface); color:var(--text-strong); }
+.task-panes .count {
+  min-width:19px; padding:2px 6px; border-radius:999px; background:var(--surface-hover);
+  color:var(--text-muted); font-size:11px; font-weight:700; text-align:center;
+}
+.task-panes button.active .count { color:var(--text-strong); }
+.theme-space-light .task-panes button { color:var(--muted); }
+.theme-space-light .task-panes button:hover { background:var(--wash-2); }
+.theme-space-light .task-panes button.active { border-color:var(--line); background:var(--paper); color:var(--ink); }
+.theme-space-light .task-panes .count { background:var(--wash-2); color:var(--muted); }
+.theme-space-light .task-panes button.active .count { color:var(--ink); }

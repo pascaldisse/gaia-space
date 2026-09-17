@@ -15,9 +15,12 @@ export const NAV_GROUPS: NavGroup[] = [
   // "Tasks", not "My tasks": this group holds the SHARED work surfaces (Team Tasks =
   // everybody's running project work, Project Tasks = one project's), so a possessive
   // label made people skip the only cross-team view there is.
-  { id: "tasks", label: "Tasks", icon: "check", views: ["To-Do", "Team Tasks", "Project Tasks"] },
-  // Projects is ONE destination: open a project → its boards → their issues.
-  // Issues/Boards/Packages stay routable (deep links, Go to) but are not tabs.
+  // The Task Ledger is an EXTRA reading surface (generated, read-only), not a
+  // replacement for the task area: it joins the group AFTER the three working
+  // surfaces so nobody meets it first and mistakes it for "Tasks".
+  { id: "tasks", label: "Tasks", icon: "check", views: ["To-Do", "Team Tasks", "Project Tasks", "Task Ledger"] },
+  // Projects is ONE destination: open a project → its Dev tab → its dev tasks.
+  // Packages stay routable (deep links, Go to) but is not a tab.
   { id: "projects", label: "Projects", icon: "layers", views: ["Projects", "Development", "Repos", "Code Reviews", "Pipelines", "Dev Environments"] },
   { id: "calendar", label: "Calendar", icon: "calendar-nav", views: ["Calendar", "Meetings"] },
   { id: "knowledge", label: "Knowledge", icon: "book-nav", views: ["Documents", "Blogs"] },
@@ -52,24 +55,33 @@ export const financeVisible = () => FINANCE_FOR_EVERYONE || financeAllowed();
 const LAYOUT_KEY = "space.nav.layout";
 const HIDDEN_KEY = "space.nav.hidden";
 const DEFAULT_VIEW_KEY = "space.nav.defaultView";
-
+const PLACEMENT_KEY = "space.nav.placement";
+const MOBILE_PLACEMENT_KEY = "space.nav.mobilePlacement";
+const DEVELOPMENT_KEY = "space.nav.showDevelopment";
 const LAYOUTS: NavLayout[] = ["grouped", "flat", "chat-first"];
-const readLayout = (): NavLayout => {
-  const stored = localStorage.getItem(LAYOUT_KEY);
-  return LAYOUTS.includes(stored as NavLayout) ? (stored as NavLayout) : "chat-first";
+const PLACEMENTS: NavPlacement[] = ["left", "right", "top", "bottom"];
+const MOBILE_PLACEMENTS: MobileNavPlacement[] = ["top", "bottom"];
+const readChoice = <T extends string>(key: string, choices: readonly T[], fallback: T): T => {
+  const stored = localStorage.getItem(key);
+  return choices.includes(stored as T) ? stored as T : fallback;
 };
+const readBoolean = (key: string, fallback: boolean): boolean => {
+  const stored = localStorage.getItem(key);
+  return stored === null ? fallback : stored === "true";
+};
+const readLayout = (): NavLayout => readChoice(LAYOUT_KEY, LAYOUTS, "chat-first");
 const readHidden = (): string[] => { try { const raw = JSON.parse(localStorage.getItem(HIDDEN_KEY) ?? "[]"); return Array.isArray(raw) ? raw.filter((x): x is string => typeof x === "string") : []; } catch { return []; } };
-
 const [navLayout, setLayoutSignal] = createSignal<NavLayout>(readLayout());
 const [hiddenGroups, setHiddenSignal] = createSignal<string[]>(readHidden());
-// Chat-first opens on Home (the calendar start view of the briefing); the older layouts
-// keep their Dashboard landing. An explicit user choice always wins.
-const [defaultView, setDefaultSignal] = createSignal<string>(
-  localStorage.getItem(DEFAULT_VIEW_KEY) ?? (readLayout() === "chat-first" ? "Home" : "Dashboard"),
-);
-
-export { navLayout, hiddenGroups, defaultView };
+const [navPlacement, setPlacementSignal] = createSignal<NavPlacement>(readChoice(PLACEMENT_KEY, PLACEMENTS, "left"));
+const [mobileNavPlacement, setMobilePlacementSignal] = createSignal<MobileNavPlacement>(readChoice(MOBILE_PLACEMENT_KEY, MOBILE_PLACEMENTS, "bottom"));
+const [showDevelopment, setShowDevelopmentSignal] = createSignal(readBoolean(DEVELOPMENT_KEY, true));
+const [defaultView, setDefaultSignal] = createSignal<string>(localStorage.getItem(DEFAULT_VIEW_KEY) ?? (readLayout() === "chat-first" ? "Home" : "Dashboard"));
+export { navLayout, hiddenGroups, defaultView, navPlacement, mobileNavPlacement, showDevelopment };
 export function setNavLayout(next: NavLayout) { localStorage.setItem(LAYOUT_KEY, next); setLayoutSignal(next); }
+export function setNavPlacement(next: NavPlacement) { localStorage.setItem(PLACEMENT_KEY, next); setPlacementSignal(next); }
+export function setMobileNavPlacement(next: MobileNavPlacement) { localStorage.setItem(MOBILE_PLACEMENT_KEY, next); setMobilePlacementSignal(next); }
+export function setShowDevelopment(next: boolean) { localStorage.setItem(DEVELOPMENT_KEY, String(next)); setShowDevelopmentSignal(next); }
 export function setHiddenGroups(next: string[]) { localStorage.setItem(HIDDEN_KEY, JSON.stringify(next)); setHiddenSignal(next); }
 export function setDefaultView(next: string) { localStorage.setItem(DEFAULT_VIEW_KEY, next); setDefaultSignal(next); }
 export function toggleGroup(id: string) { const hidden = hiddenGroups(); setHiddenGroups(hidden.includes(id) ? hidden.filter(x => x !== id) : [...hidden, id]); }
@@ -88,7 +100,7 @@ export const groupOfView = (groups: NavGroup[], view: string) => groups.find(gro
 /** View names are ROUTING KEYS (router.ts, buildPath, deep links) and must not move.
  *  When the product's word differs from the key, it is mapped here — the nav shows the
  *  product's word, the URL keeps the app's own name. */
-const VIEW_LABELS: Record<string, string> = { Issues: "Tickets", Documents: "Knowledge" };
+const VIEW_LABELS: Record<string, string> = { Documents: "Knowledge" };
 export const viewLabel = (view: string) => VIEW_LABELS[view] ?? view;
 
 // ---------------------------------------------------------------------------
@@ -96,11 +108,14 @@ export const viewLabel = (view: string) => VIEW_LABELS[view] ?? view;
 //
 // The rail selects a MODE and the sidebar shows that mode's objects. The mode is
 // never stored: it is DERIVED from the current route, so a deep link into a
-// channel / ticket / document always arrives with the sidebar its target belongs
+// channel / task / document always arrives with the sidebar its target belongs
 // to. Storing it would let the two disagree, which is exactly the defect this
 // mapping exists to prevent.
 // ---------------------------------------------------------------------------
-export type RailMode = "home" | "chats" | "activity" | "tasks" | "projects" | "calendar" | "knowledge" | "development" | "crm" | "more";
+export type RailMode = "home" | "chats" | "tasks" | "projects" | "library" | "development" | "crm" | "more";
+export type NavPlacement = "left" | "right" | "top" | "bottom";
+export type MobileNavPlacement = "top" | "bottom";
+export const MOBILE_RAIL_MODES: readonly RailMode[] = ["home", "chats", "tasks", "projects", "more"];
 
 /** Every view has EXACTLY ONE home mode. A view that is absent here belongs to
  *  "more", whose sidebar is built from the LIVE view registry — so a newly
@@ -109,9 +124,14 @@ const MODE_OF_VIEW: Record<string, RailMode> = {
   Home: "home",
   Dashboard: "home",
   Chat: "chats",
-  Inbox: "activity",
+  Inbox: "home",
+  /* TASKS IS A MODE OF ITS OWN. These three used to be mapped to "home", whose
+     sidebar is deliberately empty, and `moreViews()` lists only what is mapped to
+     "more" — so the task area was reachable by URL and by nothing else. A working
+     surface that no menu names has been deleted in every way that matters. */
   "To-Do": "tasks",
   "Team Tasks": "tasks",
+  "Task Ledger": "tasks",
   // Every project-scoped surface belongs to the PROJECTS mode, not to Tasks and not
   // to More. They were unmapped, so all four fell into More and piled up there as
   // "Projects, Project Overview, Project Steering, Project Settings" — four entries
@@ -125,16 +145,14 @@ const MODE_OF_VIEW: Record<string, RailMode> = {
   "Project Steering": "projects",
   "Project Settings": "projects",
   "Project Tasks": "projects",
-  Calendar: "calendar",
-  Meetings: "calendar",
-  Absences: "calendar",
-  Locations: "calendar",
-  Documents: "knowledge",
-  Blogs: "knowledge",
-  Members: "calendar",
+  Calendar: "home",
+  Meetings: "home",
+  Absences: "home",
+  Locations: "home",
+  Documents: "library",
+  Blogs: "library",
+  Members: "home",
   Development: "development",
-  Issues: "development",
-  Boards: "development",
   Repos: "development",
   "Code Reviews": "development",
   Pipelines: "development",
@@ -143,7 +161,10 @@ const MODE_OF_VIEW: Record<string, RailMode> = {
   CRM: "crm",
 };
 
-export const railModeOfView = (view: string): RailMode => MODE_OF_VIEW[view] ?? "more";
+export const railModeOfView = (view: string): RailMode => {
+  const mode = MODE_OF_VIEW[view] ?? "more";
+  return mode === "development" && !showDevelopment() ? "more" : mode;
+};
 
 /** Route -> mode. The entity type wins where a view is SHARED: a channel URL renders
  *  the Chat view, and a channel is always a conversation. Everything else is decided
@@ -152,9 +173,8 @@ export const railModeOfRoute = (route: { view: string; entityType?: string; proj
   // A PROJECT ROUTE IS ALWAYS THE PROJECTS MODE. This wins over the entity type and
   // over the view name, because both lie about a project-scoped address: a channel
   // opened inside the workspace (`/projects/<id>/chats/<cid>`) renders the Chat view
-  // and carries `entityType: "channel"`, yet you are standing in the project — and a
-  // ticket at `/projects/<id>/issues/<iid>` renders Issues, whose own home is
-  // Development. Deriving the mode from the view alone put both in the wrong sidebar.
+  // and carries `entityType: "channel"`, yet you are standing in the project. Deriving
+  // the mode from the view alone put that in the wrong sidebar.
   if (route.projectId) return "projects";
   return route.entityType === "channel" ? "chats" : railModeOfView(route.view);
 };
@@ -162,4 +182,4 @@ export const railModeOfRoute = (route: { view: string; entityType?: string; proj
 /** Views that own a rail mode's landing surface — used to keep the More sidebar
  *  free of duplicates without hand-maintaining a second list. */
 export const viewsInMode = (mode: RailMode): string[] =>
-  Object.keys(MODE_OF_VIEW).filter((view) => MODE_OF_VIEW[view] === mode);
+  Object.keys(MODE_OF_VIEW).filter((view) => railModeOfView(view) === mode);

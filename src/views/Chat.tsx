@@ -1,6 +1,9 @@
 import { createResource, createSignal, createEffect, onCleanup, For, Show } from "solid-js";
 import { useDeepLink, linkProps, route } from "../router";
 import { currentUser, isWeb, projects, reloadProjects, setProjectId } from "../session";
+import { meetingsApi, type Meeting } from "../api/meetings";
+import { buildChannelCallMeeting, channelCallLabel, findLiveChannelMeeting, resolveChannelCall } from "./channelCall";
+import CallPanel from "./CallPanel";
 import { navLayout } from "../nav";
 import { actingProfileId, bumpChannels, setActingProfileId } from "../chatIdentity";
 import { chatHeaderLabel } from "../chatPartition";
@@ -14,6 +17,7 @@ import { Icon } from "../components/Icon";
 import { Avatar } from "../components/Avatar";
 import "../App.css";
 import "./Chat.css";
+import "./Meetings.css";
 import {
   chatApi,
   newId,
@@ -131,6 +135,21 @@ export default function Chat(props: { embedded?: boolean } = {}) {
     if (list && list.length) { didAutoSelect = true; if (!activeChannelId() && !route().entityId) setActiveChannelId(list[0].id); }
   });
   const activeChannel = () => channels()?.find((c) => c.id === activeChannelId()) ?? null;
+  const [meetings, { refetch: refetchMeetings }] = createResource(actingProfileId, (id) =>
+    id ? meetingsApi.list(id) : Promise.resolve<Meeting[]>([]),
+  );
+  const liveMeeting = () => findLiveChannelMeeting(meetings(), activeChannelId() ?? "", actingProfileId());
+  const [openCall, setOpenCall] = createSignal<{ meeting: Meeting; audioOnly: boolean; autoJoin?: boolean }>();
+  const openExistingCall = (meeting: Meeting, audioOnly = false) => setOpenCall({ meeting, audioOnly, autoJoin: true });
+  const startCall = async (audioOnly: boolean) => {
+    const channel = activeChannel(); const organizer = actingProfileId();
+    if (!channel || !organizer) return;
+    const existing = resolveChannelCall(meetings(), channel.id);
+    if (existing) { openExistingCall(existing, audioOnly); return; }
+    const meeting = buildChannelCallMeeting(channel, organizer);
+    try { const created = await meetingsApi.createChannelCall(meeting); setOpenCall({ meeting: created, audioOnly, autoJoin: true }); void refetchMeetings(); }
+    catch (reason) { fail(reason); }
+  };
 
   /** ── A MESSAGE BECOMES WORK ────────────────────────────────────────────────
    *
@@ -138,7 +157,7 @@ export default function Chat(props: { embedded?: boolean } = {}) {
    *  `WorkItemDrawer`, a `resolve_source_ref` command on both backends, and the
    *  `source_entity_type/_id` anchor on issues, meetings and documents — imported by
    *  its own test and by nothing else. A channel card even ADVERTISED the mapping
-   *  (Task / Ticket / Date) without offering it.
+   *  (Task / Dev task / Date) without offering it.
    *
    *  The trigger belongs on the MESSAGE, because that is where the person is when
    *  they realise the message is work — not on a side card, and not in a page header.
@@ -156,7 +175,7 @@ export default function Chat(props: { embedded?: boolean } = {}) {
       y: event.clientY,
       items: [
         { label: "Task", onSelect: start("task") },
-        { label: "Ticket", onSelect: start("ticket") },
+        { label: "Dev task", onSelect: start("dev") },
         { label: "Date", onSelect: start("event") },
       ],
     });
@@ -290,10 +309,10 @@ const [showJumpToLatest, setShowJumpToLatest] = createSignal(false);
         limit: PAGE_SIZE,
         actingProfileId: key.p,
       });
-      setPaging((state) => applyPage(state, started.ticket, pageResult));
+      setPaging((state) => applyPage(state, started.seq, pageResult));
       if (paneKey) restoreHistoryPosition(paneKey);
     } catch (e) {
-      setPaging((state) => failLoad(state, started.ticket, e));
+      setPaging((state) => failLoad(state, started.seq, e));
     }
   };
   const unfurlLinks = async (messageId: string) => {
@@ -369,9 +388,9 @@ const [showJumpToLatest, setShowJumpToLatest] = createSignal(false);
     setThreadPaging(started.state);
     try {
       const page = await chatApi.listMessagesPage({ channelId: key.channelId, cursor, limit: PAGE_SIZE, actingProfileId: key.p });
-      setThreadPaging((state) => applyPage(state, started.ticket, page));
+      setThreadPaging((state) => applyPage(state, started.seq, page));
     } catch (e) {
-      setThreadPaging((state) => failLoad(state, started.ticket, e));
+      setThreadPaging((state) => failLoad(state, started.seq, e));
     }
   };
 
@@ -381,6 +400,20 @@ const [showJumpToLatest, setShowJumpToLatest] = createSignal(false);
   );
   const memberIds = () => new Set((members() ?? []).map((m) => m.profile_id));
   const [showMembers, setShowMembers] = createSignal(false);
+const [showProjectPicker, setShowProjectPicker] = createSignal(false);
+const [showNotifications, setShowNotifications] = createSignal(false);
+const [channelMenu, setChannelMenu] = createSignal<{ x: number; y: number }>();
+const attachActiveChannel = async (projectId: string) => {
+  const channel = activeChannel(); if (!channel) return;
+  try { await chatApi.updateChannel({ ...channel, project_id: projectId || null }); setShowProjectPicker(false); await refetchChannels(); bumpChannels(); }
+  catch (reason) { fail(reason); }
+};
+const deleteActiveChannel = async () => {
+  const channel = activeChannel(); const actor = actingProfileId();
+  if (!channel || !actor || !window.confirm(`Delete ${channel.name ?? "this channel"}?`)) return;
+  try { await chatApi.deleteChannel(channel.id, actor); setActiveChannelId(null); setShowMembers(false); await refetchChannels(); bumpChannels(); }
+  catch (reason) { fail(reason); }
+};
   /** A project-bound channel does not own its membership: the project's people ARE the
    *  channel's people (backend `EFFECTIVE_MEMBERS_SQL`). So this panel must not offer
    *  add/remove/join/leave there — the acts would be refused — and says where they live. */
@@ -410,8 +443,7 @@ const [showJumpToLatest, setShowJumpToLatest] = createSignal(false);
   const [mentions, { refetch: refetchMentions }] = createResource(actingProfileId, (id) =>
     id ? chatApi.listMentionsForProfile(id) : Promise.resolve([] as MentionView[]),
   );
-  const unreadMentions = () => (mentions() ?? []).filter((mention) => !mention.read);
-  const [showMentions, setShowMentions] = createSignal(false);
+    const [showMentions, setShowMentions] = createSignal(false);
   // Opening a mention is reading it: jump to the message's channel and retire the alert.
   async function openMention(mention: MentionView) {
     setActiveChannelId(mention.channel_id);
@@ -1311,24 +1343,20 @@ const [showJumpToLatest, setShowJumpToLatest] = createSignal(false);
       <section class="chat-center">
         <header class="chat-topbar">
           <Show when={activeChannel()} fallback={<span class="hint">No channel selected</span>}>
-            <strong>{chatHeaderLabel(activeChannel()!, actingProfileId(), { nameOf: profileName })}</strong>
-            <span class="branch-chip">{activeChannel()!.content_type}</span>
+            <strong>{chatHeaderLabel(activeChannel()!, actingProfileId(), { nameOf: profileName })}</strong><span class="branch-chip">{activeChannel()!.content_type}</span><span class="hint">{members()?.length ?? 0} members</span><span class="chat-topbar-spacer" />
+            <button type="button" class="ghost small" aria-label="Call" title="Call" onClick={() => void startCall(true)}>Call</button><button type="button" class="ghost small" aria-label="Video" title="Video" onClick={() => void startCall(false)}>Video</button><button type="button" class="ghost small" aria-label="Channel actions" onClick={(event) => setChannelMenu({ x: event.clientX, y: event.clientY })}>⋯</button>
           </Show>
-          <div class="members-toggle">
-            <button class="ghost small" onClick={() => setShowPinned((v) => !v)}>
-              pinned <Show when={pinnedMessages()?.length}><span class="mention-badge">{pinnedMessages()!.length}</span></Show>
-            </button>
-            <button class="ghost small" onClick={() => setShowMentions((v) => !v)}>
-              mentions
-              <Show when={unreadMentions().length}>
-                <span class="mention-badge">{unreadMentions().length}</span>
-              </Show>
-            </button>
-            <Show when={notificationPreference()}>{pref => <details class="chat-notification-settings"><summary>Notifications</summary><label><input type="checkbox" checked={pref().email_enabled} onChange={e=>void updateNotificationPreference({email_enabled:e.currentTarget.checked})}/> Email</label><label><input type="checkbox" checked={pref().push_enabled} onChange={e=>void updateNotificationPreference({push_enabled:e.currentTarget.checked})}/> Push</label><label>Threads <select value={pref().thread_scope} onChange={e=>void updateNotificationPreference({thread_scope:e.currentTarget.value as ChannelNotificationPreference["thread_scope"]})}><option value="all">All</option><option value="followed">Followed</option><option value="none">None</option></select></label></details>}</Show>
-            <Show when={!activeChannel()?.read_only}><button class="ghost small" onClick={() => setShowMembers((v) => !v)}>members ({members()?.length ?? 0})</button></Show>
-          </div>
         </header>
-
+        <Show when={liveMeeting()}>{meeting => <div class="chat-live-call" role="status">{channelCallLabel(meeting())} <span aria-hidden="true">·</span> <button type="button" class="ghost small" onClick={() => openExistingCall(meeting())}>Join</button></div>}</Show>
+        <Show when={openCall()}>{call => <div class="chat-call-panel"><CallPanel meeting={call().meeting} audioOnly={call().audioOnly} autoJoin={call().autoJoin} identity={isWeb() ? currentUser()?.profile_id ?? "" : actingProfileId() ?? ""} displayName={isWeb() ? currentUser()?.display_name ?? "" : profileName(actingProfileId())}/></div>}</Show>
+        <Show when={channelMenu()}>{menu => <ContextMenu x={menu().x} y={menu().y} onClose={() => setChannelMenu(undefined)} items={[
+          { label: "Pinned messages", onSelect: () => setShowPinned((value) => !value) },
+{ label: "Mentions", onSelect: () => setShowMentions((value) => !value) },
+{ label: "Notifications", onSelect: () => setShowNotifications((value) => !value) },
+{ label: "Members", onSelect: () => setShowMembers(true), disabled: !!activeChannel()?.read_only },
+          { label: "Attach to project", onSelect: () => setShowProjectPicker(true) },
+          { label: "Delete channel", danger: true, onSelect: () => void deleteActiveChannel() },
+        ]} />}</Show>
         <Show when={showPinned()}>
         <div class="mentions-panel">
           <Show when={(pinnedMessages() ?? []).length} fallback={<p class="hint pad">No pinned messages.</p>}>
@@ -1505,8 +1533,11 @@ const [showJumpToLatest, setShowJumpToLatest] = createSignal(false);
         </Show>
       </section>
 
-      <Show when={showMembers() || threadRoot()}>
+      <Show when={showMembers() || showProjectPicker() || showNotifications() || threadRoot()}>
       <aside class="chat-detail">
+
+        <Show when={showProjectPicker()}><section class="members-panel" aria-label="Attach channel to project"><div class="thread-header"><strong>Attach to project</strong><button class="ghost small" onClick={() => setShowProjectPicker(false)}>×</button></div><select aria-label="Attach to project" value={activeChannel()?.project_id ?? ""} onChange={(event) => void attachActiveChannel(event.currentTarget.value)}><option value="">Not part of a project</option><For each={projects()?.filter((project) => !project.archived)}>{project => <option value={project.id}>{project.name}</option>}</For></select></section></Show>
+        <Show when={showNotifications()}><Show when={notificationPreference()}>{settings => <section class="members-panel" aria-label="Notification settings"><div class="thread-header"><strong>Notifications</strong><button class="ghost small" onClick={() => setShowNotifications(false)}>×</button></div><label><input type="checkbox" checked={settings().email_enabled} onChange={event => void updateNotificationPreference({ email_enabled: event.currentTarget.checked })}/> Email</label><label><input type="checkbox" checked={settings().push_enabled} onChange={event => void updateNotificationPreference({ push_enabled: event.currentTarget.checked })}/> Push</label><label>Threads <select value={settings().thread_scope} onChange={event => void updateNotificationPreference({ thread_scope: event.currentTarget.value as ChannelNotificationPreference["thread_scope"] })}><option value="all">All</option><option value="followed">Followed</option><option value="none">None</option></select></label></section>}</Show></Show>
         <Show when={showMembers()}>
           <div class="members-panel">
             <div class="section-label" style="padding:0 0 0.4em">
@@ -1641,10 +1672,10 @@ const [showJumpToLatest, setShowJumpToLatest] = createSignal(false);
             prefillTitle={draft().excerpt}
             onClose={() => setWorkDraft(null)}
             onCreated={(kind, _id, createdProjectId) => {
-              // A ticket made from a project channel belongs to that channel's project.
-              // Keep Development's shared project filter there, so the next ticket list
+              // A dev task made from a project channel belongs to that channel's project.
+              // Keep Development's shared project filter there, so the next dev task list
               // shows the work just created instead of an unrelated empty project.
-              if (kind === "ticket" && createdProjectId) setProjectId(createdProjectId);
+              if (kind === "dev" && createdProjectId) setProjectId(createdProjectId);
               setWorkDraft(null);
             }}
           />

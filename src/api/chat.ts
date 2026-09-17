@@ -147,7 +147,7 @@ export type ProfileLite = {
   display_name: string; avatar_url: string | null; archived?: boolean };
 
 // Enough of an anchor's target to render a back-link into the conversation that
-// produced a task/ticket/meeting. `excerpt` is a one-line preview, never the body.
+// produced a task/task/meeting. `excerpt` is a one-line preview, never the body.
 export type SourceRef = { entity_type: string; entity_id: string; channel_id: string; channel_name: string | null; author_name: string | null; created_at: number; excerpt: string };
 export const chatApi = {
   // profiles (acting-user picker for local, auth-less app)

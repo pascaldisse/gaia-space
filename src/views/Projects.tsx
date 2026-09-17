@@ -8,7 +8,6 @@ import DateField from "../components/DateField";
 import ContentHead from "../components/ContentHead";
 import { PillMenu } from "../components/controls";
 import { platformApi, type Project } from "../api/platform";
-import { planningApi } from "../api/issues";
 import { personalApi } from "../api/personal";
 import { chatApi } from "../api/chat";
 import { prefixedId } from "../api/ids";
@@ -37,7 +36,7 @@ import "./Portfolio.css";
  *  project. They belong to the project you opened, not to the list of all of them.
  *
  *  WHAT A ROW SHOWS is only what tells you whether the project is healthy: open
- *  tasks, open tickets, unread messages, the deadline and the lead. Colour follows
+ *  tasks, unread messages, the deadline and the lead. Colour follows
  *  `src/statusTone.ts` and runs through `metricTone`, so **a count of 0 carries no
  *  tone** — a quiet project must not look like a warning.
  *
@@ -49,8 +48,8 @@ import "./Portfolio.css";
 const newId = () => prefixedId("project");
 const empty = () => ({ name: "", description: "", deadline: "" });
 /** ── THE KEY IS A FACT, NOT A QUESTION ────────────────────────────────────────
- *  Nothing in the product identifies anything BY the key: a ticket reads `#42`
- *  (Issues.tsx, IssueDetail.tsx), never `DEMO-42`. The key only decorated a card and
+ *  Nothing in the product identifies anything BY the key: a task reads by its
+ *  title, never `DEMO-42`. The key only decorated a card and
  *  padded a picker label. But the column is `TEXT NOT NULL UNIQUE`, so it cannot
  *  simply go: it is DERIVED from the name at creation, and the operator may still
  *  edit it in Project settings, where it is a real operator field.
@@ -132,36 +131,15 @@ export default function Projects() {
   const setMemberRole = (id: string, roleId: string) => setDraftMembers(draftMembers().map(member => member.id === id ? { ...member, roleId } : member));
   const closeCreate = () => { setCreateOpen(false); setDraftMembers([]); };
 
-  // ── the health signals ────────────────────────────────────────────────────
-  // Every figure for EVERY row comes from ONE read, grouped client-side. A per-card
-  // fetch would be N round trips for N projects. Each refusal is carried as a VALUE,
-  // never thrown: a denied read has to reach the screen as an error while the rest of
-  // the list keeps working.
-  const [counts] = createResource<{ open: Map<string, number> } | { failed: string }>(async () => {
-    try {
-      const [issues, statuses] = await Promise.all([planningApi.issues({}), planningApi.statuses()]);
-      const resolved = new Set(statuses.filter((status) => status.resolved).map((status) => status.id));
-      const open = new Map<string, number>();
-      for (const issue of issues) {
-        if (issue.archived || resolved.has(issue.status_id ?? "")) continue;
-        open.set(issue.project_id, (open.get(issue.project_id) ?? 0) + 1);
-      }
-      return { open };
-    } catch (reason) { return { failed: humanError(reason) }; }
-  });
-  const countsFailed = () => { const value = counts(); return value && "failed" in value ? value.failed : ""; };
-  const openMap = () => { const value = counts(); return value && "open" in value ? value.open : undefined; };
-  const openCount = (id: string) => openMap()?.get(id) ?? 0;
-
   /** Running TASKS per project. `teamTodos` is the one cross-project read that already
    *  exists (every member's running project work, wherever the caller is a member), so
    *  no new server surface is needed and this can never disagree with Team Tasks. */
   const [taskCounts] = createResource(actingProfileId, async (id) => {
     const by = new Map<string, number>();
     if (!id) return by;
-    // A REFUSAL IS A VALUE, NEVER A THROW — the same law the ticket read above obeys.
-    // A decoration on a row must never be able to blank the row it decorates, so a
-    // failing (or unavailable) count degrades to "no figure", not to an error page.
+    // A REFUSAL IS A VALUE, NEVER A THROW. A decoration on a row must never be able
+    // to blank the row it decorates, so a failing (or unavailable) count degrades to
+    // "no figure", not to an error page.
     try {
       const todos = await personalApi.teamTodos(id, false);
       if (!Array.isArray(todos)) return by;
@@ -209,7 +187,7 @@ export default function Projects() {
       if (project.status === "done" && !showDone()) return false;
       if (needle && !`${project.name} ${project.key} ${project.description ?? ""}`.toLocaleLowerCase().includes(needle)) return false;
       if (portfolioFilter() === "attention")
-        return openCount(project.id) > 0 || taskCount(project.id) > 0 || unreadCount(project.id) > 0 || !!(project.deadline && deadlineTone(project.deadline).colour);
+        return taskCount(project.id) > 0 || unreadCount(project.id) > 0 || !!(project.deadline && deadlineTone(project.deadline).colour);
       if (portfolioFilter() === "due") return !!(project.deadline && deadlineTone(project.deadline).colour);
       return true;
     });
@@ -366,7 +344,7 @@ export default function Projects() {
       title="Delete project?"
       body={
         <>
-          <strong>{pendingDelete()?.name}</strong> is deleted for everyone, with its tasks, tickets,
+          <strong>{pendingDelete()?.name}</strong> is deleted for everyone, with its tasks,
           calendar entries and knowledge. This cannot be undone.
         </>
       }
@@ -408,7 +386,7 @@ export default function Projects() {
         same paper the cards are made of, exactly as a task is created in its own list. */}
     <Show when={createOpen()}>
       <section class="project-create" aria-label="New project" onKeyDown={event => { if (event.key === "Escape") closeCreate(); }}>
-        <header class="project-create-head"><h2>New project</h2><p>A project carries the tickets, boards, tasks and documents of one piece of work.</p></header>
+        <header class="project-create-head"><h2>New project</h2><p>A project carries the tasks and documents of one piece of work.</p></header>
       <form class="wid-form project-form project-create-form" onSubmit={save}>
         <label class="wid-field"><span>Name</span><input class="wid-input" autofocus placeholder="Project name" aria-label="Project name" value={form().name} onInput={e => setForm({ ...form(), name: e.currentTarget.value })} /></label>
         {/* NO KEY FIELD: nobody is asked for an identifier the product never shows.
@@ -471,7 +449,6 @@ export default function Projects() {
         : portfolioFilter() === "due" ? "Projects whose deadline is near or already past."
         : "Open a project to work in it — its chats, tasks, calendar and knowledge live inside."} />
 
-    <Show when={countsFailed()}>{reason => <p class="error" role="alert">Open-ticket counts are unavailable: {reason()}</p>}</Show>
 
 
     {/* NOTHING YET vs FILTERED: this list has no filters at all, so an empty result
@@ -479,7 +456,7 @@ export default function Projects() {
     <Show when={!items.loading && !items()?.length}>
       <EmptyState
         title="No projects yet"
-        hint="A project carries the tickets, boards, tasks and documents of one piece of work."
+        hint="A project carries the tasks and documents of one piece of work."
         actions={<button type="button" class="primary" onClick={() => setCreateOpen(true)}>New project</button>}
       />
     </Show>
@@ -530,11 +507,6 @@ export default function Projects() {
           {/* THE HEALTH LINE. Every chip is one fact and one element; zero carries no
               tone, so a calm project reads calm. */}
           <div class="project-health">
-            <Show when={!counts.loading && !countsFailed()}>
-              <span class="paper-pill" classList={{ [metricTone(openCount(project.id), "teal") || "untoned"]: true }}>
-                <b>{openCount(project.id)}</b> open tickets
-              </span>
-            </Show>
             <Show when={!taskCounts.loading}>
               <span class="paper-pill" classList={{ [metricTone(taskCount(project.id), "teal") || "untoned"]: true }}>
                 <b>{taskCount(project.id)}</b> open tasks

@@ -1,10 +1,10 @@
-import { expect, test, describe, afterEach, mock } from "bun:test";
+import { expect, test, describe, afterEach, beforeEach, mock } from "bun:test";
 import { invoke } from "../api/invoke";
 mock.module("@tauri-apps/api/core", () => ({ invoke }));
 import { render } from "solid-js/web";
 import Documents, { documentTreeLoading } from "./Documents";
 import { setProfileId, setProjectId } from "../session";
-import { navigate, registerViews } from "../router";
+import { createMemoryAdapter, initRouter, navigate, registerViews, setAvailableViews } from "../router";
 
 // The Documents workspace is session-locked in web mode: the personal container is the
 // session's own profile, the UI offers no way to act as anybody else, and a forged
@@ -21,8 +21,16 @@ afterEach(() => {
   // Session state is process-global: hand it back the way you found it.
   setProjectId(""); setProfileId("");
   window.history.replaceState({}, "", "/");
+initRouter(createMemoryAdapter());
 });
 
+// Router state is process-global. Each case begins at the personal library rather
+// than inheriting an earlier file's document container or an earlier case's deep link.
+beforeEach(() => {
+  registerViews(["Documents"]);
+  setAvailableViews(null);
+  navigate({ view: "Documents", containerType: "my-docs" });
+});
 type Reply = { ok: true; value: unknown } | { status: number; body: unknown };
 const serve = (table: Record<string, Reply>) => {
   globalThis.fetch = (async (url: any) => {
@@ -43,12 +51,39 @@ const mount = async () => {
   return host;
 };
 
+const historyAdapter = (initial: string) => {
+  const stack = [initial]; let index = 0; let listener = () => {};
+  return {
+    adapter: {
+      read: () => stack[index],
+      write: (path: string, replace: boolean) => { if (replace) stack[index] = path; else { stack.splice(index + 1); stack.push(path); index = stack.length - 1; } },
+      href: (path: string) => `/space/${path}`,
+      subscribe: (fn: () => void) => { listener = fn; },
+    },
+    url: () => stack[index],
+    back: () => { if (index > 0) { index--; listener(); } },
+  };
+};
 const folder = (over: Record<string, unknown> = {}) => ({
   id: "f1", container_type: "my-docs", container_id: "me", parent_id: null,
   name: "Mine", description: null, archived: false, created_at: 0, ...over,
 });
 
 describe("documents workspace composition", () => {
+  test("resolving a container-less document link replaces its history entry", async () => {
+    setProfileId("me");
+    const history = historyAdapter("documents");
+    initRouter(history.adapter);
+    navigate({ view: "Documents", entityType: "document", entityId: "doc-1" });
+    serve({
+      list_document_folders: { ok: true, value: [] },
+      list_documents: { ok: true, value: [{ id: "doc-1", container_type: "my-docs", container_id: "me", folder_id: null, doc_type: "text", title: "Plan", body: "", version: 1, archived: false, created_by: "me" }] },
+    });
+    await mount();
+    expect(history.url()).toBe("documents/my-docs/me/doc-1");
+    history.back();
+    expect(history.url()).toBe("documents");
+  });
   test("a refresh keeps the already loaded tree visible", () => {
     expect(documentTreeLoading("refreshing", "ready")).toBe(false);
     expect(documentTreeLoading("pending", "ready")).toBe(true);
@@ -128,7 +163,21 @@ describe("documents workspace composition", () => {
     expect(host.textContent).toContain("Team");
   });
 
-  test("renders rich text, interactive checklists, and numbered code by saved body format", async () => {
+  test("a failed version-history request cannot strand the document on Loading", async () => {
+setProfileId("me");
+serve({
+list_document_folders: { ok: true, value: [] },
+list_documents: { ok: true, value: [{ id: "private-doc", container_type: "my-docs", container_id: "me", folder_id: null, doc_type: "text", body_format: "text", title: "Private plan", body: "Readable body", version: 1, archived: false, created_by: "me" }] },
+list_doc_versions: { status: 500, body: { ok: false, error: "broken version query" } },
+});
+const host = await mount();
+navigate({ view: "Documents", entityType: "document", entityId: "private-doc", containerType: "my-docs", containerId: "me" });
+await settle();
+expect(host.textContent).toContain("Readable body");
+expect(host.textContent).toContain("Version history could not be loaded");
+expect(host.textContent).not.toContain("Loading…");
+});
+test("renders rich text, interactive checklists, and numbered code by saved body format", async () => {
 setProfileId("me");
 const docs = [
 { id: "rich", container_type: "my-docs", container_id: "me", folder_id: null, doc_type: "text", body_format: "rich-text", title: "Rich", body: "<h2>Stored heading</h2><p>formatted</p>", version: 1, archived: false, created_by: "me" },

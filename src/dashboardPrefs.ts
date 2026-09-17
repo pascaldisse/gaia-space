@@ -4,7 +4,7 @@ import { personalApi } from "./api/personal";
 export type DashboardWidget = { id: string; label: string };
 export const DASHBOARD_WIDGETS: DashboardWidget[] = [
   { id: "today", label: "Today & next" }, { id: "calendar", label: "Calendar" },
-  { id: "issues", label: "Assigned tickets" }, { id: "inbox", label: "Inbox" }, { id: "absences", label: "Absences" },
+  { id: "inbox", label: "Inbox" }, { id: "absences", label: "Absences" },
 ];
 const HIDDEN_KEY = "space.dashboard.hidden";
 const WIDGET_IDS = DASHBOARD_WIDGETS.map((widget) => widget.id);

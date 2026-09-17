@@ -17,6 +17,8 @@ pub mod availability;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod blogs;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
+pub mod budget;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod calls;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod channel_feeds;
@@ -42,6 +44,8 @@ pub mod events;
 pub mod finance;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod git;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+pub mod git_hosting;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod ics;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
@@ -82,6 +86,8 @@ pub mod secretbox;
 use serde::Serialize;
 #[cfg(feature = "desktop")]
 use tauri::{WebviewUrl, WebviewWindowBuilder};
+#[cfg(feature = "desktop")]
+use tauri_plugin_dialog::DialogExt;
 
 #[cfg(feature = "desktop")]
 #[derive(Serialize)]
@@ -204,6 +210,10 @@ pub fn run() {
             applications::list_ui_extensions,
             applications::save_ui_extension,
             applications::delete_ui_extension,
+            git_hosting::create_hosted_repo,
+            git_hosting::list_hosted_repos,
+            git_hosting::delete_hosted_repo,
+            git_hosting::hosted_repo_clone_url,
             git::repo_list,
             git::repo_add,
             git::repo_remove,
@@ -214,6 +224,20 @@ pub fn run() {
             git::repo_diff,
             git::repo_stage,
             git::repo_commit,
+            git::repo_fetch,
+            git::repo_pull,
+            git::repo_push,
+            git::repo_checkout,
+            git::repo_branch_create,
+            git::repo_tags,
+            git::repo_remotes,
+            git::repo_stash_save,
+            git::repo_stash_pop,
+            git::repo_stash_list,
+            git::repo_commit_files,
+            git::repo_tree,
+            git::repo_unstage,
+            git::repo_worktrees,
             platform::list_profiles,
             platform::list_directory_feed,
             platform::list_directory_calendar,
@@ -285,78 +309,12 @@ pub fn run() {
             platform::update_project,
             platform::delete_project,
             platform::is_admin,
-            issues::list_issues,
             // Desktop lost the issue detail pane: the command carries its
             // #[tauri::command] attribute and the web transport dispatches it,
             // but it was never registered here, so every desktop open failed with
             // "Command get_issue_detail not found".
-            issues::get_issue,
-            issues::get_issue_detail,
-            issues::create_issue,
-            issues::clone_issue,
-            issues::move_issue_to_project,
-            issues::update_issue,
-            issues::set_issue_assignees,
             personal::add_project_member,
             personal::remove_project_member,
-            issues::list_issue_assignees,
-            issues::list_issue_statuses,
-            issues::list_boards,
-            issues::list_sprints,
-            issues::archive_issue,
-            issues::create_issue_status,
-            issues::update_issue_status,
-            issues::delete_issue_status,
-            issues::create_board,
-            issues::update_board,
-            issues::delete_board,
-            issues::list_board_columns,
-            issues::save_board_column,
-            issues::delete_board_column,
-            issues::get_board_card_settings,
-            issues::save_board_card_settings,
-            issues::move_issue_on_board,
-            issues::list_board_issues,
-            issues::list_backlog_issues,
-            issues::remove_issue_from_board,
-            issues::bulk_move_issues_on_board,
-            issues::bulk_remove_issues_from_board,
-            issues::bulk_update_issues_sprints,
-            issues::create_sprint,
-            issues::launch_sprint,
-            issues::close_sprint,
-            issues::delete_sprint,
-            issues::list_swimlanes,
-            issues::save_swimlane,
-            issues::delete_swimlane,
-            issues::list_planning_tags,
-            issues::save_planning_tag,
-            issues::set_issue_tags,
-            issues::list_checklists,
-            issues::save_checklist,
-            issues::list_checklist_items,
-            issues::save_checklist_item,
-            issues::toggle_checklist_item,
-            issues::list_time_tracking_entries,
-            issues::save_time_tracking_entry,
-            issues::issue_time_total,
-            issues::list_issue_attachments,
-            issues::add_issue_attachment,
-            issues::delete_issue_attachment,
-            issues::list_issue_comments,
-            issues::create_issue_comment,
-            issues::list_issue_activities,
-            issues::add_issue_child,
-            issues::list_issue_tracker_links,
-            issues::add_issue_tracker_link,
-            issues::remove_issue_tracker_link,
-            issues::update_sprint,
-            issues::archive_sprint,
-            issues::delete_planning_tag,
-            issues::delete_checklist,
-            issues::delete_checklist_item,
-            issues::delete_time_tracking_entry,
-            issues::remove_issue_link,
             chat::list_channels,
             chat::get_channel,
             chat::private_feed,
@@ -466,6 +424,9 @@ pub fn run() {
             review::dry_run_merge,
             review::attempt_merge,
             review::create_review,
+            budget::budget_statement,
+            budget::budget_add_expense,
+            budget::budget_export_statement,
             documents::list_documents,
             documents::get_document,
             documents::list_favorite_documents,
@@ -507,6 +468,7 @@ pub fn run() {
             meetings::list_meetings,
             meetings::get_meeting,
             meetings::create_meeting,
+            meetings::create_channel_call,
             meetings::update_meeting,
             meetings::archive_meeting,
             meetings::delete_meeting,
@@ -582,6 +544,9 @@ pub fn run() {
             pipelines::list_jobs,
             pipelines::list_job_runs,
             personal::list_todos,
+            personal::list_todo_links,
+            personal::add_todo_link,
+            personal::delete_todo_link,
             personal::list_project_todos,
             personal::list_team_todos,
             personal::list_project_member_ids,
@@ -590,7 +555,6 @@ pub fn run() {
             personal::update_todo,
             personal::set_todo_completion,
             personal::postpone_todo,
-            personal::convert_todo_to_issue,
             personal::delete_todo,
             channel_notes::list_channel_notes,
             channel_notes::create_channel_note,
@@ -647,7 +611,15 @@ pub fn run() {
             calendar_feeds::sync_calendar_feed,
         ])
         .setup(|app| {
-            let conn = db::connection(app.handle()).map_err(std::io::Error::other)?;
+            let conn = match db::connection(app.handle()) {
+                Ok(conn) => conn,
+                Err(error) => {
+                    let message = format!("Database migration failed: {error}");
+                    eprintln!("{message}");
+                    app.dialog().message(&message).title("GAIA Space startup error").blocking_show();
+                    return Err(std::io::Error::other(message).into());
+                }
+            };
             db::seed(&conn).map_err(|e| std::io::Error::other(e.to_string()))?;
             // Built manually (instead of via tauri.conf.json's `app.windows`) so we
             // can attach the debug-server's console-capture init script before the
@@ -663,7 +635,10 @@ pub fn run() {
             Ok(())
         })
         .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .unwrap_or_else(|error| {
+            eprintln!("GAIA Space exited after startup error: {error}");
+            std::process::exit(1);
+        });
 }
 
 /// Mobile client: starts locally so a fresh install can choose any server.

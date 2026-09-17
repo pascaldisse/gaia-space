@@ -24,7 +24,7 @@ const stubTauriIpc = () => {
 const settle = () => new Promise((done) => setTimeout(done, 40));
 const today = () => dateKey(new Date());
 const dashboard = (over: Record<string, unknown> = {}) => ({
-  open_todos: [], assigned_issues: [], meeting_occurrences: [],
+  open_todos: [], meeting_occurrences: [],
   unread_notifications: [], current_absences: [], ...over,
 });
 const calendarItem = (over: Record<string, unknown> = {}) => ({
@@ -74,7 +74,6 @@ describe("dashboard", () => {
     expect(host.textContent).toContain("No open tasks.");
     expect(host.textContent).toContain("No upcoming deadlines.");
     expect(host.textContent).toContain("No upcoming meetings.");
-    expect(host.textContent).toContain("No tickets assigned to you yet.");
     expect(host.textContent).toContain("Your inbox is clear.");
     expect(host.textContent).toContain("Nobody is away right now.");
   });

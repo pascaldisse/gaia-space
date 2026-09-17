@@ -40,4 +40,14 @@ describe("commands that name another person", () => {
       expect(call.body.profileId).toBeUndefined();
     }
   });
+
+  test("todo links use the server's snake_case input envelope", async () => {
+    serve();
+    await personalApi.todoLinks("todo-1");
+    await personalApi.addTodoLink({ todo_id: "todo-1", kind: "EXTERNAL", url: "https://example.test", target_id: null, title: "Example" });
+    expect(sent).toEqual([
+      { cmd: "list_todo_links", body: { todo_id: "todo-1" } },
+      { cmd: "add_todo_link", body: { input: { todo_id: "todo-1", kind: "EXTERNAL", url: "https://example.test", target_id: null, title: "Example" } } },
+    ]);
+  });
 });

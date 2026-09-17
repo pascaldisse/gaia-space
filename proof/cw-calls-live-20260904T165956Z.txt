@@ -1,0 +1,12 @@
+UTC=20260904T165956Z
+url=https://paloptic.com/space/channel/cw-calls-proof-1788541197084/messages
+master=7d06338
+run=33896975330
+run_url=https://github.com/pascaldisse/gaia-space/actions/runs/33896975330
+bundle=index-Gu-vfto5.js
+harness=bun run shot --login
+header=proof/cw-calls-live-20260904T165956Z-header.png
+panel=proof/cw-calls-live-20260904T165956Z-panel.png
+header.visible=Call|Video
+panel.video-click=CallPanel visible
+fixture=user=cw-calls-proof-20260904t165956z; channel=cw-calls-proof-1788541197084; cleanup=pending

@@ -4,12 +4,13 @@ import { localInput, meetingDraftError, NO_ORGANIZER, UI_LOCALE} from "../calend
 import { ProfilePicker } from "../components/Pickers";
 import DateTimeField from "../components/DateTimeField";
 import MeetingDrawer, { type MeetingForm } from "../components/MeetingDrawer";
+import { meetingWherePayload, meetingWhereKindOf } from "./MeetingWhereField";
 import PageHeader, { Chip } from "../components/PageHeader";
 import { SectionHeading } from "../components/blocks";
 import { Icon } from "../components/Icon";
 import { GhostPill, PillSelect, QuietSearch } from "../components/controls";
 import EmptyState from "../components/EmptyState";
-import { humanError, isWeb, profileId } from "../session";
+import { currentUser, humanError, isWeb, profileId } from "../session";
 import { newId } from "../api/ids";
 import { linkProps, useDeepLink } from "../router";
 import CallPanel from "./CallPanel";
@@ -49,7 +50,8 @@ import "./Meetings.css";
 const epoch = (value: string) => Math.floor(Date.parse(value) / 1000);
 const newForm = (): MeetingForm => {
   const start = Math.floor(Date.now() / 1000) + 3600;
-  return { title: "", description: null, starts_at: start, ends_at: start + 3600, rrule: null, location: null, organizer_id: profileId() || null, channel_id: null, visibility: "participants", modification_preference: "organizer-only", meeting_url: null };
+  // Default choice = 'video': a fresh composer starts on this product's own call room.
+  return { title: "", description: null, starts_at: start, ends_at: start + 3600, rrule: null, location: null, organizer_id: profileId() || null, channel_id: null, visibility: "participants", modification_preference: "organizer-only", meeting_url: null, video_provider: "livekit" };
 };
 /** ── JOIN ─────────────────────────────────────────────────────────────────────
  *  One affordance, two implementations, because the two runtimes differ in ONE
@@ -166,6 +168,10 @@ export default function Meetings() {
       // Desktop IPC has no session rebinding, so only that transport requires a profile.
       const organizer = draft.organizer_id || profileId() || null;
       if (!organizer && !isWeb()) throw new Error(NO_ORGANIZER);
+      // Where the meeting happens is one exclusive choice (video / link / in person);
+      // meetingWherePayload is the ONLY place that turns it into these three fields, so
+      // whatever a person typed for a choice no longer selected never reaches the payload.
+      const where = meetingWherePayload({ kind: meetingWhereKindOf(draft), meeting_url: draft.meeting_url ?? "", location: draft.location ?? "" });
       const meeting: Meeting = {
         id: newId(),
         title: draft.title.trim(),
@@ -173,15 +179,14 @@ export default function Meetings() {
         starts_at: draft.starts_at,
         ends_at: draft.ends_at,
         rrule: draft.rrule?.trim() || null,
-        location: draft.location?.trim() || null,
+        location: where.location,
         organizer_id: organizer,
         channel_id: draft.channel_id || null,
         visibility: draft.visibility,
         modification_preference: draft.modification_preference,
-        meeting_url: draft.meeting_url?.trim() || null,
+        meeting_url: where.meeting_url,
         archived: false,
-        // A new meeting has no room yet: the room is minted and bound at the first join.
-        video_provider: null,
+        video_provider: where.video_provider,
         video_room_id: null,
         join_url: null,
         video_status: "scheduled",
@@ -401,7 +406,7 @@ export default function Meetings() {
             <section class="rsvp"><div class="section-heading"><div><h3>Room booking</h3><p>Filter by equipment; overlaps are rejected.</p></div></div><input aria-label="Required equipment" placeholder="Projector, Whiteboard" value={equipmentFilter()} onInput={event => setEquipmentFilter(event.currentTarget.value)}/><div class="inline-form"><select aria-label="Meeting room" value={roomId()} onChange={event => setRoomId(event.currentTarget.value)}><option value="">Select room</option><For each={filteredRooms()}>{room => <option value={room.id}>{room.name} · {room.equipment.join(", ") || "No equipment"}</option>}</For></select><button type="button" onClick={() => roomId() && reserveRoom(roomId())}>Reserve</button></div></section>
             <section class="rsvp"><div class="section-heading"><div><h3>Participants</h3><p>Invite people and record their response.</p></div></div><div class="inline-form"><ProfilePicker label="Participant" value={invitee()} onChange={setInvitee}/><button type="button" onClick={invite}>Invite</button></div><Show when={participants.loading}><p class="meeting-empty">Loading participants…</p></Show><For each={participants()}>{(participant) => <div class="participant"><span>{participant.profile_id}</span><select aria-label={`RSVP for ${participant.profile_id}`} value={participant.status} onChange={(event) => rsvp(participant, event.currentTarget.value as MeetingParticipant["status"])}><option value="invited">Invited</option><option value="accepted">Accepted</option><option value="declined">Declined</option></select></div>}</For></section>
             <section class="meeting-availability"><div class="section-heading"><div><h3>Availability</h3><p>Room and attendee conflicts for this meeting time.</p></div><button type="button" onClick={() => reloadAvailability()}>Refresh</button></div><Show when={availability.loading}><p class="meeting-empty">Checking availability…</p></Show><For each={availability()?.conflicts ?? []}>{(conflict) => <p class="availability-conflict">{conflict.message}</p>}</For><Show when={!availability.loading && !((availability()?.conflicts ?? []).length)}><p class="availability-clear">No room, meeting, or absence conflicts.</p></Show><div class="room-suggestions"><For each={availability()?.suggestions ?? []}>{(room) => <button type="button" class="room-suggestion" onClick={() => reserveRoom(room.id)}>{room.name}<small>{room.location || "Room"}{room.equipment.length ? ` · ${room.equipment.join(", ")}` : ""}</small></button>}</For></div><Show when={!availability.loading && !((availability()?.suggestions ?? []).length)}><p class="meeting-empty">No available rooms to suggest.</p></Show></section>
-            <Show when={!isWeb()}><CallPanel meeting={meeting()} identity={profileId()} displayName={profileId()}/></Show>
+            <CallPanel meeting={meeting()} identity={isWeb() ? currentUser()?.profile_id ?? "" : profileId()} displayName={isWeb() ? currentUser()?.display_name ?? "" : profileId()}/>
           </>}
         </Show>
       </aside>

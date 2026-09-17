@@ -13,9 +13,9 @@ const CF_TYPES: CfType[] = ["text", "text_list", "int", "int_list", "enum", "enu
 const blankRole = () => ({ name: "", description: "" });
 const blankCf = () => ({ entity_type: "issue", cf_type: "text" as CfType, name: "", constraints: "" });
 /** These lists are stored values AND, until now, the label the user read. Only the
- *  label follows the Issue→Ticket rename; the value stays `issue` / `issue_list`,
+ *  label follows the Issue→Task rename; the value stays `issue` / `issue_list`,
  *  because it is what the server persists and compares. */
-const cfLabel = (value: string) => value.replace(/^issue$/, "ticket").replace(/^issue_list$/, "ticket_list");
+const cfLabel = (value: string) => value.replace(/^issue$/, "task").replace(/^issue_list$/, "task_list");
 /** A picker's resting VALUE is its label, so the value has to be a word a human
  *  reads. `documentFolder` and `text_list` are wire identifiers; they were being
  *  printed at the user unchanged. The stored value is untouched — only the text. */
@@ -247,7 +247,7 @@ export default function Admin() {
           <li classList={{ archived: d.archived }}><div><strong>{d.name}</strong><span class="muted">{cfTypeLabel(d.cf_type)}{d.constraints_json ? ` · ${d.constraints_json}` : ""}</span></div><GhostPill onClick={() => toggleArchiveCf(d)}>{d.archived ? "Restore" : "Archive"}</GhostPill></li>
         }</For></ul>
         {/* The old line named the internal entity key — it said `issue` while
-            every other surface in the app says ticket. `cfLabel` is the display
+            every other surface in the app says task. `cfLabel` is the display
             name and already existed; it was simply not used here. */}
         <Show when={cfDefs()?.length === 0}>
           <EmptyState title={`No custom fields on a ${cfLabel(cfEntityType())} yet`} hint="A custom field adds one extra column of your own to every record of this kind." />

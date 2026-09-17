@@ -1,0 +1,8 @@
+--- exact panic ---
+Sep 04 19:54:23 scw-bold-gauss space-server[1690640]: thread 'tokio-rt-worker' (1690643) panicked at src/bin/space-server.rs:4303:18:
+Sep 04 19:54:23 scw-bold-gauss space-server[1690640]: internal error: entered unreachable code: identity-write policy must name an identity-write command
+Sep 04 19:54:23 scw-bold-gauss space-server[1690640]: note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+--- current holder ---
+--- sqlite procs ---
+--- service ---
+active

@@ -1,0 +1,11 @@
+utc=2026-09-04T19:54:17.975Z
+base=https://paloptic.com/space
+output=proof/cw-call-2peer-20260904T195417975Z
+health={"users_1":200,"users_2":200,"users_3":200,"users_4":200,"users_5":200}
+pixels={}
+room={}
+secondClick={}
+elsewhere={"before":{"url":"https://paloptic.com/space/home","incoming":0}}
+errors=["TimeoutError: waitFor: Timeout 45000ms exceeded.\nCall log:\n  - waiting for locator('[data-call-state=\"connected\"]') to be visible\n"]
+channel={"id":"zz-proof-channel-1788551657975-42c6cb9e","members":["profile-4b68218d43ad","profile-f9fa261c6c32"]}
+cleanup=[{"status":200},{"status":500}]

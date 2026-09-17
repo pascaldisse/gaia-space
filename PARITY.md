@@ -64,7 +64,7 @@ MIGRATION RESERVATIONS (take a number only after adding a row here):
 - V129 → feat/w13-calls (§08 call lifecycle audit facts + recording completion evidence) ☀Surya
 - V55 → feat/w7-devenv (cloud dev environment lifecycle: `dev_environments` state/idle-hibernation/standby pool) ☀
 
-TOTALS (8/8 audited, 359 rows): done 109 · partial 198 · stub 3 · missing 49. Matrix NOT green — steering loop active.
+TOTALS (8/8 audited, 359 rows): done 110 · partial 199 · stub 3 · missing 47. Matrix NOT green — steering loop active.
 
 RECOUNT METHOD (2026-08-22): `python3 scripts/parity_totals.py --check` parses only Markdown data rows whose third data cell is Status ∈ {done, partial, stub, missing}; it also reconciles ordered 01→08 section headings, canonical report paths, and each immediate section summary. Headings, prose, and `04-collaboration.md` evidence notes do not count. Frozen baseline revised 356→357 (2026-08-23 ruling): 133f77c split the Polls row into `done` (V117) + `missing` (stickers/saved) — legitimate row split, no freeze violation. 371 has no row source in this tree. Baseline 357→359 (2026-08-23 w12 ruling): 8428cf3 split §04 Threads row (scheduled/paging done + thread-as-channel partial) and Mentions row (team targets done + entity mentions partial) — Polls-precedent-legitimate splits, no freeze violation.
 
@@ -72,7 +72,7 @@ NOTE: KB files' own §Gap-Analysis sections = STALE (written vs old lib/ Flutter
 MANUAL-ONLY UNVERIFIED (owner): production ticker delivery to an external receiver, real public DNS/egress, and visible Tauri desktop window startup require owner-operated environment/UI verification. In-process real-socket tests and `space-server` HTTP checks do not verify those deployment/UI facts.
 
 ## 01 Git & Code Review (audited ✓ — rows: reports/parity/01-git-code-review.md; Varuna-III stage 3)
-52 rows — done 11 · partial 24 · stub 1 · missing 16.
+52 rows — done 12 · partial 25 · stub 1 · missing 14.
 Progress: source-branch root/`.space` CODEOWNERS parsing, last-match-wins glob matching, local user/email/role resolution, and required per-path approvals landed (V21); ordered MR stacks create/list and retarget open children after parent merge landed (V22; `review::tests::merged_stack_parent_retargets_open_children_only`).
 Progress (feat/w7-review): quality gates now wait on rule-declared external checks that have never reported (`quality_gate_rules.external_checks_json`, no migration — the V24 column was dormant); stacked reviews gained `listMyStacks`/`removeStack` plus an Unstack control ⇒ "Stacked reviews/cherry-pick/restack" partial→done.
 Progress (Vishnu-V): review navigation now cycles unresolved discussions/changed files; the list has quick filters, sort, aggregate badges; source-branch CODEOWNERS drives My owned files diff filtering; webhook catalog covers review/participant/discussion/suggestion transitions.

@@ -50,7 +50,6 @@ const KINDS: Record<AttentionKind, Category> = {
   channel: { key: "channel", label: "Channels", icon: "chat", tone: "mention" },
   thread: { key: "thread", label: "Threads", icon: "chat", tone: "mention" },
   todo: { key: "todo", label: "Tasks", icon: "check", tone: "issue" },
-  issue: { key: "issue", label: "Tickets", icon: "check", tone: "issue" },
   review: { key: "review", label: "Code reviews", icon: "review", tone: "review" },
   notification: { key: "notification", label: "Updates", icon: "inbox", tone: "updates" },
 };
@@ -67,7 +66,6 @@ const FILTER_ICON: Record<ActivityFilter, IconName> = {
  *  never borrows the worklist's accent tones. */
 const FEED_ICON = (verb: string): IconName =>
   verb.includes("review") ? "review"
-  : verb.includes("ticket") ? "check"
   : verb.includes("task") ? "check"
   : verb.includes("document") ? "book"
   : verb.includes("project") ? "layers"
@@ -115,7 +113,7 @@ export default function Inbox() {
   const filterLine = () =>
     filter() === "mentions" ? "Where somebody named you, and the threads you are in."
     : filter() === "messages" ? "Conversations with something unread in them."
-    : filter() === "assigned" ? "Tasks and tickets other people put on you."
+    : filter() === "assigned" ? "Tasks other people put on you."
     : filter() === "reviews" ? "Changes waiting for your word."
     : filter() === "updates" ? "What the organisation did, as a stream — not a to-do list."
     : "Everything waiting for you, newest first — and the organisation's own stream below it.";

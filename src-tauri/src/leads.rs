@@ -5,7 +5,7 @@
 use serde::{Deserialize, Serialize};
 use std::{
     env, fs,
-    io::{Seek, SeekFrom, Write},
+    io::Write,
     path::{Path, PathBuf},
 };
 
@@ -55,18 +55,10 @@ fn list_leads_from(path: Option<PathBuf>) -> Result<Vec<Lead>> {
 
 /// Remove one entry from the Quest-managed store. Records are rewritten as raw
 /// JSON values so fields Space does not model (consent, future columns) survive
-/// the delete untouched. This rewrites the writable store handle itself, matching the
-/// writer used to create leads; it does not require a second writable directory entry
-/// for a staged rename.
+/// the delete untouched. A staged replacement keeps the source intact until the new
+/// JSON is durable; it requires write access to the containing directory.
 fn delete_from(path: &Path, id: &str) -> Result<()> {
-    let mut store = fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(path)
-        .map_err(|_| "lead store is not writable".to_string())?;
-    let mut bytes = Vec::new();
-    std::io::Read::read_to_end(&mut store, &mut bytes)
-        .map_err(|_| "lead store unavailable".to_string())?;
+    let bytes = fs::read(path).map_err(|_| "lead store unavailable".to_string())?;
     let entries: Vec<serde_json::Value> =
         serde_json::from_slice(&bytes).map_err(|_| "lead store is invalid".to_string())?;
     let kept: Vec<serde_json::Value> = entries
@@ -78,18 +70,18 @@ fn delete_from(path: &Path, id: &str) -> Result<()> {
         return Err("lead not found".to_string());
     }
     let encoded = serde_json::to_vec(&kept).map_err(|_| "lead store is invalid".to_string())?;
-    store
-        .seek(SeekFrom::Start(0))
-        .map_err(|_| "lead store is not writable".to_string())?;
-    store
-        .set_len(0)
-        .map_err(|_| "lead store is not writable".to_string())?;
+    let staged = path.with_extension("tmp");
+    let mut store = fs::File::create(&staged)
+        .map_err(|error| format!("lead store is not writable: {}: {error}", path.display()))?;
     store
         .write_all(&encoded)
-        .map_err(|_| "lead store is not writable".to_string())?;
+        .map_err(|error| format!("lead store is not writable: {}: {error}", path.display()))?;
     store
         .sync_all()
-        .map_err(|_| "lead store is not writable".to_string())
+        .map_err(|error| format!("lead store is not writable: {}: {error}", path.display()))?;
+    drop(store);
+    fs::rename(&staged, path)
+        .map_err(|error| format!("lead store is not writable: {}: {error}", path.display()))
 }
 
 pub fn delete_lead(id: String) -> Result<()> {
@@ -103,6 +95,7 @@ fn delete_lead_from(path: Option<PathBuf>, id: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::os::unix::fs::PermissionsExt;
 
     #[test]
     fn reads_camel_case_dates_and_orders_newest_first() {
@@ -151,5 +144,24 @@ mod tests {
             Err("lead not found".to_string())
         );
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn delete_from_read_only_directory_names_store_path_and_io_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("leads.json");
+        fs::write(&path, r#"[{"id":"drop"}]"#).unwrap();
+        fs::set_permissions(dir.path(), fs::Permissions::from_mode(0o555)).unwrap();
+
+        let error = delete_from(&path, "drop").unwrap_err();
+
+        fs::set_permissions(dir.path(), fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(
+            error
+                .strip_prefix("lead store is not writable: ")
+                .and_then(|message| message.strip_prefix(&format!("{}: ", path.display())))
+                .map(|message| !message.is_empty()),
+            Some(true)
+        );
     }
 }

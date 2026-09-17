@@ -4,6 +4,8 @@ import solid from "vite-plugin-solid";
 
 // @ts-expect-error process is a nodejs global
 const host = process.env.TAURI_DEV_HOST;
+// Web screenshots can target an isolated space-server without changing a checked-in port.
+const webServer = process.env.SPACE_SERVER_URL;
 
 // https://vite.dev/config/
 export default defineConfig(async ({ mode }) => ({
@@ -45,5 +47,16 @@ export default defineConfig(async ({ mode }) => ({
       // 3. tell Vite to ignore watching `src-tauri`
       ignored: ["**/src-tauri/**"],
     },
+    ...(mode === "web" && webServer
+      ? {
+          proxy: {
+            "/space/api": {
+              target: webServer,
+              changeOrigin: true,
+              rewrite: (path: string) => path.replace(/^\/space/, ""),
+            },
+          },
+        }
+      : {}),
   },
 }));

@@ -18,9 +18,9 @@
 //!   * `documents` / `document_files` (documents.rs) IS the project's file surface — it is
 //!     literally what the channel's "Files & Links" tab renders, already scoped to this
 //!     same project.
-//! Therefore a note attaches by REFERENCING a document (`attachment_document_id`). The
-//! bytes keep one home, one access model and one version history. "Upload something" is
-//! answered honestly: upload it where files live, then point the decision at it.
+//!     Therefore a note attaches by REFERENCING a document (`attachment_document_id`). The
+//!     bytes keep one home, one access model and one version history. "Upload something" is
+//!     answered honestly: upload it where files live, then point the decision at it.
 //!
 //! ── AUTHORIZATION ──────────────────────────────────────────────────────────────
 //! Reads: project members (the same door as `list_project_todos`). Writes: a project member

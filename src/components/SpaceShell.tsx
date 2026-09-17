@@ -1,10 +1,11 @@
-import { For, Show, createEffect, createMemo, createResource, createSignal, type JSX } from "solid-js";
+import { For, Show, createEffect, createMemo, createResource, createSignal, onCleanup, type JSX } from "solid-js";
 import "./SpaceShell.css";
 // Light chat surface. Scoped under `.theme-space-light`, which only this shell sets:
 // loading it here (not lazily from the workspace) keeps the rules deterministic.
 import "../views/ChatSpaceLight.css";
 import { Icon, type IconName } from "./Icon";
 import NewChannelDialog from "./NewChannelDialog";
+import RecipientPicker from "./RecipientPicker";
 import ConfirmDialog from "./ConfirmDialog";
 import PromptDialog from "./PromptDialog";
 import ContextMenu, { type ContextMenuItem } from "./ContextMenu";
@@ -12,13 +13,16 @@ import { actingProfileId as chatActingProfileId, bumpChannels, channelsVersion, 
 import { dmLabel, partitionChannels } from "../chatPartition";
 import { chatApi, newId as newMessageId, type ChannelSummary } from "../api/chat";
 import { setSelectedChannel } from "../chatChannelSelection";
-import { personalApi } from "../api/personal";
 import { documentsApi, ORGANIZATION_LIBRARY_ID } from "../api/documents";
 import { platformApi } from "../api/platform";
+import { meetingsApi, type Meeting } from "../api/meetings";
+import { CALL_RING_SECONDS, findIncomingCalls } from "../views/channelCall";
+import { ringSoundEnabled } from "../callRing";
+import { requestChannelCallJoin } from "../views/channelCallJoin";
 import { currentUser, isWeb, profileId, profiles, reloadProfiles, projects, reloadProjects, workspaceId, workspaces } from "../session";
 import { attentionCount, attentionFilterCount, asActivityFilter, setAttentionProfile, unreadChannelTotal, type ActivityFilter } from "../attention";
 import { isViewAvailable, linkEntity, linkProps, navigate, route, type Route } from "../router";
-import { NAV_GROUPS, hiddenGroups, railModeOfRoute, railModeOfView, viewLabel, type RailMode } from "../nav";
+import { MOBILE_RAIL_MODES, NAV_GROUPS, hiddenGroups, mobileNavPlacement, navPlacement, railModeOfRoute, railModeOfView, showDevelopment, viewLabel, type RailMode } from "../nav";
 
 /**
  * Communication-first shell (GAIA Space redesign, stage 1).
@@ -34,20 +38,23 @@ export type ShellView = { name: string; icon: IconName };
 
 /** The rail is a set of MODES. `landing` is the view the mode opens on when no more
  *  specific object is known — a mode must never land on a naked sidebar. */
-const RAIL: { mode: RailMode; label: string; landing: string; icon: IconName; badge?: "chat" | "mentions" }[] = [
+const RAIL: { mode: Exclude<RailMode, "more">; label: string; landing: string; icon: IconName; badge?: "chat" | "mentions" }[] = [
   { mode: "home", label: "Home", landing: "Home", icon: "home" },
   { mode: "chats", label: "Chats", landing: "Chat", icon: "chat", badge: "chat" },
-  { mode: "activity", label: "Activity", landing: "Inbox", icon: "inbox", badge: "mentions" },
   // "Tasks" lands on the PRIVATE list (My tasks); Team Tasks — everybody's running
-  // project work — is the second entry of that mode's sidebar.
+  // work — is the second entry of that mode's sidebar, the generated ledger the third.
   { mode: "tasks", label: "Tasks", landing: "To-Do", icon: "check" },
   { mode: "projects", label: "Projects", landing: "Projects", icon: "layers" },
-  { mode: "calendar", label: "Calendar", landing: "Calendar", icon: "calendar" },
-  { mode: "knowledge", label: "Library", landing: "Documents", icon: "book-nav" },
+  { mode: "library", label: "Library", landing: "Documents", icon: "book-nav" },
   { mode: "development", label: "Development", landing: "Development", icon: "target" },
   { mode: "crm", label: "CRM", landing: "CRM", icon: "columns" },
 ];
-
+const mobileRail = () => RAIL.filter((entry) => MOBILE_RAIL_MODES.includes(entry.mode));
+/** The rail entries the NARROW rail has no room for. They are not lost: the More
+ *  panel lists them (hidden on desktop, where each has its own rail button). */
+const railDroppedOnMobile = () =>
+  RAIL.filter((entry) => !MOBILE_RAIL_MODES.includes(entry.mode) && (entry.mode !== "development" || showDevelopment()));
+const desktopRail = () => RAIL.filter((entry) => entry.mode !== "development" || showDevelopment());
 /** A sidebar entry names an OBJECT of the current mode. `filter` marks the entries that
  *  NARROW the current pane instead of moving: Activity's worklist filters, which live in
  *  the route (`/inbox/<filter>`) so exactly one of them can read as active, a deep link
@@ -74,39 +81,26 @@ const MODE_LINKS: Record<RailMode, SideEntry[]> = {
   // backed by `list_unread_threads`) and therefore in Activity, the rail badge and Home.
   // Do not restore a destination here; add to the worklist rule instead.
   chats: [],
-  // Activity's objects are the things waiting for you, so its sidebar lists FILTERS over
-  // the one worklist — each one a group of `AttentionKind` (see ACTIVITY_FILTERS in
-  // attention.ts). No entry leaves the mode, and no entry exists without kinds behind it.
-  activity: [
-    { label: "All", view: "Inbox", icon: "inbox", strong: true, filter: "all" },
-    { label: "Mentions", view: "Inbox", icon: "chat", filter: "mentions" },
-    { label: "Messages", view: "Inbox", icon: "chat", filter: "messages" },
-    { label: "Assigned", view: "Inbox", icon: "check", filter: "assigned" },
-    { label: "Reviews", view: "Inbox", icon: "review", filter: "reviews" },
-    { label: "Updates", view: "Inbox", icon: "inbox", filter: "updates" },
-  ],
+  // The task mode's objects are the three task LISTS: mine, the team's, and the
+  // generated ledger. Project Tasks is deliberately absent — it is project-scoped and
+  // owns its home under Projects, where its project already stands.
   tasks: [
     { label: "My tasks", view: "To-Do", icon: "check", strong: true },
     { label: "Team tasks", view: "Team Tasks", icon: "users" },
+    { label: "Task ledger", view: "Task Ledger", icon: "columns" },
   ],
+  // Activity's objects are the things waiting for you, so its sidebar lists FILTERS over
+  // the one worklist — each one a group of `AttentionKind` (see ACTIVITY_FILTERS in
+  // attention.ts). No entry leaves the mode, and no entry exists without kinds behind it.
   // Projects lists the PROJECTS, the way Chats lists the channels — they are this
   // mode's objects. "All projects" is the only fixed entry; everything else is data.
   projects: [{ label: "All projects", view: "Projects", icon: "layers", strong: true }],
-  calendar: [
-    { label: "Calendar", view: "Calendar", icon: "calendar", strong: true },
-    { label: "Meetings", view: "Meetings", icon: "calendar-nav" },
-    { label: "People", view: "Members", icon: "org" },
-    { label: "Locations", view: "Locations", icon: "org" },
-    { label: "Time off", view: "Absences", icon: "clock-nav" },
-  ],
   // Knowledge's objects are the LIBRARIES, and every one of them is DATA (the personal
   // container, the organization's books, each project's library), so none of them can be
   // written here: the mode's column is built below, from what exists.
-  knowledge: [],
+  library: [],
   development: [
     { label: "Overview", view: "Development", icon: "target", strong: true },
-    { label: "Tickets", view: "Issues", icon: "target" },
-    { label: "Boards", view: "Boards", icon: "columns" },
     { label: "Pull requests", view: "Code Reviews", icon: "review" },
     { label: "Repositories", view: "Repos", icon: "repo" },
     { label: "Pipelines", view: "Pipelines", icon: "pipeline" },
@@ -141,10 +135,14 @@ const MODE_LINKS: Record<RailMode, SideEntry[]> = {
 };
 
 const MODE_TITLE: Record<RailMode, string> = {
-  home: "Home", chats: "Chats", activity: "Activity",
-  tasks: "Tasks", projects: "Projects", calendar: "Calendar", knowledge: "Knowledge", development: "Development", crm: "CRM", more: "More",
+  home: "Home", chats: "Chats", tasks: "Tasks", projects: "Projects", library: "Library", development: "Development", crm: "CRM", more: "More",
 };
 
+/** Section order for the Chats/Home conversation list (Pascal, 2026-09-04: "direct
+ *  messages should always appear on top"). A DM is triaged before any project's
+ *  channels, `directs` first — nothing below hardcodes the order, it reads this array.
+ *  Reorder here, not in the JSX, if that ever needs to change again. */
+const RAIL_GROUP_ORDER: readonly ("directs" | "channels")[] = ["directs", "channels"];
 /** linkProps() is evaluated ONCE when a node is created, so a plain spread freezes the
  *  href at first render: the rail's links were still `/dashboard` (the fallback, from
  *  before registerViews ran), and the Chats landing could never see channels that load
@@ -171,9 +169,15 @@ export default function SpaceShell(props: {
 }): JSX.Element {
   const [moreOpen, setMoreOpen] = createSignal(false);
   const [sidebarCollapsed, setSidebarCollapsed] = createSignal(false);
+const [mobileSidebarOpen, setMobileSidebarOpen] = createSignal(false);
   const [filter, setFilter] = createSignal("");
-  /** `undefined` = closed; a string (possibly "") = open, bound to that project. */
+  /** `undefined` = closed; a string (possibly "") = open, bound to that project.
+   *  Scoped to the sidebar's own per-project/per-section "+" only — the global
+   *  "New message" action below opens the picker instead (ONE ACTION, ONE PLACE:
+   *  a project-bound `+` still needs the project preset NewChannelDialog carries,
+   *  the person-first global action does not). */
   const [newChannelFor, setNewChannelFor] = createSignal<string | undefined>();
+  const [recipientPickerOpen, setRecipientPickerOpen] = createSignal(false);
 
   // Identity: web is bound to the authenticated profile, desktop to the acting one.
   const actingProfileId = () => currentUser()?.profile_id ?? profileId();
@@ -189,6 +193,75 @@ export default function SpaceShell(props: {
     () => [actingProfileId(), channelsVersion()] as const,
     ([id]) => (id ? chatApi.listChannelsWithMeta(id) : Promise.resolve<ChannelSummary[]>([])),
   );
+
+  // Current server transport has no meeting event stream; poll once at the app shell,
+  // never separately in every route/channel.
+  const CALL_RING_POLL_MS = Number(import.meta.env.VITE_CALL_RING_POLL_MS) || 3_000;
+  const [dismissedCalls, setDismissedCalls] = createSignal<Set<string>>(new Set());
+  const [ringNow, setRingNow] = createSignal(Math.floor(Date.now() / 1_000));
+  const [incomingMeetings, setIncomingMeetings] = createSignal<Meeting[]>([]);
+  const [incoming, { refetch: refetchIncoming }] = createResource(
+    actingProfileId,
+    async (id) => {
+      if (!id) return [] as Meeting[];
+      const meetings = await meetingsApi.list(id);
+      const candidates = findIncomingCalls(meetings, id, Math.floor(Date.now() / 1_000), CALL_RING_SECONDS, dismissedCalls());
+      const settled = await Promise.all(candidates.map(async meeting => {
+        const mine = (await meetingsApi.participants(meeting.id, id)).find(person => person.profile_id === id);
+        return mine?.status === "accepted" || mine?.status === "declined" ? null : meeting;
+      }));
+      return settled.filter((meeting): meeting is Meeting => !!meeting);
+    },
+  );
+  createEffect(() => setIncomingMeetings(incoming() ?? []));
+  createEffect(() => {
+    if (!actingProfileId()) return;
+    const timer = window.setInterval(() => { setRingNow(Math.floor(Date.now() / 1_000)); void refetchIncoming(); }, CALL_RING_POLL_MS);
+    onCleanup(() => window.clearInterval(timer));
+  });
+  const incomingCall = () => incomingMeetings()[0];
+  const dismissIncomingCall = (meetingId: string) => setDismissedCalls(value => new Set([...value, meetingId]));
+  const acceptIncomingCall = async () => {
+    const meeting = incomingCall(); const self = actingProfileId();
+    if (!meeting || !self || !meeting.channel_id) return;
+    try {
+      await meetingsApi.rsvp(meeting.id, self, "accepted");
+      dismissIncomingCall(meeting.id);
+      requestChannelCallJoin({ meeting, audioOnly: false });
+      navigate({ view: "Chat", entityType: "channel", entityId: meeting.channel_id, tab: "messages" });
+      if (typeof Notification !== "undefined" && Notification.permission === "default") void Notification.requestPermission();
+    } finally { void refetchIncoming(); }
+  };
+  const declineIncomingCall = async () => {
+    const meeting = incomingCall(); const self = actingProfileId();
+    if (!meeting || !self) return;
+    dismissIncomingCall(meeting.id);
+    try { await meetingsApi.rsvp(meeting.id, self, "declined"); }
+    finally { void refetchIncoming(); }
+  };
+  createEffect(() => {
+    const meeting = incomingCall();
+    if (!meeting) return;
+    const original = document.title; let alternate = false;
+    const caller = () => profiles()?.find(person => person.id === meeting.organizer_id)?.display_name || meeting.organizer_id || "Someone";
+    const updateTitle = () => { document.title = alternate ? `☎ Incoming call · ${caller()}` : "Incoming call"; alternate = !alternate; };
+    updateTitle(); const timer = window.setInterval(updateTitle, 1_000);
+    onCleanup(() => { window.clearInterval(timer); document.title = original; });
+  });
+  createEffect(() => {
+    if (!incomingCall() || !ringSoundEnabled() || typeof AudioContext === "undefined") return;
+    let context: AudioContext | undefined;
+    const chirp = () => {
+      try {
+        context ??= new AudioContext(); const oscillator = context.createOscillator(); const gain = context.createGain();
+        oscillator.frequency.setValueAtTime(880, context.currentTime); gain.gain.setValueAtTime(.035, context.currentTime);
+        gain.gain.exponentialRampToValueAtTime(.001, context.currentTime + .16);
+        oscillator.connect(gain).connect(context.destination); oscillator.start(); oscillator.stop(context.currentTime + .16);
+      } catch { /* browser autoplay policy can refuse an ungestured ring */ }
+    };
+    chirp(); const timer = window.setInterval(chirp, 1_500);
+    onCleanup(() => { window.clearInterval(timer); void context?.close(); });
+  });
   // projects() is lazy (auth must land first); ask once so group headers can resolve names.
   void reloadProjects().catch(() => undefined);
 
@@ -325,22 +398,6 @@ export default function SpaceShell(props: {
     }
   };
 
-  /** A task dropped on a project joins it — the same gesture as a document onto a
-   *  shelf. Only the task's OWNER may re-file it; the server refuses anyone else, and
-   *  the refusal is shown rather than swallowed. */
-  const fileTaskIntoProject = async (taskId: string, projectId: string, projectName: string) => {
-    try {
-      const mine = await personalApi.todos(actingProfileId() ?? "", true);
-      const task = mine.find((row) => row.id === taskId);
-      if (!task || task.project_id === projectId) return;
-      await personalApi.updateTodo({ ...task, project_id: projectId });
-      setDropNote(`“${task.content}” now belongs to ${projectName}`);
-      setTimeout(() => setDropNote(""), 4000);
-    } catch (reason) {
-      setChannelError(String(reason));
-    }
-  };
-
   const attachChannelToProject = async (channelId: string, projectId: string) => {
     try {
       const channel = await chatApi.getChannel(channelId);
@@ -388,7 +445,7 @@ export default function SpaceShell(props: {
   const showsChannels = createMemo(() => mode() === "chats" || mode() === "home");
   // Knowledge lists libraries, all of them data, so it keeps its column too — before
   // this it was the one mode where the second bar disappeared mid-navigation.
-  const hasSidebar = createMemo(() => MODE_LINKS[mode()].length > 0 || showsChannels() || mode() === "knowledge");
+  const hasSidebar = createMemo(() => MODE_LINKS[mode()].length > 0 || showsChannels() || mode() === "library");
 
   /** A profile's display name, for labelling a direct message with the OTHER person. */
   const displayNameOf = (id: string) => (profiles() ?? []).find((person) => person.id === id)?.display_name;
@@ -427,10 +484,16 @@ export default function SpaceShell(props: {
   });
 
   /** Direct messages: 1:1 conversations. They live in the Chats mode only, and the
-   *  search matches what the row SHOWS — the other person's name. */
+   *  search matches what the row SHOWS — the other person's name. Sorted by most
+   *  recent activity first (the same `last_message_at` the "newest channel" landing
+   *  already trusts); a pair with no messages yet has no activity to sort by, so those
+   *  fall back to their label, alphabetically, instead of a stable-sort coin flip. */
   const directs = createMemo(() => {
     const term = filter().trim().toLowerCase();
-    return split().dms.filter((channel) => !term || labelOfDirect(channel).toLowerCase().includes(term));
+    return split().dms
+      .filter((channel) => !term || labelOfDirect(channel).toLowerCase().includes(term))
+      .sort((a, b) => (b.last_message_at ?? -Infinity) - (a.last_message_at ?? -Infinity)
+        || labelOfDirect(a).localeCompare(labelOfDirect(b)));
   });
 
   /** Projects, for the Tasks mode's "by project" section. */
@@ -493,6 +556,104 @@ export default function SpaceShell(props: {
   const entryCount = (entry: SideEntry) =>
     entry.filter ? attentionFilterCount(entry.filter) : badgeOf(entry.badge);
 
+  /** Real channels grouped by project, plus the loose/"Other channels" tail — the block
+   *  `RAIL_GROUP_ORDER`'s `"channels"` entry stands for. */
+  const channelGroupsSection = () => (
+    <For each={groups()}>
+      {(group) => (
+        <div class="section">
+          <div
+            class="section-head"
+            classList={{ "drop-into": dropTarget() === `project:${group.id}` }}
+            onDragOver={(event) => {
+              // Only a real project takes a conversation; "Other channels" is the
+              // absence of one, so it is not a destination.
+              if (!group.id || !carries(event, "application/x-gaia-channel")) return;
+              event.preventDefault();
+              setDropTarget(`project:${group.id}`);
+            }}
+            onDragLeave={() => setDropTarget((current) => (current === `project:${group.id}` ? null : current))}
+            onDrop={(event) => {
+              const channelId = event.dataTransfer?.getData("application/x-gaia-channel");
+              setDropTarget(null);
+              if (!channelId || !group.id) return;
+              event.preventDefault();
+              void attachChannelToProject(channelId, group.id);
+            }}
+          >
+            <span>{group.label}</span>
+            {/* The `+` is where "new conversation" lives now (it left Chat's sidebar). */}
+            <button class="section-add" aria-label={`New channel in ${group.label}`} title="New channel" onClick={() => setNewChannelFor(group.id)}>+</button>
+          </div>
+          <For each={group.channels}>
+            {(channel) => (
+              <a
+                class="channel"
+                classList={{
+                  active: activeChannelId() === channel.id,
+                  unread: channel.unread_count > 0,
+                  "drop-into": dropTarget() === `channel:${channel.id}`,
+                }}
+                draggable={true}
+                onDragStart={(event) => event.dataTransfer?.setData("application/x-gaia-channel", channel.id)}
+                onDragOver={(event) => {
+                  if (!carries(event, "application/x-gaia-document")) return;
+                  event.preventDefault();
+                  setDropTarget(`channel:${channel.id}`);
+                }}
+                onDragLeave={() => setDropTarget((current) => (current === `channel:${channel.id}` ? null : current))}
+                onDrop={(event) => {
+                  const payload = readPayload<{ id: string; title: string; path: string }>(event, "application/x-gaia-document");
+                  setDropTarget(null);
+                  if (!payload) return;
+                  event.preventDefault();
+                  void shareDocumentInto(channel, payload);
+                }}
+                onContextMenu={(event) => openChannelMenu(event, channel)}
+                onPointerDown={() => setSelectedChannel(channel)}
+                onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") setSelectedChannel(channel); }}
+                {...navLink(() => ({ view: "Chat", entityType: "channel", entityId: channel.id, tab: "messages" }))}
+              >
+                <span class="hash" aria-hidden="true">#</span>
+                {channel.name}
+                <Show when={channel.unread_count > 0}><span class="count">{channel.unread_count}</span></Show>
+              </a>
+            )}
+          </For>
+        </div>
+      )}
+    </For>
+  );
+
+  /** The DM section `RAIL_GROUP_ORDER`'s `"directs"` entry stands for — rendered wherever
+   *  that array puts it, `@`-glyphed, sorted by `directs()` (most recent activity first). */
+  const directMessagesSection = () => (
+    <Show when={directs().length > 0}>
+      <div class="section">
+        <div class="section-head"><span>Direct messages</span></div>
+        <For each={directs()}>
+          {(channel) => (
+            <a
+              class="channel"
+              classList={{ active: activeChannelId() === channel.id, unread: channel.unread_count > 0 }}
+              onContextMenu={(event) => openChannelMenu(event, channel)}
+              onPointerDown={() => setSelectedChannel({ ...channel, headerLabel: labelOfDirect(channel), avatarUrl: profiles()?.find((person) => person.display_name === labelOfDirect(channel))?.avatar_url })}
+              onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") setSelectedChannel({ ...channel, headerLabel: labelOfDirect(channel), avatarUrl: profiles()?.find((person) => person.display_name === labelOfDirect(channel))?.avatar_url }); }}
+              {...navLink(() => ({ view: "Chat", entityType: "channel", entityId: channel.id, tab: "messages" }))}
+            >
+              <span class="hash" aria-hidden="true">@</span>
+              {labelOfDirect(channel)}
+              <Show when={channel.unread_count > 0}><span class="count">{channel.unread_count}</span></Show>
+            </a>
+          )}
+        </For>
+      </div>
+    </Show>
+  );
+  /** The order the two sections above render in — driven by `RAIL_GROUP_ORDER`, not by
+   *  their position in this file. */
+  const sidebarSections = () => RAIL_GROUP_ORDER.map((section) => (section === "directs" ? directMessagesSection() : channelGroupsSection()));
+
   const railItem = (entry: (typeof RAIL)[number]) => (
     <a
       class="rail-item"
@@ -527,7 +688,16 @@ export default function SpaceShell(props: {
   );
 
   return (
-    <div class="space-chat-shell theme-space-light" classList={{ "no-sidebar": !hasSidebar(), "sidebar-collapsed": sidebarCollapsed() }}>
+    <div class="space-chat-shell theme-space-light" data-nav-placement={navPlacement()} data-mobile-nav-placement={mobileNavPlacement()} classList={{ "no-sidebar": !hasSidebar(), "sidebar-collapsed": sidebarCollapsed(), "mobile-sidebar-open": mobileSidebarOpen() }}>
+      <Show when={incomingCall()}>{meeting => {
+        const caller = () => profiles()?.find(person => person.id === meeting().organizer_id)?.display_name || meeting().organizer_id || "Someone";
+        const channel = () => (channels() ?? []).find(item => item.id === meeting().channel_id)?.name || meeting().title;
+        const elapsed = () => Math.max(0, ringNow() - (meeting().video_started_at ?? meeting().starts_at));
+        return <section class="incoming-call-ring" role="alert" aria-label="Incoming call">
+          <div><strong>{caller()}</strong><span> is calling in #{channel()} · {elapsed()}s</span></div>
+          <div class="incoming-call-actions"><button type="button" class="decline" onClick={() => void declineIncomingCall()}>Decline</button><button type="button" class="accept" onClick={() => void acceptIncomingCall()}>Accept</button></div>
+        </section>;
+      }}</Show>
       <Show when={channelMenu()}>
         {(menu) => <ContextMenu x={menu().x} y={menu().y} items={menu().items} onClose={() => setChannelMenu(null)} />}
       </Show>
@@ -563,9 +733,13 @@ export default function SpaceShell(props: {
       <Show when={channelError()}>
         <p class="space-shell-error" role="alert">{channelError()}</p>
       </Show>
-      <aside class="rail" aria-label="Main navigation">
+      <aside class="rail mobile-rail" aria-label="Mobile navigation">
+        <For each={mobileRail()}>{entry => <a class="rail-item" aria-label={entry.label} classList={{ active: mode() === entry.mode }} onPointerDown={() => entry.mode === "chats" && setMobileSidebarOpen(true)} {...navLink(() => landingRoute(entry))}><span class="rail-icon"><Icon name={entry.icon} size={18} /></span><span class="rail-label">{entry.label}</span></a>}</For>
+        <button class="rail-item" aria-label="More" classList={{ active: moreOpen() || mode() === "more" }} onClick={() => setMoreOpen(open => !open)}><span class="rail-icon"><Icon name="menu" size={18} /></span><span class="rail-label">More</span></button>
+      </aside>
+      <aside class="rail desktop-rail" aria-label="Main navigation">
         <div class="mark" aria-hidden="true">G</div>
-        <For each={RAIL}>{railItem}</For>
+        <For each={desktopRail()}>{railItem}</For>
         <button
           class="rail-item"
           title="More"
@@ -587,7 +761,7 @@ export default function SpaceShell(props: {
             composer the sidebar's section `+` and the global `New message` open,
             organisation-scoped. Search keeps its own two addresses (the command bar
             and the sidebar's magnifier), both of which say "search". */}
-        <button class="round-action" aria-label="New message" title="New message" onClick={() => setNewChannelFor("")}>
+        <button class="round-action" aria-label="New message" title="New message" onClick={() => setRecipientPickerOpen(true)}>
           <Icon name="plus" size={20} />
         </button>
         <a class="profile" title={meLabel()} aria-label={meLabel()} {...linkProps({ view: "Settings" })}>
@@ -600,6 +774,28 @@ export default function SpaceShell(props: {
         {/* The panel closes on the container's click, not on each item: an item's own
             onClick attribute would SHADOW the spread navigation handler. */}
         <nav class="more-panel" aria-label="All views" onClick={() => setMoreOpen(false)}>
+          {/* WHAT THE NARROW RAIL DROPS, MORE PICKS UP. The mobile rail carries five
+              destinations, so some modes (Library, Development) are not drawn there —
+              and the list below holds only views mapped to "more", which would leave
+              them unreachable on a phone. This section is rendered always and hidden
+              by CSS on desktop, where those modes have their own rail button. */}
+          <Show when={railDroppedOnMobile().length}>
+            <div class="more-mobile-only">
+              <h2>Destinations</h2>
+              <For each={railDroppedOnMobile()}>
+                {(entry) => (
+                  <a
+                    class="more-item"
+                    classList={{ active: mode() === entry.mode }}
+                    {...navLink(() => landingRoute(entry))}
+                  >
+                    <span class="side-icon" aria-hidden="true"><Icon name={entry.icon} size={16} /></span>
+                    {entry.label}
+                  </a>
+                )}
+              </For>
+            </div>
+          </Show>
           <h2>All views</h2>
           <For each={moreViews()}>
             {(view) => (
@@ -618,6 +814,7 @@ export default function SpaceShell(props: {
 
       <Show when={hasSidebar()}>
       <aside class="space-sidebar" aria-label={`${MODE_TITLE[mode()]} navigation`}>
+        <button class="mobile-sidebar-back" type="button" onClick={() => setMobileSidebarOpen(false)}>Back to chat</button>
         <div class="workspace-name">
           <strong>{workspaceName()}</strong>
           <div class="tiny-actions">
@@ -677,50 +874,10 @@ export default function SpaceShell(props: {
           </div>
         </Show>
 
-        {/* THE PROJECTS ARE WHERE WORK IS FILED. Tasks lists them for the same reason
-            Knowledge lists its libraries: to go there, and to have somewhere to drop
-            what you are carrying. */}
-        <Show when={mode() === "tasks"}>
-          <div class="section">
-            <div class="section-head"><span>Projects</span></div>
-            <For each={projectList()}>
-              {(project) => (
-                <a
-                  class="side-link"
-                  classList={{
-                    active: route().projectId === project.id,
-                    "drop-into": dropTarget() === `task-project:${project.id}`,
-                  }}
-                  onDragOver={(event) => {
-                    if (!carries(event, "application/x-gaia-task")) return;
-                    event.preventDefault();
-                    setDropTarget(`task-project:${project.id}`);
-                  }}
-                  onDragLeave={() => setDropTarget((current) => (current === `task-project:${project.id}` ? null : current))}
-                  onDrop={(event) => {
-                    const payload = readPayload<{ id: string; title: string }>(event, "application/x-gaia-task");
-                    setDropTarget(null);
-                    if (!payload) return;
-                    event.preventDefault();
-                    void fileTaskIntoProject(payload.id, project.id, project.name ?? "this project");
-                  }}
-                  {...navLink(() => ({ view: "Project Tasks", projectId: project.id }))}
-                >
-                  <span class="side-icon" aria-hidden="true"><Icon name="layers" size={15} /></span>
-                  {project.name}
-                </a>
-              )}
-            </For>
-            <Show when={!projectList().length}>
-              <div class="side-empty">No projects yet.</div>
-            </Show>
-          </div>
-        </Show>
-
         {/* One library per row, the organization's above the projects' — the same shape
             Chats uses for channels. Choosing a source happens HERE now, so the Documents
             page no longer carries a second picker of its own (one act, one place). */}
-        <Show when={mode() === "knowledge"}>
+        <Show when={mode() === "library"}>
           {/* The personal container is the anchor and carries its OWN container in the
               link: arriving from a project library must actually switch the source. */}
           <a
@@ -788,91 +945,7 @@ export default function SpaceShell(props: {
         </Show>
 
         <Show when={showsChannels()}>
-        <For each={groups()}>
-          {(group) => (
-            <div class="section">
-              <div
-                class="section-head"
-                classList={{ "drop-into": dropTarget() === `project:${group.id}` }}
-                onDragOver={(event) => {
-                  // Only a real project takes a conversation; "Other channels" is the
-                  // absence of one, so it is not a destination.
-                  if (!group.id || !carries(event, "application/x-gaia-channel")) return;
-                  event.preventDefault();
-                  setDropTarget(`project:${group.id}`);
-                }}
-                onDragLeave={() => setDropTarget((current) => (current === `project:${group.id}` ? null : current))}
-                onDrop={(event) => {
-                  const channelId = event.dataTransfer?.getData("application/x-gaia-channel");
-                  setDropTarget(null);
-                  if (!channelId || !group.id) return;
-                  event.preventDefault();
-                  void attachChannelToProject(channelId, group.id);
-                }}
-              >
-                <span>{group.label}</span>
-                {/* The `+` is where "new conversation" lives now (it left Chat's sidebar). */}
-                <button class="section-add" aria-label={`New channel in ${group.label}`} title="New channel" onClick={() => setNewChannelFor(group.id)}>+</button>
-              </div>
-              <For each={group.channels}>
-                {(channel) => (
-                  <a
-                    class="channel"
-                    classList={{
-                      active: activeChannelId() === channel.id,
-                      unread: channel.unread_count > 0,
-                      "drop-into": dropTarget() === `channel:${channel.id}`,
-                    }}
-                    draggable={true}
-                    onDragStart={(event) => event.dataTransfer?.setData("application/x-gaia-channel", channel.id)}
-                    onDragOver={(event) => {
-                      if (!carries(event, "application/x-gaia-document")) return;
-                      event.preventDefault();
-                      setDropTarget(`channel:${channel.id}`);
-                    }}
-                    onDragLeave={() => setDropTarget((current) => (current === `channel:${channel.id}` ? null : current))}
-                    onDrop={(event) => {
-                      const payload = readPayload<{ id: string; title: string; path: string }>(event, "application/x-gaia-document");
-                      setDropTarget(null);
-                      if (!payload) return;
-                      event.preventDefault();
-                      void shareDocumentInto(channel, payload);
-                    }}
-                    onContextMenu={(event) => openChannelMenu(event, channel)}
-                    onPointerDown={() => setSelectedChannel(channel)}
-                    onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") setSelectedChannel(channel); }}
-                    {...navLink(() => ({ view: "Chat", entityType: "channel", entityId: channel.id, tab: "messages" }))}
-                  >
-                    <span class="hash" aria-hidden="true">#</span>
-                    {channel.name}
-                    <Show when={channel.unread_count > 0}><span class="count">{channel.unread_count}</span></Show>
-                  </a>
-                )}
-              </For>
-            </div>
-          )}
-        </For>
-        <Show when={directs().length > 0}>
-          <div class="section">
-            <div class="section-head"><span>Direct messages</span></div>
-            <For each={directs()}>
-              {(channel) => (
-                <a
-                  class="channel"
-                  classList={{ active: activeChannelId() === channel.id, unread: channel.unread_count > 0 }}
-                  onContextMenu={(event) => openChannelMenu(event, channel)}
-                  onPointerDown={() => setSelectedChannel({ ...channel, headerLabel: labelOfDirect(channel), avatarUrl: profiles()?.find((person) => person.display_name === labelOfDirect(channel))?.avatar_url })}
-                  onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") setSelectedChannel({ ...channel, headerLabel: labelOfDirect(channel), avatarUrl: profiles()?.find((person) => person.display_name === labelOfDirect(channel))?.avatar_url }); }}
-                  {...navLink(() => ({ view: "Chat", entityType: "channel", entityId: channel.id, tab: "messages" }))}
-                >
-                  <span class="hash" aria-hidden="true">@</span>
-                  {labelOfDirect(channel)}
-                  <Show when={channel.unread_count > 0}><span class="count">{channel.unread_count}</span></Show>
-                </a>
-              )}
-            </For>
-          </div>
-        </Show>
+        {sidebarSections()}
         <Show when={!groups().length && !directs().length}>
           <div class="section"><div class="side-empty">No conversations yet.</div></div>
         </Show>
@@ -896,6 +969,10 @@ export default function SpaceShell(props: {
       </aside>
       </Show>
 
+      <Show when={recipientPickerOpen()}>
+        <RecipientPicker onClose={() => setRecipientPickerOpen(false)} />
+      </Show>
+
       <Show when={newChannelFor() !== undefined}>
         <NewChannelDialog
           projectId={newChannelFor() || undefined}
@@ -914,7 +991,7 @@ export default function SpaceShell(props: {
         <header class="commandbar">
           <button class="command-search" onClick={props.onOpenSearch}>
             <Icon name="search" size={16} />
-            Search messages, tasks, dates and tickets
+            Search messages, tasks and dates
           </button>
           {/* ── THE GLOBAL-ACTION RULE ────────────────────────────────────────
               The GLOBAL bar carries SEARCH plus AT MOST ONE global action, and that
@@ -931,9 +1008,15 @@ export default function SpaceShell(props: {
               `Schedule meeting` is gone; the two surfaces that own it keep it.
               `New message` stays as the ONE global action and now genuinely opens
               NewChannelDialog — the same act as the sidebar `+`, organisation-scoped
-              (`""` = no project pre-bound), so nothing became unreachable. */}
+              (`""` = no project pre-bound), so nothing became unreachable.
+
+              Stage feat/new-message-picker: `New message` now opens RecipientPicker
+              (a Telegram-style person/channel picker) instead of NewChannelDialog's
+              content-type form. NewChannelDialog itself is untouched — the sidebar's
+              per-project `+` (`setNewChannelFor`) still opens it, since that button
+              needs the project preset a person-first picker has no reason to carry. */}
           <div class="top-actions">
-            <button class="btn primary" onClick={() => setNewChannelFor("")}>New message</button>
+            <button class="btn primary" onClick={() => setRecipientPickerOpen(true)}>New message</button>
           </div>
         </header>
         <section class="space-content">{props.children}</section>

@@ -2,9 +2,10 @@ import { createMemo, createResource, createSignal, createUniqueId, onCleanup, on
 import { personalApi, type CalendarItem } from "../api/personal";
 import { platformApi } from "../api/platform";
 import { calendarsApi } from "../api/calendar-feeds";
-import { meetingLinkError, meetingsApi, type Meeting, type MeetingParticipant } from "../api/meetings";
+import { hasMeetingLink, meetingLinkError, meetingsApi, type Meeting, type MeetingParticipant } from "../api/meetings";
+import type { Profile } from "../api/platform";
 import CallPanel from "./CallPanel";
-import { humanError, isWeb, profileId } from "../session";
+import { currentUser, humanError, isWeb, profileId } from "../session";
 import { linkProps, route, useDeepLink } from "../router";
 import PageHeader from "../components/PageHeader";
 import { ProfilePicker } from "../components/Pickers";
@@ -15,6 +16,7 @@ import DateField from "../components/DateField";
 import DateTimeField from "../components/DateTimeField";
 import { dateKey, dayRange, itemsOnDay, kindLabels, localInput, meetingIdOf, meetingDraftError, NO_ORGANIZER, taskDraftError, deadlineDraftError, scheduleDays, scheduleRange, SCHEDULE_DAYS, UI_LOCALE, WEEKDAY_LETTERS, WEEKDAY_NAMES, type QuickKind } from "../calendar";
 import { newId } from "../api/ids";
+import MeetingWhereField, { meetingWherePayload, type MeetingWhereKind } from "./MeetingWhereField";
 import "../components/paper.css";
 import "./Calendar.css";
 import "./Meetings.css";
@@ -90,7 +92,8 @@ const [selectedDay,setSelectedDay] = createSignal(startOfDay(new Date()));
 const [selected,setSelected] = createSignal<CalendarItem>();
 const [composerDay,setComposerDay] = createSignal<Date>();
 const [quickKind,setQuickKind] = createSignal<QuickKind>("meeting");
-const [form,setForm] = createSignal({ title:"", starts_at:"", ends_at:"", location:"", rrule:"", meeting_url:"", visibility:"participants" as Meeting["visibility"], modification_preference:"organizer-only" as Meeting["modification_preference"] });
+// Default choice = 'video': a fresh composer starts on this product's own call room.
+const [form,setForm] = createSignal({ title:"", starts_at:"", ends_at:"", location:"", rrule:"", meeting_url:"", whereKind:"video" as MeetingWhereKind, visibility:"participants" as Meeting["visibility"], modification_preference:"organizer-only" as Meeting["modification_preference"] });
 const [taskForm,setTaskForm] = createSignal({ title:"", day:"" });
 const [deadlineForm,setDeadlineForm] = createSignal({ project_id:"", day:"" });
 const [error,setError] = createSignal("");
@@ -134,6 +137,25 @@ const [options,{refetch:reloadOptions}] = createResource(() => profileId(), owne
 const prefs = () => { if (options.error) return undefined; return options(); };
 const updateOptions = async (patch:Record<string,boolean|number>) => { const current=prefs(); if (!current) return; try { await personalApi.saveCalendarOptions({...current,...patch}); reloadOptions(); } catch (reason) { setError(humanError(reason)); } };
 const meetingOf = (item:CalendarItem|undefined) => item?.kind==="meeting" ? meetings()?.find(m=>m.id===meetingIdOf(item)) : undefined;
+/** The day card answers the two first questions inline — where (link/location) and
+    who (organizer + invitees) — so nobody has to open the drawer to find the link.
+    The meeting is taken from the loaded list; if the list does not carry it (stale
+    list, deep-linked day), it is read directly so the row is never silently blank. */
+function AgendaMeetingInfo(props:{ item:CalendarItem; listed:Meeting|undefined; people:Profile[]; onError:(m:string)=>void }) {
+  const id = () => meetingIdOf(props.item);
+  const [fetched] = createResource(() => props.listed ? null : `${id()}|${profileId()}`, async () => (await meetingsApi.get(id(), profileId()||"")) ?? undefined);
+  const meeting = () => props.listed ?? fetched();
+  const [participants] = createResource(() => `${id()}|${profileId()}`, () => meetingsApi.participants(id(), profileId()||"").catch(() => [] as MeetingParticipant[]));
+  const nameOf = (pid:string) => props.people.find(p=>p.id===pid)?.display_name ?? pid;
+  const invitees = () => (participants()??[]).filter(p=>p.profile_id!==meeting()?.organizer_id);
+  return <Show when={meeting()}>{m=><div class="cal-agenda-info">
+    <Show when={hasMeetingLink(m())} fallback={<Show when={m().location}><span class="cal-agenda-where">{m().location}</span></Show>}>
+      <span class="cal-agenda-where"><a href={m().meeting_url!.trim()} target="_blank" rel="noopener noreferrer">{m().meeting_url!.trim()}</a> <JoinLink meeting={m()} class="cal-agenda-join" onError={props.onError}/></span>
+    </Show>
+    <Show when={m().organizer_id}><span class="cal-agenda-who">Organizer: {nameOf(m().organizer_id!)}</span></Show>
+    <Show when={participants.loading} fallback={<Show when={invitees().length} fallback={<span class="cal-agenda-who">No one invited yet.</span>}><span class="cal-agenda-who">Invited: {invitees().map(p=>`${nameOf(p.profile_id)}${p.status==="invited"?"":` (${p.status})`}`).join(", ")}</span></Show>}><span class="cal-agenda-who">Loading people…</span></Show>
+  </div>}</Show>;
+}
 const [draft,setDraft] = createSignal<Meeting>();
 const [participants,{refetch:reloadParticipants}] = createResource(() => draft()?.id, id => id ? meetingsApi.participants(id, profileId()) : Promise.resolve([]));
 // Reading `items()` after a failed load re-throws inside the render; the visible
@@ -181,7 +203,7 @@ const locationOptions = createMemo(() => [...new Set((meetings() ?? []).map(meet
 const deadlineProjects = () => (projects() ?? []).filter(project => !project.archived && !project.deadline && (project.created_by === profileId()));
 const openComposer = (day:Date, kind:QuickKind="meeting") => {
   setSelected(undefined); setDraft(undefined); setSelectedDay(day); setComposerDay(day); setQuickKind(kind); setNotice("");
-  setForm({ title:"", starts_at:localInput(atHour(day,10)), ends_at:localInput(atHour(day,11)), location:"", rrule:"", meeting_url:"", visibility:"participants", modification_preference:"organizer-only" });
+  setForm({ title:"", starts_at:localInput(atHour(day,10)), ends_at:localInput(atHour(day,11)), location:"", rrule:"", meeting_url:"", whereKind:"video", visibility:"participants", modification_preference:"organizer-only" });
   setQuickInvitees([]);
   setTaskForm({ title:"", day:dateKey(day) });
   setDeadlineForm({ project_id:"", day:dateKey(day) });
@@ -192,14 +214,18 @@ const create = async (event:SubmitEvent) => {
 event.preventDefault();
 setError(""); setNotice("");
 try {
-const f=form(); const invalid=meetingDraftError(f) || meetingLinkError(f.meeting_url);
+const f=form();
+// Where the meeting happens is one exclusive choice (video / link / in person);
+// meetingWherePayload is the ONLY place that turns it into these three fields.
+const where=meetingWherePayload({kind:f.whereKind,meeting_url:f.meeting_url,location:f.location});
+const invalid=meetingDraftError(f) || meetingLinkError(where.meeting_url);
 if (invalid) throw new Error(invalid);
 const starts_at=epoch(f.starts_at), ends_at=epoch(f.ends_at);
 // HTTP carries the authenticated web session, which the server binds as organizer.
 // Desktop IPC has no session rebinding, so only that transport requires a profile.
 const organizer=profileId() || null;
 if (!organizer && !isWeb()) throw new Error(NO_ORGANIZER);
-const meeting:Meeting={id:newId(),title:f.title.trim(),description:null,starts_at,ends_at,rrule:f.rrule.trim()||null,location:f.location.trim()||null,organizer_id:organizer,channel_id:null,visibility:f.visibility,modification_preference:f.modification_preference,archived:false,video_provider:null,video_room_id:null,join_url:null,meeting_url:f.meeting_url.trim()||null,video_status:"scheduled",video_started_at:null,video_ended_at:null,video_ended_by:null,source_entity_type:null,source_entity_id:null};
+const meeting:Meeting={id:newId(),title:f.title.trim(),description:null,starts_at,ends_at,rrule:f.rrule.trim()||null,location:where.location,organizer_id:organizer,channel_id:null,visibility:f.visibility,modification_preference:f.modification_preference,archived:false,video_provider:where.video_provider,video_room_id:null,join_url:null,meeting_url:where.meeting_url,video_status:"scheduled",video_started_at:null,video_ended_at:null,video_ended_by:null,source_entity_type:null,source_entity_id:null};
 await meetingsApi.create(meeting);
 /* The meeting EXISTS from here on. Attaching its discussion is a second act on a
    stored thing, so its failure is reported as itself — never as a create that did
@@ -367,6 +393,7 @@ subline={scopeProjectId() ? "This project's meetings, deadlines and time off on 
 <span class="cal-agenda-time">{kindLabels[item.kind]}{item.kind==="meeting" ? ` · ${new Date(item.starts_at*1000).toLocaleTimeString(UI_LOCALE,{hour:"2-digit",minute:"2-digit"})}` : item.date ? ` · ${item.date}` : ""}</span>
 <strong>{item.title}</strong>
 </button>
+<Show when={item.kind==="meeting"}><AgendaMeetingInfo item={item} listed={meetingOf(item)} people={people()??[]} onError={setError}/></Show>
 <Show when={item.kind!=="external"}><a class="cal-agenda-link" {...itemHref(item)}>Open</a></Show>
 </li>}</For>
 </ul>
@@ -421,8 +448,7 @@ subline={scopeProjectId() ? "This project's meetings, deadlines and time off on 
 </Show>
 {/* A meeting happens on somebody else's service; the address is part of making it,
     not an afterthought to be added later. */}
-<label>Meeting link<input placeholder="https://meet.google.com/…" aria-label="Meeting link" value={form().meeting_url} onInput={e=>setForm({...form(),meeting_url:e.currentTarget.value})}/></label>
-<label>Location<input value={form().location} onInput={e=>setForm({...form(),location:e.currentTarget.value})}/></label>
+<MeetingWhereField value={{kind:form().whereKind, meeting_url:form().meeting_url, location:form().location}} onChange={value=>setForm({...form(), whereKind:value.kind, meeting_url:value.meeting_url, location:value.location})}/>
 <label>Repeat<input placeholder="RRULE, e.g. FREQ=WEEKLY;COUNT=4" value={form().rrule} onInput={e=>setForm({...form(),rrule:e.currentTarget.value})}/></label>
 <label>Visibility<select value={form().visibility} onChange={e=>setForm({...form(),visibility:e.currentTarget.value as Meeting["visibility"]})}><option value="participants">Participants</option><option value="private">Private</option><option value="public">Public</option></select></label>
 <label>Who can edit?<select value={form().modification_preference} onChange={e=>setForm({...form(),modification_preference:e.currentTarget.value as Meeting["modification_preference"]})}><option value="organizer-only">Organizer only</option><option value="participants">Participants</option></select></label>
@@ -478,7 +504,7 @@ subline={scopeProjectId() ? "This project's meetings, deadlines and time off on 
 <div class="inline-form"><ProfilePicker label="" value={invitee()} onChange={setInvitee}/><button onClick={invite}>Invite</button></div>
 <For each={participants()}>{participant=><div class="participant"><span>{participant.profile_id}</span><select value={participant.status} onChange={e=>rsvp(participant,e.currentTarget.value as MeetingParticipant["status"])}><option value="invited">Invited</option><option value="accepted">Accepted</option><option value="declined">Declined</option></select></div>}</For>
 </section>
-<Show when={!isWeb()}><CallPanel meeting={item()} identity={profileId()} displayName={profileId()}/></Show>
+<CallPanel meeting={item()} identity={isWeb() ? currentUser()?.profile_id ?? "" : profileId()} displayName={isWeb() ? currentUser()?.display_name ?? "" : profileId()}/>
 </div>}
 </Show>
 </aside>

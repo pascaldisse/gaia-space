@@ -1,0 +1,4 @@
+handle /space/hooks/* {
+	uri strip_prefix /space
+	reverse_proxy 127.0.0.1:8093
+}

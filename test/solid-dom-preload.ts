@@ -13,7 +13,11 @@ import tsPlugin from "@babel/plugin-transform-typescript";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
+const nativeWeb = { fetch: globalThis.fetch, Headers: globalThis.Headers, Request: globalThis.Request, Response: globalThis.Response };
 GlobalRegistrator.register();
+// happy-dom supplies DOM globals but must not replace Bun's HTTP primitives;
+// Bun.serve/fetch tests require native Request/Response instances.
+Object.assign(globalThis, nativeWeb);
 
 const webClient = resolve(import.meta.dir, "../node_modules/solid-js/web/dist/web.js");
 // Solid's *core* also resolves to its SSR build under bun's default conditions,

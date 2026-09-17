@@ -570,3 +570,7 @@
   color: var(--muted, #68717d); font-size: 14px; line-height: 1; cursor: pointer;
 }
 .cal-invitee button:hover { background: var(--wash, #faf8f4); color: var(--danger, #c2384a); }
+.cal-agenda-info{display:grid;gap:var(--cal-space-3xs);padding:var(--cal-space-xs) var(--cal-space-3xl) 0;font-size:var(--cal-fs-xs);color:var(--text-muted)}
+.cal-agenda-where a{color:var(--accent);word-break:break-all}
+.cal-agenda-join{margin-left:var(--cal-space-xs)}
+.cal-agenda-who{color:var(--text-faint)}

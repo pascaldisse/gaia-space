@@ -5,14 +5,23 @@ import type { Meeting } from "../api/meetings";
 const calls: string[] = [];
 const ipcCommands: string[] = [];
 const remoteAudioAttachments: HTMLMediaElement[] = [];
+const remoteVideoAttachments: HTMLVideoElement[] = [];
+const remoteVideoDetachments: HTMLVideoElement[] = [];
+const remoteListeners = new Map<string, ((...args: any[]) => void)[]>();
+let remoteVideoPublication: { videoTrack: { attach: (element: HTMLVideoElement) => void; detach: (element: HTMLVideoElement) => void } } | undefined;
+const emitRemote = (event: string) => remoteListeners.get(event)?.forEach(listener => listener());
 const devices = [{ deviceId: "mic-1", label: "Studio microphone" }];
 const participant = (isLocal: boolean) => ({
   identity: isLocal ? "me" : "them", name: isLocal ? "Me" : "Them", isLocal,
   getTrackPublication: () => undefined,
+  on: () => undefined,
+  off: () => undefined,
 });
 const remoteParticipant = {
   ...participant(false),
-  getTrackPublication: (source: string) => source === "microphone" ? { audioTrack: { attach: (element: HTMLMediaElement) => remoteAudioAttachments.push(element), detach: () => undefined } } : undefined,
+  on: (event: string, listener: (...args: any[]) => void) => remoteListeners.set(event, [...(remoteListeners.get(event) ?? []), listener]),
+  off: (event: string, listener: (...args: any[]) => void) => remoteListeners.set(event, (remoteListeners.get(event) ?? []).filter(item => item !== listener)),
+  getTrackPublication: (source: string) => source === "camera" ? remoteVideoPublication : source === "microphone" ? { audioTrack: { attach: (element: HTMLMediaElement) => remoteAudioAttachments.push(element), detach: () => undefined } } : undefined,
 };
 class FakeRoom {
   static getLocalDevices = async () => devices as MediaDeviceInfo[];
@@ -33,6 +42,7 @@ class FakeRoom {
 mock.module("livekit-client", () => ({
   Room: FakeRoom,
   RoomEvent: { ConnectionStateChanged: "connection", ParticipantConnected: "participant-connected", ParticipantDisconnected: "participant-disconnected", TrackSubscribed: "track-subscribed", TrackUnsubscribed: "track-unsubscribed", LocalTrackPublished: "track-published", LocalTrackUnpublished: "track-unpublished", DataReceived: "data-received" },
+  ParticipantEvent: { TrackSubscribed: "track-subscribed", TrackUnsubscribed: "track-unsubscribed", TrackPublished: "track-published", TrackUnpublished: "track-unpublished", LocalTrackPublished: "local-track-published", LocalTrackUnpublished: "local-track-unpublished", TrackMuted: "track-muted", TrackUnmuted: "track-unmuted" },
   Track: { Source: { Camera: "camera", Microphone: "microphone", ScreenShare: "screen" } },
 }));
 const { default: CallPanel } = await import("./CallPanel");
@@ -40,8 +50,35 @@ const { default: CallPanel } = await import("./CallPanel");
 let dispose: (() => void) | undefined;
 const settle = () => new Promise(resolve => setTimeout(resolve, 30));
 const meeting: Meeting = { id: "meeting-1", title: "Design review", description: null, starts_at: 1, ends_at: 2, rrule: null, location: null, organizer_id: "me", channel_id: null, visibility: "participants", modification_preference: "organizer-only", archived: false, video_provider: null, video_room_id: null, join_url: null, meeting_url: null, video_status: "scheduled", video_started_at: null, video_ended_at: null, video_ended_by: null, source_entity_type: null, source_entity_id: null };
-afterEach(() => { dispose?.(); dispose = undefined; document.body.innerHTML = ""; calls.length = 0; ipcCommands.length = 0; remoteAudioAttachments.length = 0; delete (window as any).__TAURI_INTERNALS__; });
+afterEach(() => { dispose?.(); dispose = undefined; document.body.innerHTML = ""; calls.length = 0; ipcCommands.length = 0; remoteAudioAttachments.length = 0; remoteVideoAttachments.length = 0; remoteVideoDetachments.length = 0; remoteListeners.clear(); remoteVideoPublication = undefined; delete (window as any).__TAURI_INTERNALS__; });
 
+test("a participant tile reacts to video subscription and unsubscription", async () => {
+  (window as any).__TAURI_INTERNALS__ = { invoke: async (command: string) => {
+    if (command === "join_meeting_call") return { url: "ws://livekit.test", room: "meeting-meeting-1", token: "signed-token" };
+    if (command === "recording_actor_status") return { available: true, profile_id: "me", source: "sole_profile", reason: null };
+    if (command === "list_meeting_recordings" || command === "list_meeting_transcript_segments") return [];
+    throw new Error(`unexpected command: ${command}`);
+  } };
+  const host = document.createElement("div"); document.body.append(host);
+  dispose = render(() => <CallPanel meeting={meeting} identity="me" displayName="Me" />, host);
+  (Array.from(host.querySelectorAll("button")).find(button => button.textContent === "Join call") as HTMLButtonElement).click();
+  await settle();
+  const tile = host.querySelector('article[aria-label="Them"]') as HTMLElement;
+  expect(tile.querySelector("video")).toBeNull();
+  expect(tile.querySelector(".call-avatar")).not.toBeNull();
+  remoteVideoPublication = { videoTrack: { attach: element => remoteVideoAttachments.push(element), detach: element => remoteVideoDetachments.push(element) } };
+  emitRemote("track-subscribed");
+  await settle();
+  const video = tile.querySelector("video") as HTMLVideoElement;
+  expect(video).toBeInstanceOf(HTMLVideoElement);
+  expect(remoteVideoAttachments).toEqual([video]);
+  remoteVideoPublication = undefined;
+  emitRemote("track-unsubscribed");
+  await settle();
+  expect(remoteVideoDetachments).toEqual([video]);
+  expect(tile.querySelector("video")).toBeNull();
+  expect(tile.querySelector(".call-avatar")).not.toBeNull();
+});
 test("joining exposes native media controls, device selectors, and a clean leave", async () => {
   (window as any).__TAURI_INTERNALS__ = { invoke: async (command: string) => {
     ipcCommands.push(command);
@@ -58,18 +95,27 @@ if (command === "list_meeting_transcript_segments") return [{ id: "segment-1", m
   (Array.from(host.querySelectorAll("button")).find(button => button.textContent === "Join call") as HTMLButtonElement).click();
   await settle();
   expect(calls).toEqual(["microphone:true", "camera:true"]);
-  expect(host.textContent).toContain("2 participants");
+  expect(host.textContent).toContain("Connected · 2");
   expect(remoteAudioAttachments).toHaveLength(1);
   expect(remoteAudioAttachments[0]).toBeInstanceOf(HTMLAudioElement);
+  // Device pickers live behind the ⋯ "more options" menu now, not in the open flow.
+  (Array.from(host.querySelectorAll("button")).find(button => button.getAttribute("aria-label") === "More options: devices, room id") as HTMLButtonElement).click();
+  await settle();
   expect(host.querySelectorAll("select")).toHaveLength(3);
+  // Chat lives in the collapsible drawer, default closed: open it before composing.
+  (Array.from(host.querySelectorAll("button")).find(button => button.getAttribute("aria-label") === "Toggle in-call chat") as HTMLButtonElement).click();
+  await settle();
   const chat = host.querySelector('input[aria-label="Chat message"]') as HTMLInputElement;
   chat.value = "Ship it"; chat.dispatchEvent(new Event("input", { bubbles: true }));
   (Array.from(host.querySelectorAll("button")).find(button => button.textContent === "Send") as HTMLButtonElement).click();
   await settle();
   expect(calls.some(call => call.includes('chat:') && call.includes("Ship it"))).toBe(true);
   expect(host.textContent).toContain("Ship it");
-expect(host.textContent).toContain("Caption proof");
-expect(ipcCommands).toContain("list_meeting_transcript_segments");
+  // Captions share the same drawer as chat: switching tabs, not a second panel.
+  (Array.from(host.querySelectorAll("button")).find(button => button.textContent?.startsWith("Captions")) as HTMLButtonElement).click();
+  await settle();
+  expect(host.textContent).toContain("Caption proof");
+  expect(ipcCommands).toContain("list_meeting_transcript_segments");
   (Array.from(host.querySelectorAll("button")).find(button => button.textContent === "Mute microphone") as HTMLButtonElement).click();
   (Array.from(host.querySelectorAll("button")).find(button => button.textContent === "Turn camera off") as HTMLButtonElement).click();
   (Array.from(host.querySelectorAll("button")).find(button => button.textContent === "Share screen") as HTMLButtonElement).click();
@@ -113,10 +159,10 @@ test("a persisted running egress job is shown on join, so a restart cannot stran
   expect(host.textContent).not.toContain("Recording recording");
 });
 
-// The backend refuses recording when it cannot name the acting profile. The UI must
-// say so rather than offer a button that throws: a control that looks armed and does
-// nothing is the interface lying about what the system will do.
-test("an unresolvable native actor disables recording and explains why", async () => {
+// The backend refuses recording when it cannot name the acting profile. Rather than
+// offer a button that throws, the control is removed entirely (no error box either):
+// a control that looks armed and does nothing is the interface lying about intent.
+test("an unresolvable native actor removes the recording control instead of disabling it", async () => {
   (window as any).__TAURI_INTERNALS__ = { invoke: async (command: string) => {
     ipcCommands.push(command);
     if (command === "join_meeting_call") return { url: "ws://livekit.test", room: "meeting-meeting-1", token: "signed-token" };
@@ -128,12 +174,9 @@ test("an unresolvable native actor disables recording and explains why", async (
   dispose = render(() => <CallPanel meeting={meeting} identity="me" displayName="Me" />, host);
   (Array.from(host.querySelectorAll("button")).find(button => button.textContent === "Join call") as HTMLButtonElement).click();
   await settle();
-  const record = Array.from(host.querySelectorAll("button")).find(button => button.textContent === "Start recording") as HTMLButtonElement;
-  expect(record.disabled).toBe(true);
-  expect(host.textContent).toContain("cannot tell who is acting");
-  record.click();
-  await settle();
-  expect(ipcCommands).not.toContain("start_meeting_recording");
+  expect(Array.from(host.querySelectorAll("button")).some(button => button.textContent === "Start recording")).toBe(false);
+  expect(host.textContent).not.toContain("cannot tell who is acting");
+  expect(host.textContent).not.toContain("Recording is unavailable");
 });
 
 test("only the organizer can end the call, and a non-organizer sees leave alone", async () => {
@@ -179,17 +222,20 @@ test("a meeting that already has a bound room shows it before anyone joins", asy
   expect(host.textContent).toContain("by me");
 });
 
-test("an invited attendee waits in the lobby until the organizer accepts the RSVP", async () => {
+test("an invited attendee joins without an RSVP round trip", async () => {
   (window as any).__TAURI_INTERNALS__ = { invoke: async (command: string) => {
     ipcCommands.push(command);
     if (command === "list_meeting_participants") return [{ meeting_id: "meeting-1", profile_id: "me", status: "invited" }];
+    if (command === "join_meeting_call") return { url: "ws://livekit.test", room: "meeting-meeting-1", token: "signed-token" };
+    if (command === "recording_actor_status") return { available: true, profile_id: "me", source: "sole_profile", reason: null };
+    if (command === "list_meeting_recordings" || command === "list_meeting_transcript_segments") return [];
     throw new Error(`unexpected command: ${command}`);
   } };
   const host = document.createElement("div"); document.body.append(host);
   dispose = render(() => <CallPanel meeting={{ ...meeting, organizer_id: "host" }} identity="me" displayName="Me" />, host);
   (host.querySelector("button") as HTMLButtonElement).click();
   await settle();
-  expect(ipcCommands).toEqual(["list_meeting_participants"]);
-  expect(host.textContent).toContain("Lobby request sent");
-  expect(host.textContent).toContain("Waiting for admission…");
+  expect(ipcCommands).toContain("list_meeting_participants");
+  expect(ipcCommands).toContain("join_meeting_call");
+  expect(host.textContent).toContain("Connected");
 });

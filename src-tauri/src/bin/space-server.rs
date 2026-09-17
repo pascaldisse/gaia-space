@@ -9,9 +9,9 @@ use axum::{
     Json, Router,
 };
 use gaia_space_lib::{
-    app_rights, applications, blogs, calendar_feeds, calls, channel_feeds, channel_notes, chat,
-    chatbot, db, devenv, documents, events, issues, leads, meetings, oauth, organization,
-    package_registry, payload_dispatch, personal, pipelines, platform, review,
+    app_rights, applications, blogs, budget, calendar_feeds, calls, channel_feeds, channel_notes,
+    chat, chatbot, db, devenv, documents, events, git_hosting, issues, leads, meetings, oauth,
+    organization, package_registry, payload_dispatch, personal, pipelines, platform, review,
 };
 use rand::RngCore;
 use rusqlite::{params, OptionalExtension};
@@ -21,11 +21,273 @@ use sha2::Digest;
 use std::{
     collections::HashMap,
     env,
+    io::Read,
     net::{IpAddr, SocketAddr},
     path::PathBuf,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::process::Command;
+
+/* git smart HTTP */
+
+fn git_http_name(value: &str) -> bool {
+    gaia_space_lib::git_hosting::valid_name(value)
+}
+
+fn hosted_project_public(project: &str) -> Result<bool, Box<axum::response::Response>> {
+    let conn = db::conn()
+        .map_err(|e| Box::new(err(StatusCode::INTERNAL_SERVER_ERROR, &e).into_response()))?;
+    conn.query_row(
+        "SELECT visibility='public' FROM projects WHERE id=?1",
+        [project],
+        |r| r.get(0),
+    )
+    .optional()
+    .map_err(|e| Box::new(err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response()))
+    .map(|value| value.unwrap_or(false))
+}
+
+fn hosted_git_path(project: &str, repo: &str) -> Result<PathBuf, Box<axum::response::Response>> {
+    if !git_http_name(project) || !git_http_name(repo) {
+        return Err(Box::new(
+            err(StatusCode::BAD_REQUEST, "invalid git repository path").into_response(),
+        ));
+    }
+    let conn = db::conn()
+        .map_err(|e| Box::new(err(StatusCode::INTERNAL_SERVER_ERROR, &e).into_response()))?;
+    let exists: bool = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM hosted_repositories WHERE project_id=?1 AND name=?2)",
+            params![project, repo],
+            |r| r.get(0),
+        )
+        .map_err(|e| {
+            Box::new(err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response())
+        })?;
+    if !exists {
+        return Err(Box::new(
+            err(StatusCode::NOT_FOUND, "hosted repository not found").into_response(),
+        ));
+    }
+    gaia_space_lib::git_hosting::hosted_repo_path(
+        &db::data_dir()
+            .map_err(|e| Box::new(err(StatusCode::INTERNAL_SERVER_ERROR, &e).into_response()))?,
+        project,
+        repo,
+    )
+    .map_err(|e| Box::new(err(StatusCode::BAD_REQUEST, &e).into_response()))
+}
+
+async fn git_service(
+    repo: &std::path::Path,
+    service: &str,
+    advertise: bool,
+    input: Vec<u8>,
+) -> Result<Vec<u8>, axum::response::Response> {
+    let executable = match service {
+        "git-upload-pack" => "upload-pack",
+        "git-receive-pack" => "receive-pack",
+        _ => return Err(err(StatusCode::BAD_REQUEST, "invalid git service").into_response()),
+    };
+    let mut command = Command::new("git");
+    command.arg(executable).arg("--stateless-rpc");
+    if advertise {
+        command.arg("--advertise-refs");
+    }
+    command
+        .arg(repo)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped());
+    let mut child = command.spawn().map_err(|e| {
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            &format!("start git {executable}: {e}"),
+        )
+        .into_response()
+    })?;
+    let mut stdin = child.stdin.take().ok_or_else(|| {
+        err(StatusCode::INTERNAL_SERVER_ERROR, "git stdin unavailable").into_response()
+    })?;
+    let writer = tokio::spawn(async move { stdin.write_all(&input).await });
+    let mut stdout = child.stdout.take().ok_or_else(|| {
+        err(StatusCode::INTERNAL_SERVER_ERROR, "git stdout unavailable").into_response()
+    })?;
+    let mut output = Vec::new();
+    stdout
+        .read_to_end(&mut output)
+        .await
+        .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response())?;
+    writer
+        .await
+        .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response())?
+        .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response())?;
+    let status = child
+        .wait()
+        .await
+        .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response())?;
+    if !status.success() {
+        return Err(err(
+            StatusCode::BAD_GATEWAY,
+            &format!("git {executable} failed: {status}"),
+        )
+        .into_response());
+    }
+    Ok(output)
+}
+
+fn git_request_body(
+    headers: &HeaderMap,
+    body: Bytes,
+) -> Result<Vec<u8>, Box<axum::response::Response>> {
+    if headers
+        .get(header::CONTENT_ENCODING)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v.eq_ignore_ascii_case("gzip"))
+    {
+        let mut output = Vec::new();
+        flate2::read::GzDecoder::new(body.as_ref())
+            .read_to_end(&mut output)
+            .map_err(|e| {
+                Box::new(
+                    err(
+                        StatusCode::BAD_REQUEST,
+                        &format!("invalid gzip Git request: {e}"),
+                    )
+                    .into_response(),
+                )
+            })?;
+        Ok(output)
+    } else {
+        Ok(body.to_vec())
+    }
+}
+
+fn git_response(content_type: String, bytes: Vec<u8>) -> axum::response::Response {
+    (
+        [(
+            header::CONTENT_TYPE,
+            HeaderValue::from_str(&content_type)
+                .unwrap_or(HeaderValue::from_static("application/octet-stream")),
+        )],
+        bytes,
+    )
+        .into_response()
+}
+
+async fn git_info_refs(
+    headers: HeaderMap,
+    Path((project, path)): Path<(String, String)>,
+    Query(query): Query<HashMap<String, String>>,
+) -> axum::response::Response {
+    let Some(repo) = path.strip_suffix(".git/info/refs") else {
+        return err(StatusCode::NOT_FOUND, "unknown git route").into_response();
+    };
+    let Some(service) = query
+        .get("service")
+        .filter(|s| matches!(s.as_str(), "git-upload-pack" | "git-receive-pack"))
+    else {
+        return err(StatusCode::BAD_REQUEST, "invalid git service").into_response();
+    };
+    let write = service == "git-receive-pack";
+    let public = match hosted_project_public(&project) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    if write || !public {
+        if let Err(response) = registry_auth(&headers) {
+            return response;
+        }
+    }
+    let path = match hosted_git_path(&project, repo) {
+        Ok(path) => path,
+        Err(response) => return *response,
+    };
+    match git_service(&path, service, true, Vec::new()).await {
+        Ok(mut advertised) => {
+            let mut body =
+                format!("{:04x}# service={}\n0000", service.len() + 15, service).into_bytes();
+            body.append(&mut advertised);
+            git_response(format!("application/x-{service}-advertisement"), body)
+        }
+        Err(response) => response,
+    }
+}
+
+async fn git_rpc(
+    headers: HeaderMap,
+    Path((project, path)): Path<(String, String)>,
+    body: Bytes,
+) -> axum::response::Response {
+    let Some((repo_git, service)) = path.rsplit_once('/') else {
+        return err(StatusCode::NOT_FOUND, "unknown git route").into_response();
+    };
+    let Some(repo) = repo_git.strip_suffix(".git") else {
+        return err(StatusCode::NOT_FOUND, "unknown git route").into_response();
+    };
+    let service = service.to_string();
+    if !matches!(service.as_str(), "git-upload-pack" | "git-receive-pack") {
+        return err(StatusCode::NOT_FOUND, "unknown git service").into_response();
+    }
+    let public = match hosted_project_public(&project) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    if service == "git-receive-pack" || !public {
+        if let Err(response) = registry_auth(&headers) {
+            return response;
+        }
+    }
+    let path = match hosted_git_path(&project, repo) {
+        Ok(path) => path,
+        Err(response) => return *response,
+    };
+    let input = match git_request_body(&headers, body) {
+        Ok(body) => body,
+        Err(response) => return *response,
+    };
+    let before = if service == "git-receive-pack" {
+        git_ref_tips(&path)
+    } else {
+        Ok(HashMap::new())
+    };
+    match git_service(&path, &service, false, input).await {
+        Ok(output) => {
+            if service == "git-receive-pack" {
+                if let (Ok(before), Ok(after)) = (before, git_ref_tips(&path)) {
+                    for (reference, tip) in after {
+                        if before.get(&reference) != Some(&tip) {
+                            let payload = json!({"event":events::GIT_COMMIT,"commit":{"repo_path":path,"id":tip,"message":"smart HTTP push","branch":reference}});
+                            if let Err(error) =
+                                applications::enqueue_event(events::GIT_COMMIT, &payload)
+                            {
+                                eprintln!("webhook fan-out for git.commit failed: {error}");
+                            }
+                        }
+                    }
+                }
+            }
+            git_response(format!("application/x-{service}-result"), output)
+        }
+        Err(response) => response,
+    }
+}
+
+fn git_ref_tips(path: &std::path::Path) -> Result<HashMap<String, String>, String> {
+    let repository = git2::Repository::open_bare(path).map_err(|e| e.to_string())?;
+    let references = repository.references().map_err(|e| e.to_string())?;
+    let tips = references
+        .filter_map(|reference| reference.ok())
+        .filter_map(|reference| {
+            Some((
+                reference.name().ok()?.to_string(),
+                reference.target()?.to_string(),
+            ))
+        })
+        .collect();
+    Ok(tips)
+}
 
 const PARAMETER_SECRET_MASK: &str = "***";
 const LOGIN_MAX_FAILED_ATTEMPTS: u32 = 5;
@@ -2476,6 +2738,8 @@ enum CommandPolicy {
     /// gate only binds `actor_id` to the session identity.
     TodoOwnerDelete,
     TodoCompletionWrite,
+    TodoLinkRead,
+    TodoLinkWrite,
     /// The channel Notes & Decisions log. Read and write share one posture: the session
     /// identity is rebound onto the request (`bind_session_identity` already covers
     /// `profile_id`/`author_id`), and `channel_notes.rs` then applies project membership
@@ -2547,7 +2811,8 @@ enum CommandPolicy {
 /// before it can reach `dispatch!`; missing entries fail closed with 403.
 fn command_policy(name: &str) -> Option<CommandPolicy> {
     Some(match name {
-        "create_project" => CommandPolicy::ProjectCreate,
+        "create_hosted_repo" | "delete_hosted_repo" | "list_hosted_repos" | "hosted_repo_clone_url" => CommandPolicy::Session,
+"create_project" => CommandPolicy::ProjectCreate,
         "update_project" => CommandPolicy::ProjectWrite,
         "delete_project" => CommandPolicy::ProjectDelete,
         "create_board" | "create_issue" | "clone_issue" | "move_issue_to_project" | "create_issue_status" => {
@@ -2575,25 +2840,24 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
             CommandPolicy::ProjectTodoRead
         }
         "create_todo" => CommandPolicy::TodoCreate,
-        "update_todo" | "postpone_todo" | "convert_todo_to_issue" => {
-            CommandPolicy::TodoOwnerWrite
-        }
+        "update_todo" | "postpone_todo" => CommandPolicy::TodoOwnerWrite,
         "delete_todo" => CommandPolicy::TodoOwnerDelete,
         "set_todo_completion" => CommandPolicy::TodoCompletionWrite,
+        "list_todo_links" => CommandPolicy::TodoLinkRead,
+        "add_todo_link" | "delete_todo_link" => CommandPolicy::TodoLinkWrite,
         "list_channel_notes" => CommandPolicy::ChannelNoteRead,
         "create_channel_note" | "update_channel_note" | "delete_channel_note" => {
             CommandPolicy::ChannelNoteWrite
         }
         "mark_notification_read" => CommandPolicy::NotificationWrite,
         "create_absence" | "update_absence" | "delete_absence" => CommandPolicy::AbsenceWrite,
-        "create_meeting" => CommandPolicy::SessionIdentityWrite,
-        "save_document" | "restore_doc_version" => CommandPolicy::DocumentWrite,
+        "create_meeting" | "create_channel_call" => CommandPolicy::SessionIdentityWrite,
+        "save_document" | "restore_doc_version" | "budget_add_expense" | "budget_export_statement" => CommandPolicy::DocumentWrite,
+        "budget_statement" => CommandPolicy::DocumentRead,
         "list_document_access" => CommandPolicy::DocumentRead,
         "update_document_access" => CommandPolicy::DocumentAccessWrite,
         "create_document" => CommandPolicy::DocumentCreate,
         "app_info"
-        | "join_meeting_call"
-        | "end_meeting_call"
         | "start_livekit_server"
         | "trigger_pipeline_script"
         | "trigger_pipeline_on_push"
@@ -2609,9 +2873,10 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         | "add_review_participant"
         | "add_team_membership"
         | "archive_cf_definition" => CommandPolicy::Session,
-        "archive_document" => CommandPolicy::DocumentOwnerWrite,
+        "archive_document" | "publish_document" => CommandPolicy::DocumentOwnerWrite,
         "delete_document" => CommandPolicy::DocumentOwnerDelete,
         "archive_meeting" | "attach_meeting_channel" | "delete_meeting" => CommandPolicy::MeetingWrite,
+        "join_meeting_call" | "end_meeting_call" => CommandPolicy::MeetingRead,
         "archive_issue" | "archive_role" | "archive_sprint" | "archive_team" => {
             CommandPolicy::Session
         }
@@ -2700,7 +2965,11 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         "get_issue" | "get_issue_detail" | "list_issues" => CommandPolicy::IssueRead,
         "list_issue_assignees" | "set_issue_assignees" => CommandPolicy::IssueAssign,
         "add_project_member" | "remove_project_member" => CommandPolicy::ProjectMemberAdmin,
-        "get_document" | "list_doc_versions" => CommandPolicy::DocumentRead,
+        "get_document"
+        | "get_document_publication"
+        | "list_doc_versions"
+        | "read_document_file"
+        | "get_document_file" => CommandPolicy::DocumentRead,
         // Favourites are caller-scoped: `bind_session_identity` forces `profile_id` to
         // the session, and the read scope inside the query does the rest.
         "list_favorite_documents" | "set_document_favorite" | "move_favorite_document" => {
@@ -3004,6 +3273,25 @@ fn bind_session_identity(value: &mut Value, profile_id: &str) {
     }
 }
 
+/// An invite has two identities: the authorized actor (the session) and the
+/// participant target (`profile_id`). Preserve only that top-level target while
+/// rebinding every actor-shaped field before command dispatch.
+fn bind_meeting_invite_identity(body: &mut Value, profile_id: &str) {
+    let target = match body {
+        Value::Object(object) => (object.remove("profile_id"), object.remove("profileId")),
+        _ => (None, None),
+    };
+    bind_session_identity(body, profile_id);
+    if let Value::Object(object) = body {
+        if let Some(value) = target.0 {
+            object.insert("profile_id".into(), value);
+        }
+        if let Some(value) = target.1 {
+            object.insert("profileId".into(), value);
+        }
+    }
+}
+
 fn bind_required_object_identity(
     body: &mut Value,
     object_name: &str,
@@ -3023,6 +3311,27 @@ fn bind_required_object_identity(
         object.insert(snake_key.to_string(), json!(profile_id));
     }
     Ok(())
+}
+
+fn bind_session_identity_write(
+    name: &str,
+    body: &mut Value,
+    profile_id: &str,
+) -> Result<(), (StatusCode, Json<Value>)> {
+    match name {
+        "create_meeting" | "create_channel_call" => bind_required_object_identity(
+            body,
+            "meeting",
+            "organizer_id",
+            "organizerId",
+            profile_id,
+        )
+        .map_err(|e| err(StatusCode::BAD_REQUEST, &e)),
+        _ => Err(err(
+            StatusCode::BAD_REQUEST,
+            "unsupported identity-write command",
+        )),
+    }
 }
 
 fn project_owner(project_id: &str) -> Result<Option<String>, String> {
@@ -3087,7 +3396,14 @@ fn document_id(body: &Value, name: &str) -> Option<String> {
     } else if matches!(
         name,
         "restore_doc_version"
+            | "budget_statement"
+            | "budget_add_expense"
+            | "budget_export_statement"
             | "list_doc_versions"
+            | "read_document_file"
+            | "get_document_file"
+            | "get_document_publication"
+            | "publish_document"
             | "list_document_access"
             | "update_document_access"
     ) {
@@ -3104,6 +3420,8 @@ fn meeting_id(body: &Value, name: &str) -> Option<String> {
         "invite_meeting_participant"
             | "set_meeting_participant_status"
             | "list_meeting_participants"
+            | "join_meeting_call"
+            | "end_meeting_call"
     ) {
         arg(body, "meeting_id").ok()
     } else {
@@ -3336,7 +3654,10 @@ fn authorize_command(
             object.insert("user_id".to_string(), json!(user.profile_id));
         }
     }
-    if (!matches!(policy, CommandPolicy::AbsenceWrite) || user.role != "GlobalAdmin")
+    if name == "invite_meeting_participant" {
+        // The session authorizes the invite, while the body names its recipient.
+        bind_meeting_invite_identity(body, &user.profile_id);
+    } else if (!matches!(policy, CommandPolicy::AbsenceWrite) || user.role != "GlobalAdmin")
         && policy != CommandPolicy::DocumentAccessWrite
         && policy != CommandPolicy::MeetingParticipantWrite
     {
@@ -3813,6 +4134,11 @@ fn authorize_command(
                 }
             }
             put_arg(body, "profile_id", json!(user.profile_id));
+            // Same source `project_readable` reads a project by: a GlobalAdmin sees every
+            // project's todos exactly as it sees every project, with no membership row
+            // required. Server-resolved from the session only — a client-sent `admin`
+            // field would be overwritten here regardless of what it said.
+            put_arg(body, "admin", json!(user.role == "GlobalAdmin"));
             Ok(())
         }
         // Reads: the channel id is the scope and `channel_notes::list_channel_notes`
@@ -3917,6 +4243,24 @@ fn authorize_command(
                 ))
             }
         }
+        CommandPolicy::TodoLinkRead | CommandPolicy::TodoLinkWrite => {
+            let todo_id: String = if name == "add_todo_link" {
+                body.get("input").and_then(|input| input.get("todo_id")).and_then(Value::as_str).map(str::to_string).ok_or_else(|| err(StatusCode::BAD_REQUEST, "input.todo_id is required"))?
+            } else if name == "delete_todo_link" {
+                let id: String = arg(body, "id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
+                db::conn().map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?
+                    .query_row("SELECT todo_id FROM todo_links WHERE id=?1", [&id], |row| row.get(0))
+                    .map_err(|_| err(StatusCode::FORBIDDEN, "todo access denied"))?
+            } else {
+                arg(body, "todo_id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?
+            };
+            if user.role != "GlobalAdmin" && !todo_owned_by(&user.profile_id, &todo_id)
+                && !personal::todo_assigned_by(&todo_id, &user.profile_id).map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))? {
+                return Err(err(StatusCode::FORBIDDEN, "todo access denied"));
+            }
+            if name == "delete_todo_link" { put_arg(body, "actor_id", json!(user.profile_id)); }
+            Ok(())
+        }
         CommandPolicy::NotificationWrite => {
             let notification_id: String =
                 arg(body, "id").map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
@@ -3997,17 +4341,9 @@ fn authorize_command(
             }
             Ok(())
         }
-        CommandPolicy::SessionIdentityWrite => match name {
-            "create_meeting" => bind_required_object_identity(
-                body,
-                "meeting",
-                "organizer_id",
-                "organizerId",
-                &user.profile_id,
-            ),
-            _ => unreachable!("identity-write policy must name an identity-write command"),
+        CommandPolicy::SessionIdentityWrite => {
+            bind_session_identity_write(name, body, &user.profile_id)
         }
-        .map_err(|e| err(StatusCode::BAD_REQUEST, &e)),
         CommandPolicy::DocumentCreate => {
             bind_document_create(user, body).map_err(|e| err(StatusCode::FORBIDDEN, &e))?;
             require_catalog_right(
@@ -4039,8 +4375,14 @@ fn authorize_command(
             if documents::document_writable_by(&id, &user.profile_id, user.role == "GlobalAdmin")
                 .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?
             {
-                if matches!(name, "save_document" | "restore_doc_version") {
+                if matches!(
+                    name,
+                    "save_document" | "restore_doc_version" | "budget_add_expense"
+                ) {
                     put_arg(body, "actor", json!(user.profile_id));
+                }
+                if matches!(name, "budget_statement" | "budget_export_statement") {
+                    put_arg(body, "profile_id", json!(user.profile_id));
                 }
                 require_catalog_right(
                     user,
@@ -5259,55 +5601,17 @@ async fn cmd(
         Ok(user) => user,
         Err(e) => return e.into_response(),
     };
+    const LEGACY_TICKET_COMMANDS: &[&str] = &[
+        "create_issue", "clone_issue", "move_issue_to_project", "update_issue", "archive_issue", "get_issue", "get_issue_detail", "list_issues", "list_issue_statuses", "set_issue_assignees", "list_issue_assignees", "add_issue_child", "list_issue_comments", "create_issue_comment", "list_issue_activities", "list_issue_tracker_links", "add_issue_tracker_link", "remove_issue_tracker_link", "add_issue_attachment", "delete_issue_attachment", "list_issue_attachments", "remove_issue_link", "create_board", "update_board", "delete_board", "list_boards", "list_board_columns", "save_board_column", "delete_board_column", "get_board_card_settings", "save_board_card_settings", "move_issue_on_board", "list_board_issues", "list_backlog_issues", "remove_issue_from_board", "bulk_move_issues_on_board", "bulk_remove_issues_from_board", "bulk_update_issues_sprints", "create_sprint", "launch_sprint", "close_sprint", "update_sprint", "delete_sprint", "archive_sprint", "list_sprints", "list_swimlanes", "save_swimlane", "delete_swimlane", "list_planning_tags", "save_planning_tag", "delete_planning_tag", "set_issue_tags", "list_checklists", "save_checklist", "delete_checklist", "list_checklist_items", "save_checklist_item", "delete_checklist_item", "toggle_checklist_item", "list_time_tracking_entries", "save_time_tracking_entry", "delete_time_tracking_entry", "issue_time_total",
+    ];
+    if LEGACY_TICKET_COMMANDS.contains(&name.as_str()) {
+        return Json(json!({"error":"tickets merged into tasks (09-05)"})).into_response();
+    }
     if let Err(e) = authorize_command(&user, &name, &mut body) {
         return e.into_response();
     }
     if name == "list_projects" {
         return match platform::list_projects() { Ok(projects) => Json(json!({"ok":true,"value":projects.into_iter().filter(|project| project_readable(&user,&project.id).unwrap_or(false)).collect::<Vec<_>>() })).into_response(), Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR,&e).into_response() };
-    }
-    // An unscoped issue list is answered per project the caller may read: one round trip
-    // for a whole portfolio, and never a row from a project that is not theirs.
-    if name == "list_issue_statuses"
-        && arg::<Option<String>>(&body, "project_id")
-            .ok()
-            .flatten()
-            .is_none()
-    {
-        return match issues::list_issue_statuses(None) {
-            Ok(rows) => Json(json!({"ok":true,"value":rows.into_iter().filter(|status| project_readable(&user,&status.project_id).unwrap_or(false)).collect::<Vec<_>>()})).into_response(),
-            Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR,&e).into_response(),
-        };
-    }
-    if name == "list_boards"
-        && arg::<Option<String>>(&body, "project_id")
-            .ok()
-            .flatten()
-            .is_none()
-    {
-        return match issues::list_boards(None) {
-            Ok(rows) => Json(json!({"ok":true,"value":rows.into_iter().filter(|board| project_readable(&user,&board.project_id).unwrap_or(false)).collect::<Vec<_>>()})).into_response(),
-            Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR,&e).into_response(),
-        };
-    }
-    if name == "list_issues"
-        && arg::<Option<String>>(&body, "project_id")
-            .ok()
-            .flatten()
-            .is_none()
-    {
-        // Every OTHER filter of the request still applies — dropping them here would
-        // answer a search for "needle" with the whole haystack, silently.
-        let include_archived = arg::<Option<bool>>(&body, "include_archived")
-            .ok()
-            .flatten();
-        let text = arg::<Option<String>>(&body, "text").ok().flatten();
-        let status_id = arg::<Option<String>>(&body, "status_id").ok().flatten();
-        let assignee_id = arg::<Option<String>>(&body, "assignee_id").ok().flatten();
-        let tag_id = arg::<Option<String>>(&body, "tag_id").ok().flatten();
-        return match issues::list_issues(None, text, status_id, assignee_id, tag_id, None, None, include_archived) {
-            Ok(rows) => Json(json!({"ok":true,"value":rows.into_iter().filter(|issue| project_readable(&user,&issue.project_id).unwrap_or(false)).collect::<Vec<_>>()})).into_response(),
-            Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR,&e).into_response(),
-        };
     }
     // A confidential absence reason never leaves the process for a reader who is not
     // the person themselves or an administrator: redaction happens here, at the one
@@ -5342,7 +5646,36 @@ async fn cmd(
     if name == "delete_absence" {
         return absence_delete(&user, &body);
     }
+    // The body names only a meeting. Identity/display name come from the authenticated session.
+    if name == "join_meeting_call" {
+        let meeting_id: String = match arg(&body, "meeting_id") {
+            Ok(value) => value,
+            Err(error) => return err(StatusCode::BAD_REQUEST, &error).into_response(),
+        };
+        return match calls::join_web_meeting_call(
+            meeting_id,
+            user.profile_id.clone(),
+            user.display_name.clone(),
+        ) {
+            Ok(value) => Json(json!({"ok":true,"value":value})).into_response(),
+            Err(error) => err(StatusCode::BAD_REQUEST, &error).into_response(),
+        };
+    }
+    if name == "end_meeting_call" {
+        let meeting_id: String = match arg(&body, "meeting_id") {
+            Ok(value) => value,
+            Err(error) => return err(StatusCode::BAD_REQUEST, &error).into_response(),
+        };
+        return match calls::end_web_meeting_call(meeting_id, user.profile_id.clone()) {
+            Ok(value) => Json(json!({"ok":true,"value":value})).into_response(),
+            Err(error) => err(StatusCode::BAD_REQUEST, &error).into_response(),
+        };
+    }
     dispatch!(name.as_str(), body, {
+    "create_hosted_repo" => git_hosting::create_hosted_repo(project_id: String, name: String, description: Option<String>, default_branch: String),
+    "delete_hosted_repo" => git_hosting::delete_hosted_repo(id: String),
+    "list_hosted_repos" => git_hosting::list_hosted_repos(project_id: String),
+    "hosted_repo_clone_url" => git_hosting::hosted_repo_clone_url(base_url: String, project: String, name: String),
     "list_devfiles" => applications::list_devfiles(project_id: Option<String>),
     "save_devfile" => applications::save_devfile(value: applications::Devfile),
     "delete_devfile" => applications::delete_devfile(id: String),
@@ -5395,7 +5728,6 @@ async fn cmd(
     "save_ui_extension" => applications::save_ui_extension(value: applications::UiExtension),
     "delete_ui_extension" => applications::delete_ui_extension(id: String),
     "add_channel_member" => chat::add_channel_member(channel_id: String, member_id: String, administrator: bool),
-    "add_issue_child" => issues::add_issue_child(parent_id: String, child_id: String),
     "add_message_attachment" => chat::add_message_attachment(message_id: String, attachment: chat::NewMessageAttachment),
     "set_message_attachment_state" => chat::set_message_attachment_state(message_id: String, id: String, state: String, error: Option<String>),
     "remove_message_attachment" => chat::remove_message_attachment(message_id: String, id: String),
@@ -5403,22 +5735,21 @@ async fn cmd(
     "add_review_participant" => review::add_review_participant(participant: review::ReviewParticipant),
     "add_team_membership" => platform::add_team_membership(input: platform::TeamMembershipInput),
     "archive_cf_definition" => platform::archive_cf_definition(id: String, archived: bool),
+    "budget_statement" => budget::budget_statement(document_id: String, month: Option<String>, profile_id: Option<String>),
+    "budget_add_expense" => budget::budget_add_expense(document_id: String, input: budget::BudgetExpenseInput, actor: Option<String>),
+    "budget_export_statement" => budget::budget_export_statement(document_id: String, month: String, profile_id: Option<String>),
     "archive_document" => documents::archive_document(id: String, archived: bool),
     "delete_document" => documents::delete_document(id: String, actor_id: String),
-    "archive_issue" => issues::archive_issue(id: String, archived: bool),
     "archive_meeting" => meetings::archive_meeting(id: String, archived: bool),
     "attach_meeting_channel" => meetings::attach_meeting_channel(id: String),
     "delete_meeting" => meetings::delete_meeting(id: String),
     "archive_role" => platform::archive_role(id: String, archived: bool),
-    "archive_sprint" => issues::archive_sprint(id: String, archived: bool),
     "archive_team" => platform::archive_team(id: String, archived: bool),
     "attempt_merge" => review::attempt_merge(id: String, repo_path: String, review_id: String, source_branch: String, target_branch: String, actor_id: String),
     "cf_get_values" => platform::cf_get_values(entity_type: String, entity_id: String),
     "cf_set_value" => platform::cf_set_value(definition_id: String, entity_id: String, value_json: String),
     "check_right" => platform::check_right(profile_id: String, right_code: String, scope_type: String, scope_id: Option<String>),
-    "close_sprint" => issues::close_sprint(id: String),
     "create_absence" => personal::create_absence(input: personal::AbsenceInput),
-    "create_board" => issues::create_board(input: issues::BoardInput),
     "create_cf_definition" => platform::create_cf_definition(input: platform::CfDefinitionInput),
     "create_channel" => chat::create_channel(channel: chat::Channel, member_ids: Vec<String>),
     "create_deploy_target" => pipelines::create_deploy_target(target: pipelines::DeployTarget),
@@ -5428,11 +5759,8 @@ async fn cmd(
     "create_document_folder" => documents::create_document_folder(folder: documents::DocumentFolder, owner_id: Option<String>),
     "create_entity_channel" => chat::create_entity_channel(entity_type: String, entity_id: String, name: Option<String>),
     "ensure_thread_channel" => chat::ensure_thread_channel(root_message_id: String, title: Option<String>, acting_profile_id: Option<String>),
-    "create_issue" => issues::create_issue(input: issues::IssueInput),
-    "clone_issue" => issues::clone_issue(input: issues::IssueTransferInput),
-    "move_issue_to_project" => issues::move_issue_to_project(input: issues::IssueTransferInput),
-    "create_issue_status" => issues::create_issue_status(input: issues::StatusInput),
     "create_meeting" => meetings::create_meeting(meeting: meetings::Meeting),
+    "create_channel_call" => meetings::create_channel_call(meeting: meetings::Meeting),
     "create_job_artifact" => pipelines::create_job_artifact(input: pipelines::JobArtifactInput),
     "create_message" => chat::create_message(message: chat::Message),
     "create_package_repository" => pipelines::create_package_repository(repo: pipelines::PackageRepository),
@@ -5445,7 +5773,6 @@ async fn cmd(
     "create_review_discussion" => review::create_review_discussion(discussion: review::NewDiscussion),
     "create_role" => platform::create_role(input: platform::RoleInput),
     "create_role_assignment" => platform::create_role_assignment(input: platform::RoleAssignmentInput),
-    "create_sprint" => issues::create_sprint(input: issues::SprintInput),
     "create_team" => platform::create_team(input: platform::TeamInput),
     "create_todo" => personal::create_todo(input: personal::TodoInput),
     "current_absences" => personal::current_absences(date: String),
@@ -5461,26 +5788,16 @@ async fn cmd(
     "set_dashboard_preferences" => personal::set_dashboard_preferences_http(preferences: personal::DashboardPreferences),
     "get_calendar_options" => personal::get_calendar_options_http(profile_id: String),
     "set_calendar_options" => personal::set_calendar_options_http(options: personal::CalendarOptions),
-    "delete_board" => issues::delete_board(id: String),
-    "delete_board_column" => issues::delete_board_column(id: String),
-    "delete_checklist" => issues::delete_checklist(id: String),
-    "delete_checklist_item" => issues::delete_checklist_item(id: String),
     "delete_deploy_target" => pipelines::delete_deploy_target(id: String),
-    "delete_issue_status" => issues::delete_issue_status(id: String),
-    "delete_issue_attachment" => issues::delete_issue_attachment(id: String),
     "delete_message" => chat::delete_message(id: String),
     "delete_messenger_contact" => platform::delete_messenger_contact(id: String, profile_id: String),
     "delete_package_repository" => pipelines::delete_package_repository(id: String),
     "delete_package_version" => pipelines::delete_package_version(id: String),
     "delete_pipeline_script" => pipelines::delete_pipeline_script(id: String),
-    "delete_planning_tag" => issues::delete_planning_tag(id: String),
     "delete_quality_gate_rule" => review::delete_quality_gate_rule(id: String),
     "delete_role_assignment" => platform::delete_role_assignment(id: String),
-    "delete_sprint" => issues::delete_sprint(id: String),
     "delete_subscription_scope" => personal::delete_subscription_scope(profile_id: String, event_type: String, target_type: String, target_id: String),
     "delete_subscription_setting" => personal::delete_subscription_setting(profile_id: String, event_type: String),
-    "delete_swimlane" => issues::delete_swimlane(id: String),
-    "delete_time_tracking_entry" => issues::delete_time_tracking_entry(id: String),
     "delete_todo" => personal::delete_todo(id: String, actor_id: String),
     "list_channel_notes" => channel_notes::list_channel_notes(channel_id: String, profile_id: String),
     "create_channel_note" => channel_notes::create_channel_note(input: channel_notes::ChannelNoteInput),
@@ -5497,8 +5814,8 @@ async fn cmd(
     "get_channel_by_entity" => chat::get_channel_by_entity(entity_type: String, entity_id: String),
     "resolve_source_ref" => chat::resolve_source_ref(entity_type: String, entity_id: String),
     "get_document" => documents::get_document_scoped(id: String, profile_id: String),
-    "get_issue" => issues::get_issue(id: String),
-    "get_issue_detail" => issues::get_issue_detail(id: String),
+    "get_document_publication" => documents::get_document_publication(document_id: String),
+    "publish_document" => documents::publish_document(document_id: String, published: bool, slug: Option<String>),
     "get_meeting" => meetings::get_meeting_scoped(id: String, profile_id: String),
     "get_profile" => platform::get_profile(id: String),
     "get_profile_email_status" => platform::get_profile_email_status(profile_id: String),
@@ -5512,16 +5829,9 @@ async fn cmd(
     "get_blog_post" => blogs::get_blog_post_scoped(id: String, profile_id: String, allow_all: bool),
     "publish_blog_draft" => blogs::publish_blog_draft_scoped(input: blogs::PublishBlogDraftInput, profile_id: String, allow_all: bool),
     "invite_meeting_participant" => meetings::invite_meeting_participant(meeting_id: String, profile_id: String),
-    "issue_time_total" => issues::issue_time_total(issue_id: String),
     "join_channel" => chat::join_channel(channel_id: String, profile_id: String),
-    "launch_sprint" => issues::launch_sprint(id: String),
     "leave_channel" => chat::leave_channel(channel_id: String, profile_id: String),
     "list_absences" => personal::list_absences(profile_id: Option<String>),
-    "list_backlog_issues" => issues::list_backlog_issues(board_id: String),
-    "list_board_columns" => issues::list_board_columns(board_id: String),
-    "list_board_issues" => issues::list_board_issues(board_id: String, sprint_id: Option<String>),
-    "get_board_card_settings" => issues::get_board_card_settings(board_id: String),
-    "list_boards" => issues::list_boards(project_id: Option<String>),
     "list_cf_definitions" => platform::list_cf_definitions(entity_type: Option<String>),
     "list_membership_edit_requests" => platform::list_membership_edit_requests(membership_id: Option<String>),
     "request_membership_edit" => platform::request_membership_edit(membership: platform::TeamMembership, requested_by: String),
@@ -5530,11 +5840,11 @@ async fn cmd(
     "list_channels" => chat::list_channels(),
     "list_channels_with_meta" => chat::list_channels_with_meta(profile_id: String),
     "list_unread_threads" => chat::list_unread_threads(profile_id: String),
-    "list_checklist_items" => issues::list_checklist_items(checklist_id: String),
-    "list_checklists" => issues::list_checklists(issue_id: String),
     "list_deploy_targets" => pipelines::list_deploy_targets(),
     "list_deployments_for_target" => pipelines::list_deployments_for_target(target_id: String),
     "list_doc_versions" => documents::list_doc_versions_scoped(document_id: String, profile_id: String),
+    "read_document_file" => documents::read_document_file(document_id: String, max_bytes: Option<u64>),
+    "get_document_file" => documents::get_document_file(document_id: String),
     "list_document_access" => documents::list_document_access(document_id: String),
     "update_document_access" => documents::update_document_access(document_id: String, permissions: Vec<documents::DocumentAccessRecipient>),
     "list_document_folders" => documents::list_document_folders_scoped(profile_id: String),
@@ -5542,10 +5852,6 @@ async fn cmd(
     "list_favorite_documents" => documents::list_favorite_documents(profile_id: String),
     "set_document_favorite" => documents::set_document_favorite(profile_id: String, document_id: String, favorite: bool),
     "move_favorite_document" => documents::move_favorite_document(profile_id: String, document_id: String, group_name: Option<String>, position: i64),
-    "list_issue_statuses" => issues::list_issue_statuses(project_id: Option<String>),
-    "list_issues" => issues::list_issues(project_id: Option<String>, text: Option<String>, status_id: Option<String>, assignee_id: Option<String>, tag_id: Option<String>, custom_field_id: Option<String>, custom_field_value_json: Option<String>, include_archived: Option<bool>),
-    "list_issue_attachments" => issues::list_issue_attachments(issue_id: String),
-    "add_issue_attachment" => issues::add_issue_attachment(issue_id: String, attachment: issues::IssueAttachmentInput),
     "list_job_runs" => pipelines::list_job_runs(),
     "list_job_runs_for_script" => pipelines::list_job_runs_for_script(script_id: String),
     "list_job_artifacts" => pipelines::list_job_artifacts(job_run_id: String),
@@ -5590,7 +5896,6 @@ async fn cmd(
     "list_package_repository_acl" => pipelines::list_package_repository_acl(repository_id: String),
     "list_package_versions" => pipelines::list_package_versions(repository_id: String, query: Option<String>),
     "list_pipeline_scripts" => pipelines::list_pipeline_scripts(),
-    "list_planning_tags" => issues::list_planning_tags(project_id: String),
     "get_organization" => organization::get_organization(),
     "update_organization" => organization::update_organization(value: organization::Organization),
     "get_org_settings" => organization::get_org_settings(),
@@ -5644,7 +5949,6 @@ async fn cmd(
     "assign_project_team_role" => platform::assign_project_team_role(project_id: String, team_id: String, project_role_id: String),
     "remove_project_team_role" => platform::remove_project_team_role(project_id: String, team_id: String, project_role_id: String),
     "list_safe_merge_runs" => review::list_safe_merge_runs(review_id: String),
-    "list_sprints" => issues::list_sprints(board_id: Option<String>),
     "list_app_installs" => applications::list_app_installs(),
     "list_app_tokens" => applications::list_app_tokens(application_id: String),
     "list_marketplace_apps" => applications::list_marketplace_apps(),
@@ -5657,14 +5961,15 @@ async fn cmd(
     "uninstall_app" => applications::uninstall_app(id: String),
     "list_subscription_scopes" => personal::list_subscription_scopes(profile_id: String),
     "list_subscription_settings" => personal::list_subscription_settings(profile_id: String),
-    "list_swimlanes" => issues::list_swimlanes(board_id: String, sprint_id: Option<String>),
     "list_team_memberships" => platform::list_team_memberships(team_id: Option<String>, profile_id: Option<String>),
     "list_teams" => platform::list_teams(),
     "list_thread_replies" => chat::list_thread_replies(thread_of: String, acting_profile_id: Option<String>),
-    "list_time_tracking_entries" => issues::list_time_tracking_entries(issue_id: String),
     "list_todos" => personal::list_todos(profile_id: String, include_done: Option<bool>),
-    "list_project_todos" => personal::list_project_todos(project_id: String, profile_id: String, include_done: Option<bool>),
-    "list_team_todos" => personal::list_team_todos(profile_id: String, include_done: Option<bool>),
+    "list_todo_links" => personal::list_todo_links(todo_id: String),
+    "add_todo_link" => personal::add_todo_link(input: personal::TodoLinkInput),
+    "delete_todo_link" => personal::delete_todo_link(id: String, actor_id: String),
+    "list_project_todos" => personal::list_project_todos(project_id: String, profile_id: String, include_done: Option<bool>, admin: Option<bool>),
+    "list_team_todos" => personal::list_team_todos(profile_id: String, include_done: Option<bool>, admin: Option<bool>),
     "list_project_member_ids" => personal::project_member_ids(project_id: String),
     "calendar_aggregate" => personal::calendar_aggregate(profile_id: String, range_start: i64, range_end: i64, range_start_date: Option<String>, range_end_date: Option<String>, target_profile_id: Option<String>, target_location: Option<String>),
     "list_calendar_feeds" => calendar_feeds::list_calendar_feeds(profile_id: String),
@@ -5680,7 +5985,6 @@ async fn cmd(
     "move_document" => documents::move_document(id: String, container_type: String, container_id: Option<String>, folder_id: Option<String>),
     "move_document_folder" => documents::move_document_folder(id: String, parent_id: Option<String>),
     "delete_document_folder" => documents::delete_document_folder(id: String, actor_id: String),
-    "move_issue_on_board" => issues::move_issue_on_board(board_id: String, issue_id: String, column_id: String, sprint_id: Option<String>, swimlane_id: Option<String>, position: Option<i64>),
     "open_merge_request" => review::open_merge_request(req: review::NewMergeRequest),
     "apply_package_retention" => pipelines::apply_package_retention(repository_id: String),
     "package_retention_candidates" => pipelines::package_retention_candidates(repository_id: String),
@@ -5692,30 +5996,20 @@ async fn cmd(
     "download_package_payload" => pipelines::download_package_payload(repository_id: String, package_name: String, version: String, filename: String),
     "remove_channel_member" => chat::remove_channel_member(channel_id: String, member_id: String),
     "remove_package_repository_acl" => pipelines::remove_package_repository_acl(repository_id: String, profile_id: String),
-    "remove_issue_from_board" => issues::remove_issue_from_board(board_id: String, issue_id: String),
-    "remove_issue_link" => issues::remove_issue_link(id: String),
     "remove_reaction" => chat::remove_reaction(message_id: String, profile_id: String, emoji: String),
     "remove_team_membership" => platform::remove_team_membership(id: String),
     "restore_doc_version" => documents::restore_doc_version(document_id: String, version: i64, actor: Option<String>),
     "review_diff" => review::review_diff(repo_path: String, source_branch: String, target_branch: String),
     "register_worker" => pipelines::register_worker(worker: pipelines::Worker),
-    "save_board_column" => issues::save_board_column(input: issues::ColumnInput),
-    "save_board_card_settings" => issues::save_board_card_settings(settings: issues::BoardCardSettings),
     "save_test_report" => pipelines::save_test_report(report: pipelines::TestReport),
     "ingest_teamcity_test_messages" => pipelines::ingest_teamcity_test_messages(input: pipelines::TeamCityTestReportInput),
-    "save_checklist" => issues::save_checklist(input: issues::ChecklistInput),
-    "save_checklist_item" => issues::save_checklist_item(input: issues::ChecklistItemInput),
     "save_document" => documents::save_document(id: String, title: String, body: Option<String>, actor: Option<String>),
     "save_messenger_contact" => platform::save_messenger_contact(value: platform::MessengerContact),
-    "save_planning_tag" => issues::save_planning_tag(input: issues::TagInput),
     "save_subscription_scope" => personal::save_subscription_scope(scope: personal::SubscriptionScope),
     "save_subscription_setting" => personal::save_subscription_setting(setting: personal::SubscriptionSetting),
-    "save_swimlane" => issues::save_swimlane(input: issues::SwimlaneInput),
-    "save_time_tracking_entry" => issues::save_time_tracking_entry(input: issues::TimeEntryInput),
     "schedule_deployment" => pipelines::schedule_deployment(req: pipelines::ScheduleDeploymentRequest),
     "seed_rights" => platform::seed_rights(),
     "set_discussion_resolved" => review::set_discussion_resolved(id: String, resolved: bool),
-    "set_issue_tags" => issues::set_issue_tags(issue_id: String, tag_ids: Vec<String>),
     "set_message_pinned" => chat::set_message_pinned(id: String, pinned: bool),
     "save_message_draft" => chat::save_message_draft(channel_id: String, author_id: String, thread_key: Option<String>, text: String),
     "delete_message_draft" => chat::delete_message_draft(channel_id: String, author_id: String, thread_key: Option<String>),
@@ -5734,13 +6028,11 @@ async fn cmd(
     "set_participant_state" => review::set_participant_state(review_id: String, profile_id: String, state: Option<String>),
     "set_profile_email_status" => platform::set_profile_email_status(value: platform::ProfileEmailStatus),
     "set_role_rights" => platform::set_role_rights(role_id: String, right_codes: Vec<String>),
-    "toggle_checklist_item" => issues::toggle_checklist_item(id: String, item_done: bool),
     "transition_deployment" => pipelines::transition_deployment(id: String, status: String),
     "trigger_pipeline_script" => pipelines::trigger_pipeline_script(script_id: String),
     "trigger_pipeline_on_push" => pipelines::trigger_pipeline_on_push(script_id: String, repository: String, branch: String),
     "trigger_pipeline_event" => pipelines::trigger_pipeline_event(script_id: String, event: pipelines::TriggerEvent),
     "due_scheduled_runs" => pipelines::due_scheduled_runs(now: i64),
-    "update_board" => issues::update_board(board: issues::Board),
     "update_cf_definition" => platform::update_cf_definition(definition: platform::CfDefinition),
     "update_channel" => chat::update_channel(channel: chat::Channel),
     "delete_channel" => chat::delete_channel(id: String, actor_id: String),
@@ -5749,10 +6041,6 @@ async fn cmd(
     "update_document_folder" => documents::update_document_folder(folder: documents::DocumentFolder),
     "add_project_member" => personal::add_project_member(project_id: String, member_id: String),
     "remove_project_member" => personal::remove_project_member(project_id: String, member_id: String),
-    "set_issue_assignees" => issues::set_issue_assignees(issue_id: String, profile_ids: Vec<String>),
-    "list_issue_assignees" => issues::list_issue_assignees(issue_id: String),
-    "update_issue" => issues::update_issue(issue: issues::Issue),
-    "update_issue_status" => issues::update_issue_status(status: issues::IssueStatus),
     "update_meeting" => meetings::update_meeting(meeting: meetings::Meeting),
     "update_message" => chat::update_message(id: String, text: String, mention_ids: Option<Vec<String>>, mention_team_ids: Option<Vec<String>>, mention_targets: Option<Vec<chat::MentionTarget>>),
     "list_mentions_for_profile" => chat::list_mentions_for_profile(profile_id: String, unread_only: Option<bool>),
@@ -5768,13 +6056,11 @@ async fn cmd(
     "update_quality_gate_rule" => review::update_quality_gate_rule(rule: review::QualityGateRule),
     "update_review" => review::update_review(review: review::Review),
     "update_role" => platform::update_role(role: platform::Role),
-    "update_sprint" => issues::update_sprint(sprint: issues::Sprint),
     "update_team" => platform::update_team(team: platform::Team),
     "update_team_membership" => platform::update_team_membership(membership: platform::TeamMembership),
     "update_todo" => personal::update_todo(todo: personal::Todo),
     "set_todo_completion" => personal::set_todo_completion(id: String, done: bool),
     "postpone_todo" => personal::postpone_todo(id: String, days: i64),
-    "convert_todo_to_issue" => personal::convert_todo_to_issue(id: String, project_id: String, status_id: Option<String>),
     })
 }
 /// OAuth2 authorization endpoint (RFC 6749 §3.1). The resource owner is the caller's
@@ -6036,15 +6322,8 @@ fn spawn_webhook_ticker() {
     });
 }
 
-#[tokio::main]
-async fn main() {
-    let p = env::var("SPACE_DB").unwrap_or_else(|_| "/var/lib/gaia-space/space.db".into());
-    db::set_db_path(PathBuf::from(p));
-    bootstrap();
-    spawn_webhook_ticker();
-    spawn_pipeline_schedule_ticker();
-    spawn_chat_schedule_ticker();
-    let app = Router::new()
+fn app_router() -> Router {
+    Router::new()
         .route("/caldav/", any(caldav_home))
         .route("/caldav/{calendar_id}/", any(caldav_collection))
         .route("/caldav/{calendar_id}/calendar.ics", any(caldav_calendar))
@@ -6133,13 +6412,25 @@ async fn main() {
                 .post(registry_oci_post)
                 .get(registry_oci_get),
         )
+        .route("/git/{project}/{*path}", get(git_info_refs).post(git_rpc))
         .route("/oauth/authorize", post(oauth_authorize))
         .route("/oauth/token", post(oauth_token))
         .route("/api/cmd/{command}", post(cmd))
         .layer(DefaultBodyLimit::max(document_upload_max_bytes(
             env::var("SPACE_DOCUMENT_UPLOAD_MAX_BYTES").ok().as_deref(),
         )))
-        .with_state(App::new());
+        .with_state(App::new())
+}
+
+#[tokio::main]
+async fn main() {
+    let p = env::var("SPACE_DB").unwrap_or_else(|_| "/var/lib/gaia-space/space.db".into());
+    db::set_db_path(PathBuf::from(p));
+    bootstrap();
+    spawn_webhook_ticker();
+    spawn_pipeline_schedule_ticker();
+    spawn_chat_schedule_ticker();
+    let app = app_router();
     let port = env::var("SPACE_PORT")
         .ok()
         .and_then(|x| x.parse().ok())
@@ -6231,6 +6522,20 @@ mod tests {
                 "{name}"
             );
         }
+    }
+
+    #[test]
+    fn document_detail_commands_have_scoped_policies_and_ids() {
+        for name in [
+            "get_document_publication",
+            "read_document_file",
+            "get_document_file",
+        ] {
+            assert!(matches!(command_policy(name), Some(CommandPolicy::DocumentRead)), "{name}");
+            assert_eq!(document_id(&json!({"documentId": "doc-preview", "maxBytes": null}), name), Some("doc-preview".into()));
+        }
+        assert!(matches!(command_policy("publish_document"), Some(CommandPolicy::DocumentOwnerWrite)));
+        assert_eq!(document_id(&json!({"documentId": "doc-preview", "published": true}), "publish_document"), Some("doc-preview".into()));
     }
 
     #[test]
@@ -6351,6 +6656,171 @@ mod tests {
         )
         .await
     }
+
+    #[tokio::test]
+    async fn web_call_join_is_session_bound_and_private_scope_checked() {
+        let _serial = test_lock();
+        setup();
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        // Accept the probe: CI's TCP backlog is not a LiveKit server, but it must
+        // answer the exact reachability check the production join path performs.
+        let probe = std::thread::spawn(move || listener.accept().unwrap());
+        std::env::set_var("LIVEKIT_HOST", "127.0.0.1");
+        std::env::set_var("LIVEKIT_PORT", port.to_string());
+        std::env::set_var(
+            "LIVEKIT_PUBLIC_URL",
+            "wss://calls.example.test/space/livekit",
+        );
+        db::conn().unwrap().execute(
+            "INSERT INTO meetings(id,title,starts_at,ends_at,organizer_id,visibility,video_provider,video_status,archived) VALUES('call-private','Private call',1,2,'pa','private','livekit','scheduled',0)",
+            [],
+        ).unwrap();
+        let (status, joined) = call(
+            cookie("ta"),
+            "join_meeting_call",
+            json!({"meetingId":"call-private","profileId":"pb","displayName":"Forged"}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{joined}");
+        assert_eq!(
+            joined["value"]["url"],
+            "wss://calls.example.test/space/livekit"
+        );
+        let token = joined["value"]["token"].as_str().unwrap();
+        use base64::Engine as _;
+        let payload = token.split('.').nth(1).unwrap();
+        let claims: Value = serde_json::from_slice(
+            &base64::engine::general_purpose::URL_SAFE_NO_PAD
+                .decode(payload)
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(claims["sub"], "pa");
+        assert_eq!(claims["name"], "Alice");
+        let (status, _) = call(
+            HeaderMap::new(),
+            "join_meeting_call",
+            json!({"meetingId":"call-private"}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        let (status, _) = call(
+            cookie("tb"),
+            "join_meeting_call",
+            json!({"meetingId":"call-private"}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        std::env::remove_var("LIVEKIT_HOST");
+        std::env::remove_var("LIVEKIT_PORT");
+        std::env::remove_var("LIVEKIT_PUBLIC_URL");
+        let _ = probe.join();
+    }
+    #[tokio::test]
+    async fn web_meeting_invite_preserves_target_and_binds_inviter_to_session() {
+        let _serial = test_lock();
+        setup();
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let probe = std::thread::spawn(move || listener.accept().unwrap());
+        std::env::set_var("LIVEKIT_HOST", "127.0.0.1");
+        std::env::set_var("LIVEKIT_PORT", port.to_string());
+        std::env::set_var(
+            "LIVEKIT_PUBLIC_URL",
+            "wss://calls.example.test/space/livekit",
+        );
+        let c = db::conn().unwrap();
+        c.execute(
+            "INSERT INTO meetings(id,title,starts_at,ends_at,organizer_id,visibility,video_provider,video_status,archived) VALUES('invite-private','Private invite',1,2,'pa','participants','livekit','scheduled',0)",
+            [],
+        )
+        .unwrap();
+
+        let (status, value) = call(
+            cookie("ta"),
+            "invite_meeting_participant",
+            json!({"meetingId":"invite-private","profileId":"pb","actor":"pd","organizerId":"pd"}),
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::OK,
+            "invite_meeting_participant: {value}"
+        );
+        let participant: String = c
+            .query_row(
+                "SELECT profile_id FROM meeting_participants WHERE meeting_id='invite-private'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(participant, "pb", "the body participant must be retained");
+        let organizer: String = c
+            .query_row(
+                "SELECT organizer_id FROM meetings WHERE id='invite-private'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            organizer, "pa",
+            "a forged invite actor cannot replace the session actor"
+        );
+
+        let (status, participants) = call(
+            cookie("ta"),
+            "list_meeting_participants",
+            json!({"meetingId":"invite-private"}),
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::OK,
+            "list_meeting_participants: {participants}"
+        );
+        assert_eq!(participants["value"][0]["profile_id"], "pb");
+        let (status, meeting) =
+            call(cookie("tb"), "get_meeting", json!({"id":"invite-private"})).await;
+        assert_eq!(
+            status,
+            StatusCode::OK,
+            "invited participant get_meeting: {meeting}"
+        );
+        let (status, value) = call(
+            cookie("tb"),
+            "set_meeting_participant_status",
+            json!({"meetingId":"invite-private","profileId":"pb","status":"accepted"}),
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::OK,
+            "participant accepts own RSVP: {value}"
+        );
+        let (status, joined) = call(
+            cookie("tb"),
+            "join_meeting_call",
+            json!({"meetingId":"invite-private"}),
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::OK,
+            "invited participant join_meeting_call: {joined}"
+        );
+        let (status, _) = call(cookie("td"), "get_meeting", json!({"id":"invite-private"})).await;
+        assert_eq!(
+            status,
+            StatusCode::FORBIDDEN,
+            "uninvited participant is denied"
+        );
+        std::env::remove_var("LIVEKIT_HOST");
+        std::env::remove_var("LIVEKIT_PORT");
+        std::env::remove_var("LIVEKIT_PUBLIC_URL");
+        let _ = probe.join();
+    }
+
     #[tokio::test]
     async fn permanent_tokens_are_minted_listed_and_owner_revocable_over_http() {
         let _serial = test_lock();
@@ -6484,6 +6954,50 @@ mod tests {
         c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('pa','alice','Alice',1),('pb','bob','Bob',1),('pc','server-admin','Server Admin',1),('pd','dora','Dora',1)", []).unwrap();
         c.execute("INSERT INTO users(id,username,password_hash,display_name,profile_id,role,active,created_at) VALUES('ua','alice','x','Alice','pa','member',1,1),('ub','bob','x','Bob','pb','member',1,1),('uc','server-admin','x','Server Admin','pc','admin',1,1),('ud','dora','x','Dora','pd','member',1,1)", []).unwrap();
         c.execute("INSERT INTO sessions(token,user_id,created_at,expires_at) VALUES('ta','ua',unixepoch(),unixepoch()+3600),('tb','ub',unixepoch(),unixepoch()+3600),('tc','uc',unixepoch(),unixepoch()+3600),('td','ud',unixepoch(),unixepoch()+3600)", []).unwrap();
+    }
+
+    #[tokio::test]
+    async fn git_smart_http_clone_and_push_roundtrip() {
+        let _serial = test_lock();
+        setup();
+        set_password("server-admin", "smart-http-password");
+        let suffix = format!("{}", std::process::id());
+        let private_project = format!("git-private-{suffix}");
+        let public_project = format!("git-public-{suffix}");
+        let c = db::conn().unwrap();
+        c.execute("INSERT INTO projects(id,name,key,created_by,created_at,visibility) VALUES(?1,'Private Git',?2,'pc',unixepoch(),'private'),(?3,'Public Git',?4,'pc',unixepoch(),'public')", params![private_project, format!("PR{suffix}"), public_project, format!("PU{suffix}")]).unwrap();
+        drop(c);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server =
+            tokio::spawn(async move { axum::serve(listener, app_router()).await.unwrap() });
+        tokio::task::spawn_blocking(move || {
+            let base = format!("http://{address}");
+            let client = reqwest::blocking::Client::new();
+            for (project_id, name) in [(&private_project, "private"), (&public_project, "public")] {
+                let response = client.post(format!("{base}/api/cmd/create_hosted_repo")).header(header::COOKIE, "space_session=tc").json(&json!({"project_id":project_id,"name":name,"description":null,"default_branch":"main"})).send().unwrap();
+                assert!(response.status().is_success(), "create hosted repo: {}", response.text().unwrap());
+            }
+            assert_eq!(client.get(format!("{base}/git/{private_project}/private.git/info/refs?service=git-upload-pack")).send().unwrap().status(), StatusCode::UNAUTHORIZED);
+            assert_eq!(client.get(format!("{base}/git/{public_project}/public.git/info/refs?service=git-upload-pack")).send().unwrap().status(), StatusCode::OK);
+            let work = std::env::temp_dir().join(format!("gaia-space-git-smart-http-{suffix}"));
+            std::fs::create_dir_all(&work).unwrap();
+            let url = format!("http://server-admin:smart-http-password@{address}/git/{private_project}/private.git");
+            let first = work.join("first"); let second = work.join("second");
+            let run = |args: &[&str]| { let out = std::process::Command::new("git").args(args).output().unwrap(); assert!(out.status.success(), "git {:?}: {}", args, String::from_utf8_lossy(&out.stderr)); };
+            run(&["clone", &url, first.to_str().unwrap()]);
+            // An empty bare repository has no checked-out branch. Name the first
+            // local branch explicitly so this test does not inherit Git's init.defaultBranch.
+            run(&["-C", first.to_str().unwrap(), "branch", "-M", "main"]);
+            run(&["-C", first.to_str().unwrap(), "config", "user.email", "test@example.test"]);
+            run(&["-C", first.to_str().unwrap(), "config", "user.name", "Smart HTTP Test"]);
+            std::fs::write(first.join("README"), "smart HTTP\n").unwrap();
+            run(&["-C", first.to_str().unwrap(), "add", "README"]); run(&["-C", first.to_str().unwrap(), "commit", "-m", "smart HTTP"]); run(&["-C", first.to_str().unwrap(), "push", "origin", "main"]); run(&["clone", &url, second.to_str().unwrap()]);
+            let log = std::process::Command::new("git").args(["-C", second.to_str().unwrap(), "log", "-1", "--format=%s"]).output().unwrap(); assert_eq!(String::from_utf8_lossy(&log.stdout).trim(), "smart HTTP");
+            assert_eq!(client.post(format!("{base}/git/{private_project}/private.git/git-receive-pack")).body(Vec::new()).send().unwrap().status(), StatusCode::UNAUTHORIZED);
+            let _ = std::fs::remove_dir_all(work);
+        }).await.unwrap();
+        server.abort();
     }
 
     fn bearer(token: &str) -> HeaderMap {
@@ -9275,6 +9789,78 @@ mod tests {
             .contains("Assignee must be a project member"));
     }
 
+    /// The live bug: a GlobalAdmin with zero project memberships got `count=0` from
+    /// `list_team_todos`/`list_project_todos`, though `project_readable` already shows it
+    /// every project. `pc` (server-admin, role='admin' → GlobalAdmin) is a member of
+    /// nothing here on purpose.
+    #[tokio::test]
+    async fn global_admin_sees_project_and_team_todos_with_no_memberships() {
+        let _serial = test_lock();
+        setup();
+        let c = db::conn().unwrap();
+        c.execute_batch("INSERT INTO projects(id,name,key,created_by,created_at) VALUES('adm-proj','AdminProj','ADMP','pa',1); INSERT INTO project_members(project_id,profile_id) VALUES('adm-proj','pb');").unwrap();
+        drop(c);
+        let (status, value) = call(cookie("ta"), "create_todo", json!({"input":{"profile_id":"pa","content":"Owner task","project_id":"adm-proj","done":false,"assignee_ids":[]}})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        let todo_id = value["value"]["id"].as_str().unwrap().to_string();
+
+        // 'pc' (GlobalAdmin) has no row in `project_members` and did not create the
+        // project or the todo — the exact live-bug shape (bridge admin, 0 memberships).
+        let (status, value) = call(
+            cookie("tc"),
+            "list_project_todos",
+            json!({"project_id":"adm-proj","include_done":true}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        assert_eq!(
+            value["value"].as_array().unwrap().iter().map(|t| t["id"].as_str().unwrap()).collect::<Vec<_>>(),
+            vec![todo_id.as_str()],
+            "a GlobalAdmin must read a project's todos exactly as it reads the project itself"
+        );
+        let (status, value) = call(
+            cookie("tc"),
+            "list_team_todos",
+            json!({"include_done":true}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        assert!(
+            value["value"].as_array().unwrap().iter().any(|t| t["id"].as_str() == Some(todo_id.as_str())),
+            "{value}"
+        );
+
+        // A plain member-less non-admin ('td') still sees nothing: the bypass is
+        // role-gated, not merely "anyone who asks".
+        let (status, value) = call(
+            cookie("td"),
+            "list_project_todos",
+            json!({"project_id":"adm-proj","include_done":true}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(value["value"].as_array().unwrap().is_empty());
+        let (status, value) = call(
+            cookie("td"),
+            "list_team_todos",
+            json!({"include_done":true}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(!value["value"].as_array().unwrap().iter().any(|t| t["id"].as_str() == Some(todo_id.as_str())));
+
+        // A client cannot forge the bypass for itself: 'td' claiming admin=true over the
+        // wire is silently overwritten server-side (CommandPolicy::ProjectTodoRead).
+        let (status, value) = call(
+            cookie("td"),
+            "list_project_todos",
+            json!({"project_id":"adm-proj","include_done":true,"admin":true}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(value["value"].as_array().unwrap().is_empty(), "a client-sent admin flag must be ignored");
+    }
+
     #[tokio::test]
     async fn notification_endpoints_bind_the_recipient_and_refuse_foreign_writes() {
         let _serial = test_lock();
@@ -10267,6 +10853,74 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn channel_call_identity_is_session_bound_and_invites_the_dm_roster() {
+        let _serial = test_lock();
+        setup();
+        let c = db::conn().unwrap();
+        c.execute(
+            "INSERT INTO channels(id,content_type,name,archived) VALUES('channel-call-dm','dm','Alice and Bob',0)",
+            [],
+        )
+        .unwrap();
+        c.execute(
+            "INSERT INTO channel_members(channel_id,profile_id,administrator) VALUES('channel-call-dm','pa',1),('channel-call-dm','pb',0)",
+            [],
+        )
+        .unwrap();
+        let (status, value) = call(
+            cookie("ta"),
+            "create_channel_call",
+            json!({"meeting":{
+                "id":"channel-call-identity",
+                "title":"Alice and Bob",
+                "description":null,
+                "starts_at":1893456000,
+                "ends_at":1893459600,
+                "rrule":null,
+                "location":null,
+                "organizer_id":"pb",
+                "channel_id":"channel-call-dm",
+                "visibility":"participants",
+                "modification_preference":"organizer-only",
+                "archived":false,
+                "video_provider":"livekit",
+                "video_status":"scheduled"
+            }}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "create_channel_call: {value}");
+        let organizer: String = c
+            .query_row(
+                "SELECT organizer_id FROM meetings WHERE id='channel-call-identity'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(organizer, "pa");
+        let participants: Vec<(String, String)> = c
+            .prepare(
+                "SELECT profile_id,status FROM meeting_participants WHERE meeting_id='channel-call-identity' ORDER BY profile_id",
+            )
+            .unwrap()
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(
+            participants,
+            vec![("pa".into(), "accepted".into()), ("pb".into(), "invited".into())]
+        );
+    }
+
+    #[test]
+    fn unmapped_identity_write_is_a_bad_request_not_a_panic() {
+        let mut body = json!({"meeting":{}});
+        let error = bind_session_identity_write("unknown_identity_write", &mut body, "pa")
+            .expect_err("an unmapped identity-write command must fail closed");
+        assert_eq!(error.0, StatusCode::BAD_REQUEST);
+    }
+
     /// Reads the stored row as an independent check: assertions above run through the HTTP
     /// surface, this one goes straight to SQLite, so a policy bug cannot hide behind the
     /// same code path twice.
@@ -10621,6 +11275,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "tickets merged into tasks"]
     async fn issue_reads_deny_nonmembers_and_allow_owner() {
         let _serial = test_lock();
         setup();
@@ -10645,6 +11300,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "tickets merged into tasks"]
     async fn issue_attachment_write_allows_project_members_and_refuses_outsiders() {
         let _serial = test_lock();
         setup();
@@ -10673,6 +11329,7 @@ mod tests {
     /// An issue is worked by PEOPLE: several at once, sub-issues included, and only
     /// people who belong to the project. Outsiders can neither read nor assign.
     #[tokio::test]
+    #[ignore = "tickets merged into tasks"]
     async fn issue_assignment_takes_several_project_members_and_refuses_outsiders() {
         let _serial = test_lock();
         setup();
@@ -10770,6 +11427,7 @@ mod tests {
     /// A project used to be stuck with whoever was inserted by hand: nothing in
     /// the app could add a member, so nobody else could ever be assigned.
     #[tokio::test]
+    #[ignore = "tickets merged into tasks"]
     async fn project_membership_is_editable_and_the_owner_can_assign_anybody() {
         let _serial = test_lock();
         setup();
@@ -10892,6 +11550,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "tickets merged into tasks"]
     async fn board_and_search_reads_do_not_leak_private_project_metadata() {
         let _serial = test_lock();
         setup();
@@ -10911,19 +11570,11 @@ mod tests {
                 json!({"board_id":"private-board-id"}),
             )
             .await;
-            assert_eq!(status, StatusCode::FORBIDDEN, "{command}: {value}");
-            assert!(value.get("value").is_none(), "{command}: {value}");
+            assert_eq!(status, StatusCode::OK, "{command}: {value}");
+            assert_eq!(value["error"], "tickets merged into tasks (09-05)");
         }
-        assert_eq!(
-            call(
-                cookie("ta"),
-                "list_board_issues",
-                json!({"board_id":"private-board-id"})
-            )
-            .await
-            .0,
-            StatusCode::OK
-        );
+        let (_, value) = call(cookie("ta"), "list_board_issues", json!({"board_id":"private-board-id"})).await;
+        assert_eq!(value["error"], "tickets merged into tasks (09-05)");
         let (status, value) = call(
             cookie("td"),
             "goto_search",
@@ -10954,6 +11605,7 @@ mod tests {
     /// own projects: it answers with their rows only, while naming a foreign project is
     /// still refused outright.
     #[tokio::test]
+    #[ignore = "tickets merged into tasks"]
     async fn unscoped_list_reads_answer_with_readable_projects_only() {
         let _serial = test_lock();
         setup();
@@ -11048,26 +11700,6 @@ mod tests {
                 StatusCode::OK
             );
         }
-        assert_eq!(
-            call(
-                cookie("td"),
-                "list_issue_statuses",
-                json!({"project_id":"private"})
-            )
-            .await
-            .0,
-            StatusCode::FORBIDDEN
-        );
-        assert_eq!(
-            call(
-                cookie("tb"),
-                "list_issue_statuses",
-                json!({"project_id":"private"})
-            )
-            .await
-            .0,
-            StatusCode::OK
-        );
     }
 
     /// Document *folders* are a second container surface, and the create binder is the
@@ -11489,7 +12121,119 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn get_document_file_is_acl_scoped_and_id_strict_over_http() {
+        let _serial = test_lock();
+        setup();
+        let c = db::conn().unwrap();
+        c.execute("INSERT INTO documents(id,container_type,container_id,doc_type,title,body,version,archived,created_by) VALUES('file-acl','my-docs','pa','file','Spec','',1,0,'pa')", []).unwrap();
+        c.execute("INSERT INTO document_files(document_id,filename,mime,size,stored_path,uploaded_by) VALUES('file-acl','spec.pdf','application/pdf',7,'/var/space/blobs/file-acl.pdf','pa')", []).unwrap();
+        drop(c);
+
+        // Through the real router: `/api/cmd/{command}` with the production
+        // cookie header, not a direct handler call.
+        let post = |session: Option<&str>, body: Value| {
+            let mut request = axum::http::Request::builder()
+                .method("POST")
+                .uri("/api/cmd/get_document_file")
+                .header(header::CONTENT_TYPE, "application/json");
+            if let Some(token) = session {
+                request = request.header(header::COOKIE, format!("space_session={token}"));
+            }
+            let request = request.body(Body::from(body.to_string())).unwrap();
+            async move {
+                status_and_body(app_router().oneshot(request).await.unwrap().into_response()).await
+            }
+        };
+
+        let (status, value) = post(Some("ta"), json!({"document_id":"file-acl"})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        assert_eq!(value["value"]["filename"], json!("spec.pdf"));
+        assert_eq!(value["value"]["mime"], json!("application/pdf"));
+        let rendered = value.to_string();
+        assert!(
+            !rendered.contains("stored_path") && !rendered.contains("/var/space/blobs"),
+            "the on-disk location never leaves the server: {rendered}"
+        );
+
+        let (status, _) = post(Some("ta"), json!({"id":"file-acl"})).await;
+        assert_eq!(
+            status,
+            StatusCode::BAD_REQUEST,
+            "a generic `id` is not an accepted document id"
+        );
+
+        let (status, _) = post(Some("tb"), json!({"documentId":"file-acl"})).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "a stranger cannot read it");
+
+        let (status, _) = post(None, json!({"document_id":"file-acl"})).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED, "no session, no read");
+    }
+
     /// Without a session there is no resource owner to consent.
+    #[tokio::test]
+    async fn budget_commands_bind_the_session_and_apply_document_acl() {
+        let _serial = test_lock();
+        setup();
+        let c = db::conn().unwrap();
+        c.execute(
+            "ALTER TABLE documents ADD COLUMN kind TEXT NOT NULL DEFAULT 'markdown'",
+            [],
+        )
+        .ok();
+        let body = json!({
+            "currency":"EUR", "members":["pa"],
+            "columns":[
+                {"id":"date","label":"Date","type":"date"},
+                {"id":"paid_by","label":"Paid by","type":"person"},
+                {"id":"amount","label":"Amount","type":"number"},
+                {"id":"description","label":"Description","type":"text"},
+                {"id":"split","label":"Split among","type":"text"}
+            ], "rows":[]
+        })
+        .to_string();
+        c.execute("INSERT INTO documents(id,container_type,container_id,doc_type,title,body,version,archived,created_by,kind) VALUES('budget-acl','my-docs','pa','text','Budget',?1,1,0,'pa','budget')", [body]).unwrap();
+        let (status, _) = call(
+            cookie("tb"),
+            "budget_statement",
+            json!({"document_id":"budget-acl","month":null}),
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::FORBIDDEN,
+            "a stranger cannot read a budget by id"
+        );
+        let (status, statement) = call(
+            cookie("ta"),
+            "budget_statement",
+            json!({"document_id":"budget-acl","month":null}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{statement}");
+        let (status, _) = call(
+            cookie("tb"),
+            "budget_add_expense",
+            json!({"document_id":"budget-acl","input":{"amount":"1.00","description":"Denied"}}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "a stranger cannot append");
+        let (status, added) = call(
+            cookie("ta"),
+            "budget_add_expense",
+            json!({"document_id":"budget-acl","input":{"amount":"1.00","description":"Coffee"}}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{added}");
+        assert!(
+            added["value"]["body"]
+                .as_str()
+                .unwrap()
+                .contains("\"paid_by\":\"pa\""),
+            "the actor is session-bound"
+        );
+    }
+
     #[tokio::test]
     async fn oauth_authorize_requires_a_session() {
         let _serial = test_lock();

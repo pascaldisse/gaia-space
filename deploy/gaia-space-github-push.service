@@ -1,0 +1,14 @@
+[Unit]
+Description=GAIA Space GitHub push bridge
+After=network.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/gaia-space/github-push.env
+User=gaia-space
+WorkingDirectory=/opt/gaia-space-repo
+ExecStart=/usr/local/bin/bun run bridge/github-push/index.ts
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

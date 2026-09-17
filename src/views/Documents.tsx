@@ -6,11 +6,12 @@ import "../App.css";
 import "./Documents.css";
 import DocumentCreateDrawer, { type DocumentCreateMode } from "../components/DocumentCreateDrawer";
 import SheetEditor from "../components/SheetEditor";
+import Budget from "./Budget";
 import ConfirmDialog from "../components/ConfirmDialog";
 import PromptDialog from "../components/PromptDialog";
 import ContextMenu, { type ContextMenuItem } from "../components/ContextMenu";
 import DeleteButton from "../components/DeleteButton";
-import { Icon } from "../components/Icon";
+import { Icon, type IconName } from "../components/Icon";
 import { useDeepLink, hrefFor, linkEntity, linkProps, navigate, route } from "../router";
 import {
   documentsApi,
@@ -27,13 +28,15 @@ import {
   parseSheet,
   versionSnippet,
   serializeSheet,
-  type DocumentFilePreview,
+  type DocumentFile,
   type DocumentDiscussion,
   type FavoriteDocument,
 } from "../api/documents";
 import { chatApi, newId as newMessageId, type MessageView } from "../api/chat";
 import { channelFeedsApi } from "../api/channel-feeds";
 import { profileId as sessionProfileId, profileLocked, isWeb } from "../session";
+import { emptyBudget, parseBudget, serializeBudget, type BudgetDoc } from "../api/budget";
+import { personalApi } from "../api/personal";
 import { actingProfileId as chatActingProfileId } from "../chatIdentity";
 import { applyMarkdownCommand, sanitizeRichHtml, type MarkdownCommand } from "../richtext";
 import { blogsApi, type BlogPost } from "../api/blogs";
@@ -103,14 +106,28 @@ export default function Documents(props: { container?: ContainerType; containerI
   });
 
   const [projects] = createResource(() => documentsApi.listProjects());
-  const [selectedProjectId, setSelectedProjectId] = createSignal<string | null>(null);
+  const [selectedProjectIdState, setSelectedProjectId] = createSignal<string | null>(null);
+  // URL context is authoritative. Keeping it only in effects made an immediately mounted
+  // document view briefly render the prior library until its route observer had run.
+  const selectedProjectId = () => {
+    const r = route();
+    return r.view === "Documents" && r.containerType === "project" ? r.containerId ?? null : selectedProjectIdState();
+  };
   createEffect(() => {
     const list = projects();
-    if (list && list.length && !selectedProjectId()) setSelectedProjectId(list[0].id);
+    if (list && list.length && !selectedProjectIdState()) setSelectedProjectId(list[0].id);
   });
 
-  const [activeContainer, setActiveContainer] = createSignal<ContainerType>("my-docs");
-  const [selectedBookId, setSelectedBookId] = createSignal<string | null>(null);
+  const [activeContainerState, setActiveContainer] = createSignal<ContainerType>("my-docs");
+  const activeContainer = (): ContainerType => {
+    const r = route();
+    return r.view === "Documents" && r.containerType ? r.containerType as ContainerType : activeContainerState();
+  };
+  const [selectedBookIdState, setSelectedBookId] = createSignal<string | null>(null);
+  const selectedBookId = () => {
+    const r = route();
+    return r.view === "Documents" && r.containerType === "kb" ? r.containerId ?? null : selectedBookIdState();
+  };
   const [newBookName, setNewBookName] = createSignal("");
 
   const containerId = () => {
@@ -559,12 +576,34 @@ const [showArchived, setShowArchived] = createSignal(false);
   // ---- document CRUD ----
   const [newDocTitle, setNewDocTitle] = createSignal("");
 const [newDocBodyFormat, setNewDocBodyFormat] = createSignal<DocumentCreateType>("text");
-  const [selectedDocumentId, setSelectedDocumentId] = createSignal<string | null>(null);
+  type LocalDocumentSelection = { id: string | null; routeKey: string };
+  const routeKey = () => {
+    const r = route();
+    return [r.view, r.entityType ?? "", r.entityId ?? "", r.containerType ?? "", r.containerId ?? "", r.projectId ?? ""].join("\0");
+  };
+  const [localDocumentSelection, setLocalDocumentSelection] = createSignal<LocalDocumentSelection | null>(null);
+  const setSelectedDocumentId = (id: string | null) => setLocalDocumentSelection({ id, routeKey: routeKey() });
+  // A route is authoritative unless a local act (create/upload) selected a replacement
+  // while that exact route remained current. This avoids an effect-timing fallback to
+  // the library root without discarding an uploaded file's immediate preview.
+  const selectedDocumentId = () => {
+    const local = localDocumentSelection();
+    if (local?.routeKey === routeKey()) return local.id;
+    const r = route();
+    return r.view === "Documents" && r.entityType === "document" ? r.entityId ?? null : null;
+  };
   async function createDocument() {
     const title = newDocTitle().trim();
     const cid = containerId();
     if (!title || !cid) return;
     const id = newId("doc");
+    // A project budget starts with its actual roster (owner + project_members), not
+    // the organization directory. Personal/KB budgets start with their creator.
+    const budgetMembers = newDocBodyFormat() === "budget"
+      ? activeContainer() === "project"
+        ? await personalApi.projectMemberIds(cid)
+        : (actingProfileId() ? [actingProfileId()!] : [])
+      : [];
     const document: Document = {
       id,
       container_type: activeContainer(),
@@ -575,10 +614,10 @@ const [newDocBodyFormat, setNewDocBodyFormat] = createSignal<DocumentCreateType>
       doc_type: "text",
       // A table is a document KIND, not a text flavour: it keeps the plain body format
       // and carries its grid as the body the same versioning writes for prose.
-      body_format: newDocBodyFormat() === "sheet" ? "text" : (newDocBodyFormat() as DocumentBodyFormat),
-      kind: newDocBodyFormat() === "sheet" ? "sheet" : "markdown",
+      body_format: newDocBodyFormat() === "sheet" || newDocBodyFormat() === "budget" ? "text" : (newDocBodyFormat() as DocumentBodyFormat),
+      kind: newDocBodyFormat() === "sheet" ? "sheet" : newDocBodyFormat() === "budget" ? "budget" : "markdown",
       title,
-      body: newDocBodyFormat() === "sheet" ? serializeSheet(emptySheet()) : "",
+      body: newDocBodyFormat() === "sheet" ? serializeSheet(emptySheet()) : newDocBodyFormat() === "budget" ? serializeBudget(emptyBudget(budgetMembers)) : "",
       version: 1,
       archived: false,
       created_by: actingProfileId(),
@@ -626,22 +665,24 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
     if (!props.container) return;
     applyContainer(props.container, props.containerId);
   });
-  useDeepLink("document", (id) => {
-    setSelectedDocumentId(id);
-    if (route().containerType) return;
-    // container-less link (e.g. Goto hit): resolve the document's own container and
-    // rewrite the URL so address bar and UI agree.
-    const doc = allDocuments()?.find((d) => d.id === id);
+  useDeepLink("document", (id) => setSelectedDocumentId(id), () => setSelectedDocumentId(null));
+  // A resource may still be loading when the URL effect first opens a bare document.
+  // Resolve once its rows arrive, then replace that temporary history entry in place.
+  createEffect(() => {
+    const r = route();
+    if (r.view !== "Documents" || r.entityType !== "document" || !r.entityId || r.containerType) return;
+    const doc = allDocuments()?.find((d) => d.id === r.entityId);
     if (!doc) return;
     applyContainer(doc.container_type, doc.container_id ?? undefined);
-    linkEntity("document", id, { containerType: doc.container_type, containerId: doc.container_id ?? undefined });
-  }, () => setSelectedDocumentId(null));
+    linkEntity("document", r.entityId, { containerType: doc.container_type, containerId: doc.container_id ?? undefined }, true);
+  });
 
   const [editTitle, setEditTitle] = createSignal("");
   const [editBody, setEditBody] = createSignal("");
   // A sheet edits a parsed grid; the text body stays its single serialized source, so
   // saving, versions and restore keep using the one document save path.
   const [sheet, setSheet] = createSignal<SheetDoc>(emptySheet());
+const [budget, setBudget] = createSignal<BudgetDoc>(parseBudget(null));
   const [showPreview, setShowPreview] = createSignal(true);
   // sync editor fields when the *selected document id* changes — not on every refetch,
   // so in-progress edits survive background polling/refetches.
@@ -652,6 +693,7 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
       setEditTitle(doc?.title ?? "");
       setEditBody(doc?.body ?? "");
       if (doc?.kind === "sheet") setSheet(parseSheet(doc.body));
+if (doc?.kind === "budget") setBudget(parseBudget(doc.body));
     }
     return id;
   }, null);
@@ -816,8 +858,8 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
   const [downloading, setDownloading] = createSignal(false);
   async function downloadFile(doc: Document) {
     if (doc.doc_type !== "file") return;
-    const state = filePreview();
-    const name = (state?.status === "ok" ? state.preview.filename : null) ?? doc.title;
+    const state = fileFacts();
+    const name = (state?.status === "ok" ? state.file.filename : null) ?? doc.title;
     if (isWeb()) {
       const link = window.document.createElement("a");
       link.href = documentsApi.fileDownloadUrl(doc.id);
@@ -885,12 +927,20 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
     return folder ? `${place} / ${folder}` : place;
   };
 
-  // A preview is a convenience, never a gate: it can be slow, truncated, or missing
-  // bytes on disk, and in every one of those cases the reader still gets a reason and
-  // the file itself. So the fetch carries its own deadline and its failure is a VALUE,
-  // not a thrown resource error — a thrown one leaves the pane spinning forever.
-  type FilePreviewState =
-    | { status: "ok"; preview: DocumentFilePreview }
+  /** ── AN UPLOAD IS A FILE, NOT A PAGE ──────────────────────────────────────
+   *  Knowledge used to render uploads inside the pane: a PDF in an <object>, a
+   *  spreadsheet through a JS converter, a text file in a <pre>. In a column that
+   *  shares the width with a list and a history rail, every one of them arrived
+   *  cramped — a worse copy of the reader the person already owns. So the pane
+   *  stops imitating a viewer. It states WHAT the file is and hands over the bytes.
+   *
+   *  Written documents are unaffected: they ARE pages, and still render here.
+   *
+   *  The facts come from `get_document_file` — name, type, size, who uploaded it and
+   *  when — which reads a metadata row and NO bytes. The old path fetched the file
+   *  itself (base64 in a command response) only to print its name. */
+  type FileFactsState =
+    | { status: "ok"; file: DocumentFile }
     | { status: "error"; message: string };
   const filePreviewTimeoutMs = () => {
     const injected = (window as unknown as { __GAIA_FILE_PREVIEW_TIMEOUT_MS?: number }).__GAIA_FILE_PREVIEW_TIMEOUT_MS;
@@ -904,160 +954,118 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
       return await Promise.race([
         work,
         new Promise<never>((_, reject) => {
-          timer = setTimeout(() => reject(new Error("the preview took too long to load")), ms);
+          timer = setTimeout(() => reject(new Error("the file details took too long to load")), ms);
         }),
       ]);
     } finally {
       if (timer) clearTimeout(timer);
     }
   };
-  const [filePreview] = createResource(
+  /* The lookup's failure is a VALUE, not a thrown resource error: a thrown one leaves
+     the pane spinning forever, and a missing metadata row must never withhold the
+     download — the bytes have their own route and do not depend on this read. */
+  const [fileFacts] = createResource(
     () => (selectedDocument()?.doc_type === "file" ? selectedDocumentId() : null),
-    async (id): Promise<FilePreviewState | null> => {
+    async (id): Promise<FileFactsState | null> => {
       if (!id) return null;
       try {
-        return { status: "ok", preview: await withDeadline(documentsApi.readDocumentFile(id), filePreviewTimeoutMs()) };
+        const file = await withDeadline(documentsApi.getDocumentFile(id), filePreviewTimeoutMs());
+        if (!file) return { status: "error", message: "this document has no stored file" };
+        return { status: "ok", file };
       } catch (error) {
         return { status: "error", message: (error as Error)?.message ?? String(error) };
       }
     },
   );
-  const previewDataUrl = (p: DocumentFilePreview) =>
-    p.data_base64 ? `data:${p.mime};base64,${p.data_base64}` : "";
-  // The stored bytes have a stable URL in web mode: that is what makes a PDF viewable
-  // in the browser and every other type downloadable, instead of "it is on some disk".
+  // The stored bytes have a stable URL in web mode: that is what makes every type
+  // downloadable, instead of "it is on some disk".
   const fileHref = (documentId: string) =>
     isWeb() ? `${import.meta.env.BASE_URL}api/documents/files/${documentId}` : "";
-  // Office documents are zip archives, so nothing but a real reader can show them.
-  // Both readers are pure-JS and loaded on demand: a person who never opens a .docx
-  // never downloads the converter.
-  const OFFICE_MIME: Record<string, "docx" | "xlsx"> = {
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
-    "application/vnd.ms-excel": "xlsx",
-  };
-  const officeKind = (preview: DocumentFilePreview): "docx" | "xlsx" | null => {
-    const byMime = OFFICE_MIME[preview.mime];
-    if (byMime) return byMime;
-    const name = preview.filename.toLowerCase();
-    if (name.endsWith(".docx")) return "docx";
-    if (name.endsWith(".xlsx") || name.endsWith(".xls")) return "xlsx";
-    return null;
-  };
-  const base64ToBytes = (value: string) => {
-    const binary = atob(value);
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
-    return bytes;
-  };
-  async function officeBytes(documentId: string, preview: DocumentFilePreview): Promise<ArrayBuffer> {
-    // Web has the whole file behind a URL; desktop has the preview payload, which the
-    // backend may have capped — a truncated archive is unreadable, and says so.
-    if (isWeb()) {
-      const response = await fetch(fileHref(documentId), { credentials: "include" });
-      if (!response.ok) throw new Error(`could not read the file (HTTP ${response.status})`);
-      return await response.arrayBuffer();
-    }
-    if (!preview.data_base64) throw new Error("no bytes available for this file");
-    if (preview.truncated) throw new Error("the stored preview is truncated, so the archive cannot be opened");
-    return base64ToBytes(preview.data_base64).buffer as ArrayBuffer;
-  }
-  function OfficePreview(props: { preview: DocumentFilePreview; kind: "docx" | "xlsx" }) {
-    const [rendered] = createResource(
-      () => ({ id: selectedDocumentId(), preview: props.preview, kind: props.kind }),
-      async ({ id, preview, kind }) => {
-        if (!id) return null;
-        const bytes = await officeBytes(id, preview);
-        if (kind === "docx") {
-          const mammoth = await import("mammoth");
-          const result = await mammoth.convertToHtml({ arrayBuffer: bytes });
-          return sanitizeRichHtml(result.value);
-        }
-        const XLSX = await import("xlsx");
-        const book = XLSX.read(bytes, { type: "array" });
-        // Every sheet, each under its own name: a workbook is not just its first tab.
-        return book.SheetNames.map((name) =>
-          `<h3>${name.replace(/[<>&]/g, "")}</h3>${sanitizeRichHtml(XLSX.utils.sheet_to_html(book.Sheets[name]))}`,
-        ).join("");
-      },
-    );
-    return (
-      <div class="office-preview">
-        <Show when={!rendered.loading} fallback={<p class="hint" role="status">Rendering {props.preview.filename}…</p>}>
-          <Show
-            when={!rendered.error}
-            fallback={<p class="error-bar" role="alert">{String(rendered.error)}</p>}
-          >
-            <div class="office-body" innerHTML={rendered() ?? ""} />
-          </Show>
-        </Show>
-      </div>
-    );
-  }
 
-  /** No preview: say why, then hand over the bytes anyway — the stored file has its own
-   *  URL, so "we could not render it" never has to mean "you cannot have it". */
-  function FilePreviewUnavailable(props: { message: string }) {
+  /** ONE WORD FOR THE KIND, and it is the word people use — "PDF", "Word document",
+   *  "Image", not `application/vnd.openxmlformats-…`. A mime type is a machine's
+   *  answer to "what is this"; printing it at a reader was never an answer. */
+  const FILE_KINDS: { test: (mime: string, name: string) => boolean; label: string; icon: IconName }[] = [
+    { test: (m) => m === "application/pdf", label: "PDF document", icon: "book" },
+    { test: (m, n) => m.startsWith("image/") || /\.(png|jpe?g|gif|webp|svg|heic)$/.test(n), label: "Image", icon: "grid" },
+    { test: (m, n) => /wordprocessingml|msword/.test(m) || /\.docx?$/.test(n), label: "Word document", icon: "book" },
+    { test: (m, n) => /spreadsheetml|ms-excel/.test(m) || /\.xlsx?$/.test(n), label: "Spreadsheet", icon: "columns" },
+    { test: (m, n) => /presentationml|ms-powerpoint/.test(m) || /\.pptx?$/.test(n), label: "Presentation", icon: "layers" },
+    { test: (m, n) => /zip|compressed|tar|rar|7z/.test(m) || /\.(zip|tar|gz|rar|7z)$/.test(n), label: "Archive", icon: "package" },
+    { test: (m) => m.startsWith("video/"), label: "Video", icon: "grid" },
+    { test: (m) => m.startsWith("audio/"), label: "Audio", icon: "grid" },
+    { test: (m, n) => m.startsWith("text/") || /\.(txt|md|csv|json|ya?ml|log)$/.test(n), label: "Text file", icon: "book-nav" },
+  ];
+  const fileKind = (mime: string, filename: string) => {
+    const name = filename.toLowerCase();
+    return FILE_KINDS.find((kind) => kind.test(mime, name)) ?? { label: "File", icon: "book-nav" as IconName };
+  };
+  const fileExtension = (filename: string) => {
+    const dot = filename.lastIndexOf(".");
+    return dot > 0 && dot < filename.length - 1 ? filename.slice(dot + 1).toUpperCase() : "FILE";
+  };
+  /** Binary-prefixed, one decimal, the unit a person reads. `0 bytes` stays `0 bytes`:
+   *  an empty upload is a fact worth showing plainly. */
+  const humanSize = (bytes: number) => {
+    if (!Number.isFinite(bytes) || bytes < 0) return "unknown size";
+    if (bytes < 1024) return `${bytes} bytes`;
+    const units = ["KB", "MB", "GB", "TB"];
+    let value = bytes / 1024;
+    let unit = 0;
+    while (value >= 1024 && unit < units.length - 1) { value /= 1024; unit += 1; }
+    return `${value >= 10 ? Math.round(value) : value.toFixed(1)} ${units[unit]}`;
+  };
+
+  /** THE CARD. One object, stated once: what it is, how big, who put it there, and the
+   *  one act it supports. It is the shape an attachment already has in a channel, at
+   *  the size a library page can afford to give it. */
+  function FileCard(props: { file: DocumentFile | null; message?: string }) {
     const doc = () => selectedDocument();
-    const name = () => doc()?.title ?? "file";
+    const name = () => props.file?.filename ?? doc()?.title ?? "file";
+    const kind = () => fileKind(props.file?.mime ?? "", name());
+    const uploader = () => {
+      const id = props.file?.uploaded_by;
+      if (!id) return null;
+      const person = profiles()?.find((p) => p.id === id);
+      return person?.display_name || person?.username || null;
+    };
+    const uploadedAt = () =>
+      props.file?.uploaded_at ? new Date(props.file.uploaded_at * 1000).toLocaleDateString() : null;
     return (
-      <div class="file-preview file-preview-error">
-        <p class="error-bar" role="alert">Preview unavailable: {props.message}</p>
-        <Show when={isWeb()}>
-          <p>
-            <a class="file-download" href={fileHref(selectedDocumentId() ?? "")} download={name()}>
-              ↓ Download {name()}
-            </a>
-          </p>
-        </Show>
-      </div>
-    );
-  }
-
-  function FilePreview(props: { preview: DocumentFilePreview }) {
-    const p = () => props.preview;
-    return (
-      <div class="file-preview" data-mime={p().mime}>
-        <div class="file-meta">
-          <strong>{p().filename}</strong>
-          <span>{p().mime}</span>
-          <span>{p().size} bytes</span>
-          <Show when={p().truncated}><span class="hint">preview truncated</span></Show>
+      <div class="doc-file-card" data-kind={kind().label}>
+        <div class="dfc-glyph" aria-hidden="true">
+          <Icon name={kind().icon} size={26} />
+          <span class="dfc-ext">{fileExtension(name())}</span>
         </div>
-        <Show when={p().mime.startsWith("image/")}>
-          <img class="file-image" src={previewDataUrl(p())} alt={p().filename} />
-        </Show>
-        <Show when={p().text !== null}>
-          <pre class="file-text">{p().text}</pre>
-        </Show>
-        <Show when={isWeb() && p().mime === "application/pdf"}>
-          <object
-            class="file-pdf"
-            data={fileHref(selectedDocumentId() ?? "")}
-            type="application/pdf"
-            aria-label={`PDF preview of ${p().filename}`}
-          >
-            <a href={fileHref(selectedDocumentId() ?? "")}>Open {p().filename}</a>
-          </object>
-        </Show>
-        <Show when={isWeb()}>
-          <p>
-            <a class="file-download" href={fileHref(selectedDocumentId() ?? "")} download={p().filename}>
-              ↓ Download {p().filename}
-            </a>
+        <div class="dfc-facts">
+          <h2 class="dfc-name" title={name()}>{name()}</h2>
+          <p class="dfc-meta">
+            <span>{kind().label}</span>
+            <Show when={props.file}>{(file) => <><span class="dfc-sep">·</span><span>{humanSize(file().size)}</span></>}</Show>
+            <Show when={uploadedAt()}>{(when) => <><span class="dfc-sep">·</span><span>Added {when()}</span></>}</Show>
+            <Show when={uploader()}>{(who) => <><span class="dfc-sep">·</span><span>by {who()}</span></>}</Show>
           </p>
-        </Show>
-        <Show when={officeKind(p())}>
-          {(kind) => <OfficePreview preview={p()} kind={kind()} />}
-        </Show>
-        <Show when={
-          p().text === null
-          && !p().mime.startsWith("image/")
-          && !officeKind(p())
-          && !(isWeb() && p().mime === "application/pdf")
-        }>
-          <p class="hint">No inline preview for this type — the file is stored beside the database.</p>
-        </Show>
+          {/* THE PANE NO LONGER PRETENDS TO BE A VIEWER, so it says so once instead of
+              leaving the reader waiting for something that is not coming. */}
+          <p class="dfc-hint">Download the file to open it in the reader it belongs to.</p>
+          <Show when={props.message}>
+            {(message) => <p class="dfc-note" role="alert">Details unavailable: {message()}. The file itself is still here.</p>}
+          </Show>
+          <div class="dfc-actions">
+            <Show
+              when={isWeb()}
+              fallback={
+                <button type="button" class="primary dfc-download" disabled={downloading()} onClick={() => { const d = doc(); if (d) void downloadFile(d); }}>
+                  {downloading() ? "Saving…" : "Download"}
+                </button>
+              }
+            >
+              <a class="primary dfc-download file-download" href={fileHref(selectedDocumentId() ?? "")} download={name()}>
+                Download
+              </a>
+            </Show>
+          </div>
+        </div>
       </div>
     );
   }
@@ -1107,7 +1115,7 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
 
   // ---- publication (public link) ----
   const [publication, { refetch: refetchPublication }] = createResource(selectedDocumentId, (id) =>
-    id ? documentsApi.getPublication(id) : Promise.resolve(null),
+    id ? documentsApi.getPublication(id).catch(() => null) : Promise.resolve(null),
   );
   async function togglePublished() {
     const id = selectedDocumentId();
@@ -1166,13 +1174,16 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
       const body =
         doc.kind === "sheet"
           ? serializeSheet(sheet())
-          : doc.body_format === "rich-text"
+          : doc.kind === "budget"
+            ? serializeBudget(budget())
+            : doc.body_format === "rich-text"
             ? sanitizeRichHtml(editBody())
             : editBody();
       const saved = await documentsApi.saveDocument(doc.id, editTitle().trim() || doc.title, body, actingProfileId());
       setEditTitle(saved.title);
       setEditBody(saved.body ?? "");
       if (saved.kind === "sheet") setSheet(parseSheet(saved.body));
+if (saved.kind === "budget") setBudget(parseBudget(saved.body));
       await refetchDocuments();
       await refetchVersions();
     } catch (e) {
@@ -1206,6 +1217,7 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
     try {
       const restored = await documentsApi.restoreDocVersion(doc.id, version, actingProfileId());
       if (restored.kind === "sheet") setSheet(parseSheet(restored.body));
+if (restored.kind === "budget") setBudget(parseBudget(restored.body));
       // resync the editor fields directly from the returned document — the id-keyed
       // effect below only refires on document *selection* change, not on content
       // changes to the currently-open document (restore/save happen in place).
@@ -1890,9 +1902,8 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
                   >
                     {isFavorite(doc().id) ? "★ Favourite" : "☆ Favourite"}
                   </button>
-{/* A table has no text flavour and no preview: neither control would say anything
-    about it, so neither is on the page. */}
-<Show when={doc().kind !== "sheet"}>
+{/* Tables and budgets have no text flavour or preview. */}
+<Show when={doc().kind !== "sheet" && doc().kind !== "budget"}>
 <select aria-label="Document body type" value={doc().body_format} onChange={(e) => void changeBodyFormat(doc(), e.currentTarget.value as DocumentBodyFormat)}>
 <option value="text">Text / Markdown</option><option value="rich-text">Rich text</option><option value="checklist">Checklist</option><option value="code">Code</option>
 </select>
@@ -1900,7 +1911,7 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
                   <Show when={doc().archived}>
                     <span class="archived-chip">archived</span>
                   </Show>
-                  <Show when={doc().kind !== "sheet"}>
+                  <Show when={doc().kind !== "sheet" && doc().kind !== "budget"}>
                     <button class="ghost small" onClick={() => setShowPreview((v) => !v)}>
                       {showPreview() ? "hide preview" : "show preview"}
                     </button>
@@ -1959,10 +1970,27 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
                 </div>
 
                 <Show when={doc().doc_type === "file"} fallback={
-                  <Show when={doc().kind !== "sheet"} fallback={
-                    <div class="editor-panes">
-                      <SheetEditor sheet={sheet()} onChange={setSheet} disabled={doc().archived} />
-                    </div>
+                  <Show when={doc().kind !== "sheet" && doc().kind !== "budget"} fallback={
+                    <Show when={doc().kind === "budget"} fallback={
+                      <div class="editor-panes">
+                        <SheetEditor sheet={sheet()} onChange={setSheet} disabled={doc().archived} />
+                      </div>
+                    }>
+                      <Budget
+                        document={doc()}
+                        budget={budget()}
+                        profiles={profiles() ?? []}
+                        profileId={sessionProfileId() || actingProfileId()}
+                        disabled={doc().archived}
+                        onChange={setBudget}
+                        onReload={async () => {
+                          const fresh = await documentsApi.getDocument(doc().id);
+                          if (fresh?.kind === "budget") setBudget(parseBudget(fresh.body));
+                          await refetchDocuments();
+                        }}
+                        onOpenDocument={(id) => navigate(docRoute(id))}
+                      />
+                    </Show>
                   }>
                     <div class="editor-panes" classList={{ split: showPreview() }}>
                       <EditorSurface format={doc().body_format} />
@@ -1973,13 +2001,13 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
                   </Show>
                 }>
                   <div class="editor-panes">
-                    <Show when={filePreview()} fallback={<p class="hint pad" role="status">Loading file…</p>}>
+                    <Show when={fileFacts()} fallback={<p class="hint pad" role="status">Loading file…</p>}>
                       {(state) => (
                         <Show
-                          when={state().status === "ok" ? (state() as { status: "ok"; preview: DocumentFilePreview }).preview : null}
-                          fallback={<FilePreviewUnavailable message={(state() as { status: "error"; message: string }).message} />}
+                          when={state().status === "ok" ? (state() as { status: "ok"; file: DocumentFile }).file : null}
+                          fallback={<FileCard file={null} message={(state() as { status: "error"; message: string }).message} />}
                         >
-                          {(preview) => <FilePreview preview={preview()} />}
+                          {(file) => <FileCard file={file()} />}
                         </Show>
                       )}
                     </Show>
@@ -2036,21 +2064,23 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
                   </select>
                   <button class="primary small" disabled={!shareRecipientId()} onClick={addAccessRecipient}>Add</button>
                 </div>
-                <Show when={!access.loading} fallback={<p class="hint">Loading access…</p>}>
-                  <ul class="sharing-list">
-                    <For each={access() ?? []}>
-                      {(permission) => (
-                        <li>
-                          <span class="sharing-recipient">{recipientName(permission)}</span>
-                          <span class="sharing-kind">{permission.recipient_type === "profile" ? "person" : "team"}</span>
-                          <span class="sharing-level">{permission.access_level}</span>
-                          <button class="ghost small" aria-label={`Remove ${recipientName(permission)}`} onClick={() => removeAccessRecipient(permission)}>Remove</button>
-                        </li>
-                      )}
-                    </For>
-                  </ul>
-                  <Show when={(access() ?? []).length === 0}>
-                    <p class="hint">Only you can access this document.</p>
+                <Show when={!access.error} fallback={<p class="error-bar" role="alert">Document access could not be loaded: {String(access.error)}</p>}>
+                  <Show when={!access.loading} fallback={<p class="hint">Loading access…</p>}>
+                    <ul class="sharing-list">
+                      <For each={access() ?? []}>
+                        {(permission) => (
+                          <li>
+                            <span class="sharing-recipient">{recipientName(permission)}</span>
+                            <span class="sharing-kind">{permission.recipient_type === "profile" ? "person" : "team"}</span>
+                            <span class="sharing-level">{permission.access_level}</span>
+                            <button class="ghost small" aria-label={`Remove ${recipientName(permission)}`} onClick={() => removeAccessRecipient(permission)}>Remove</button>
+                          </li>
+                        )}
+                      </For>
+                    </ul>
+                    <Show when={(access() ?? []).length === 0}>
+                      <p class="hint">Only you can access this document.</p>
+                    </Show>
                   </Show>
                 </Show>
               </section>
@@ -2058,28 +2088,30 @@ try { await documentsApi.updateDocument({ ...doc, body_format: bodyFormat }); aw
             <div class="section-label" style="padding:0 0 0.4em">
               Version history
             </div>
-            <Show when={!versions.loading} fallback={<p class="hint">Loading…</p>}>
-              <ul class="version-list">
-                <For each={versions()}>
-                  {(v) => (
-                    <li classList={{ current: v.version === selectedDocument()?.version }}>
-                      <div class="version-head">
-                        <strong>v{v.version}</strong>
-                        <span class="version-time">{when(v.created_at)}</span>
-                      </div>
-                      <div class="version-author">{profiles()?.find((p) => p.id === v.created_by)?.display_name ?? v.created_by ?? "—"}</div>
-                      {/* History speaks about the document, not about its storage: a
-                          table is counted and named, prose keeps its text preview. */}
-                      <div class="version-snippet">{versionSnippet(selectedDocument()?.kind, v.body)}</div>
-                      <Show when={v.version !== selectedDocument()?.version}>
-                        <button class="ghost small" onClick={() => restoreVersion(v.version)}>
-                          Restore
-                        </button>
-                      </Show>
-                    </li>
-                  )}
-                </For>
-              </ul>
+            <Show when={!versions.error} fallback={<p class="error-bar" role="alert">Version history could not be loaded: {String(versions.error)}</p>}>
+              <Show when={!versions.loading} fallback={<p class="hint">Loading…</p>}>
+                <ul class="version-list">
+                  <For each={versions()}>
+                    {(v) => (
+                      <li classList={{ current: v.version === selectedDocument()?.version }}>
+                        <div class="version-head">
+                          <strong>v{v.version}</strong>
+                          <span class="version-time">{when(v.created_at)}</span>
+                        </div>
+                        <div class="version-author">{profiles()?.find((p) => p.id === v.created_by)?.display_name ?? v.created_by ?? "—"}</div>
+                        {/* History speaks about the document, not about its storage: a
+                            table is counted and named, prose keeps its text preview. */}
+                        <div class="version-snippet">{versionSnippet(selectedDocument()?.kind, v.body)}</div>
+                        <Show when={v.version !== selectedDocument()?.version}>
+                          <button class="ghost small" onClick={() => restoreVersion(v.version)}>
+                            Restore
+                          </button>
+                        </Show>
+                      </li>
+                    )}
+                  </For>
+                </ul>
+              </Show>
             </Show>
           </aside>
         </Show>

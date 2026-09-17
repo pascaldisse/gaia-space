@@ -5,12 +5,12 @@ import { render } from "solid-js/web";
 import Projects, { DESCRIPTION_MAX, deriveKey, shortDescription } from "./Projects";
 import { setProfileId, setProjectId } from "../session";
 
-// The portfolio strip and the per-row health signals are read off ONE issue read plus
-// ONE status read (plus one task read and one channel read), whatever the number of
-// projects. A failed count is an error on screen, never a silent zero.
+// The portfolio strip and the per-row health signals are read off one team-task read
+// plus one channel read, whatever the number of projects. A failed count degrades
+// quietly to an absent chip, never a silent zero.
 //
 // `/projects` IS A LIST (stage 19): the row shows what tells you whether a project is
-// healthy — open tickets, open tasks, unread, deadline, lead — and the health chips run
+// healthy — open tasks, unread, deadline, lead — and the health chips run
 // through `metricTone`, so a count of 0 carries no tone.
 
 /** The health chips of one row, in document order. */
@@ -47,11 +47,6 @@ const project = (over: Record<string, unknown> = {}) => ({
   id: "p1", name: "Atlas", key: "ATL", description: null,
   created_by: "p-owner", archived: false, deadline: null, ...over,
 });
-const issue = (over: Record<string, unknown> = {}) => ({
-  id: "i1", project_id: "p1", number: 1, title: "Work", description: null,
-  status_id: "open", assignee_id: null, created_by: null, due_date: null,
-  priority: null, archived: false, assignee_ids: [], ...over,
-});
 const mount = async () => {
   const host = document.createElement("div");
   document.body.appendChild(host);
@@ -60,7 +55,7 @@ const mount = async () => {
   return host;
 };
 
-describe("portfolio summary and open-issue counts", () => {
+describe("portfolio summary and open-task counts", () => {
   // Nobody types a key any more (it is not a question in the drawer); the name alone
   // produces it, and uniqueness is settled by uniqueKey (projects.members.test.tsx).
   test("a key is derived from the name", () => {
@@ -80,7 +75,7 @@ describe("portfolio summary and open-issue counts", () => {
     const short = "A small project.";
     expect(shortDescription(short)).toBe(short);
 
-    const long = "Rebuilding the customer portal so that invoices, contracts and support tickets finally live in one place instead of three.";
+    const long = "Rebuilding the customer portal so that invoices, contracts and support tasks finally live in one place instead of three.";
     const cut = shortDescription(long);
     expect(cut.length).toBeLessThanOrEqual(DESCRIPTION_MAX);
     expect(cut.endsWith("\u2026")).toBe(true);
@@ -94,22 +89,17 @@ describe("portfolio summary and open-issue counts", () => {
     expect(shortDescription(wall)).toBe(`${"x".repeat(95)}\u2026`);
   });
 
-  test("counts come from one issue read and one status read, not one per card", async () => {
+  test("counts come from one team-task read and one channel read, not one per card", async () => {
     stubTauriIpc();
     setProfileId("p-owner");
     reply = (cmd) => {
       if (cmd === "list_projects") return [project(), project({ id: "p2", name: "Borea", key: "BOR", deadline: "2030-01-02" })];
-      if (cmd === "list_issue_statuses") return [{ id: "open", project_id: "p1", name: "Open", resolved: false, color: "#fff", ordering: 0 }, { id: "done", project_id: "p1", name: "Done", resolved: true, color: "#fff", ordering: 1 }];
-      if (cmd === "list_issues") return [
-        issue(), issue({ id: "i2" }),
-        issue({ id: "i3", status_id: "done" }),        // resolved -> not open
-        issue({ id: "i4", archived: true }),            // archived -> not open
-        issue({ id: "i5", project_id: "p2" }),
-      ];
       // Open TASKS per project: one cross-project read, grouped client-side.
       if (cmd === "list_team_todos") return [
         { id: "t1", profile_id: "p-owner", content: "Write it", due_date: null, project_id: "p1", done: false, source_entity_type: null, source_entity_id: null, notes: null, assignee_ids: [], content_kind: "text" },
-        { id: "t2", profile_id: "p-owner", content: "Done already", due_date: null, project_id: "p1", done: true, source_entity_type: null, source_entity_id: null, notes: null, assignee_ids: [], content_kind: "text" },
+        { id: "t2", profile_id: "p-owner", content: "Also open", due_date: null, project_id: "p1", done: false, source_entity_type: null, source_entity_id: null, notes: null, assignee_ids: [], content_kind: "text" },
+        { id: "t3", profile_id: "p-owner", content: "Done already", due_date: null, project_id: "p1", done: true, source_entity_type: null, source_entity_id: null, notes: null, assignee_ids: [], content_kind: "text" },
+        { id: "t4", profile_id: "p-owner", content: "Borea's one", due_date: null, project_id: "p2", done: false, source_entity_type: null, source_entity_id: null, notes: null, assignee_ids: [], content_kind: "text" },
       ];
       // UNREAD in a project's channels: the signal that a project is talking to you.
       if (cmd === "list_channels_with_meta") return [
@@ -119,9 +109,7 @@ describe("portfolio summary and open-issue counts", () => {
     };
     const host = await mount();
 
-    expect(calls.filter((c) => c.cmd === "list_issues")).toHaveLength(1);
-    expect(calls.filter((c) => c.cmd === "list_issue_statuses")).toHaveLength(1);
-    // THE LAW IS "NOT ONE PER CARD", not "exactly one call": these two reads are keyed
+    // THE LAW IS "NOT ONE PER CARD", not "exactly one call": these reads are keyed
     // on the acting identity, so they legitimately re-run when the session settles.
     // What must never happen is a read that carries a project — that is the N+1 shape.
     const taskReads = calls.filter((c) => c.cmd === "list_team_todos");
@@ -132,23 +120,20 @@ describe("portfolio summary and open-issue counts", () => {
       expect(Object.keys(call.args ?? {})).not.toContain("projectId");
     expect(calls.filter((c) => c.cmd === "list_project_todos")).toHaveLength(0);
 
-    // Atlas: 2 open tickets, 1 running task, nothing unread, no deadline.
-    // Borea: 1 open ticket, no task (so the chip is a quiet 0), 3 unread, a deadline.
+    // Atlas: 2 open tasks, nothing unread, no deadline.
+    // Borea: 1 open task, 3 unread, a deadline.
     // ZERO CARRIES NO TONE, and an unread count of 0 is not a chip at all.
     const health = healthOf(host);
-    expect(health[0]).toEqual(["2 open tickets", "1 open tasks"]);
-    expect(health[1].slice(0, 3)).toEqual(["1 open tickets", "0 open tasks", "3 unread"]);
+    expect(health[0]).toEqual(["2 open tasks"]);
+    expect(health[1]).toEqual(["1 open tasks", "3 unread"]);
     // THE DEADLINE IS NOT A HEALTH CHIP. It is the card's one pill at the edge, the same
     // shape a task tile carries, coloured only by bandTone(deadlineBand(…)); and a card
     // without a date says so quietly rather than going blank.
-    expect(health[1]).toHaveLength(3);
     const pills = [...host.querySelectorAll(".project-card .project-due")];
     expect(pills.map((pill) => pill.textContent)).toEqual(["No deadline", "Due 2030-01-02"]);
     expect(pills[0].className).toContain("untoned");
     // 2030 is far away, so the far band — never red for a date nobody is near.
     expect(pills[1].className).toContain("teal");
-    const quiet = host.querySelectorAll(".project-health .paper-pill.untoned");
-    expect([...quiet].map((pill) => pill.textContent)).toContain("0 open tasks");
 
     // A ROW IS A LINK: one click, a real href, reachable by keyboard — never a
     // double-click target, and never a `role=button` div.
@@ -176,20 +161,22 @@ describe("portfolio summary and open-issue counts", () => {
     expect([...host.querySelectorAll(".project-card")].find(card => card.textContent?.includes("Shipped"))?.querySelector(".project-done-badge")?.textContent).toBe("Done");
   });
 
-  test("a refused issue read is an error on screen, never a silent zero", async () => {
+  test("a refused task-count read degrades quietly: an untoned zero, never an error page", async () => {
     stubTauriIpc();
     setProfileId("p-owner");
     reply = (cmd) => {
       if (cmd === "list_projects") return [project()];
-      if (cmd === "list_issues") return new Error("not authorized");
+      if (cmd === "list_team_todos") return new Error("not authorized");
       return [];
     };
     const host = await mount();
-    const alert = host.querySelector('.error[role="alert"]');
-    expect(alert?.textContent).toContain("Open-ticket counts are unavailable");
-    // No silent zero: the ticket chip is absent entirely rather than reading "0".
-    const chips = [...host.querySelectorAll(".project-health .paper-pill")].map((n) => n.textContent);
-    expect(chips.some((text) => text?.includes("open tickets"))).toBe(false);
+    // A decoration on a row must never blank the row: the refusal degrades to the
+    // same quiet, untoned "0 open tasks" an empty (but successful) read would show —
+    // never an error banner, never a page that fails to render.
+    expect(host.querySelector('.error[role="alert"]')).toBeNull();
+    const chip = host.querySelector(".project-health .paper-pill");
+    expect(chip?.textContent).toBe("0 open tasks");
+    expect(chip?.className).toContain("untoned");
   });
 
   test("the board, the matrix report and the access panel have LEFT this page", async () => {

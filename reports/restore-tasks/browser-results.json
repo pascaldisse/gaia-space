@@ -1,0 +1,143 @@
+{
+  "results": [
+    {
+      "path": "todo",
+      "width": 1440,
+      "title": "My tasks",
+      "rows": 2,
+      "geometry": {
+        "width": 1440,
+        "scroll": 1440,
+        "content": [
+          {
+            "x": 372,
+            "width": 1068,
+            "scroll": 1068
+          }
+        ]
+      }
+    },
+    {
+      "path": "to-do",
+      "width": 1440,
+      "title": "My tasks",
+      "rows": 2,
+      "geometry": {
+        "width": 1440,
+        "scroll": 1440,
+        "content": [
+          {
+            "x": 372,
+            "width": 1068,
+            "scroll": 1068
+          }
+        ]
+      }
+    },
+    {
+      "path": "team-tasks",
+      "width": 1440,
+      "title": "Team tasks",
+      "rows": 5,
+      "geometry": {
+        "width": 1440,
+        "scroll": 1440,
+        "content": [
+          {
+            "x": 372,
+            "width": 1068,
+            "scroll": 1068
+          }
+        ]
+      }
+    },
+    {
+      "path": "task-ledger",
+      "width": 1440,
+      "title": "Task Ledger",
+      "rows": 329,
+      "geometry": {
+        "width": 1440,
+        "scroll": 1440,
+        "content": [
+          {
+            "x": 384,
+            "width": 1056,
+            "scroll": 1056
+          }
+        ]
+      }
+    },
+    {
+      "path": "todo",
+      "width": 390,
+      "title": "My tasks",
+      "rows": 2,
+      "geometry": {
+        "width": 390,
+        "scroll": 390,
+        "content": [
+          {
+            "x": 0,
+            "width": 390,
+            "scroll": 390
+          }
+        ]
+      }
+    },
+    {
+      "path": "to-do",
+      "width": 390,
+      "title": "My tasks",
+      "rows": 2,
+      "geometry": {
+        "width": 390,
+        "scroll": 390,
+        "content": [
+          {
+            "x": 0,
+            "width": 390,
+            "scroll": 390
+          }
+        ]
+      }
+    },
+    {
+      "path": "team-tasks",
+      "width": 390,
+      "title": "Team tasks",
+      "rows": 5,
+      "geometry": {
+        "width": 390,
+        "scroll": 390,
+        "content": [
+          {
+            "x": 0,
+            "width": 390,
+            "scroll": 390
+          }
+        ]
+      }
+    },
+    {
+      "path": "task-ledger",
+      "width": 390,
+      "title": "Task Ledger",
+      "rows": 329,
+      "geometry": {
+        "width": 390,
+        "scroll": 390,
+        "content": [
+          {
+            "x": 0,
+            "width": 390,
+            "scroll": 390
+          }
+        ]
+      }
+    }
+  ],
+  "composer": "opened + cancelled",
+  "reload": "My tasks",
+  "errors": []
+}

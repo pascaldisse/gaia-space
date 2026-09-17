@@ -196,7 +196,7 @@ export default function Reviews() {
     selectedId,
     (id) => (id ? reviewApi.listMergeRuns(id) : Promise.resolve([])),
   );
-  const [externalIssueLinks, { refetch: refetchExternalIssueLinks }] = createResource(
+  const [externalLinks, { refetch: refetchExternalLinks }] = createResource(
     selectedId,
     (id) => (id ? reviewApi.listExternalIssueLinks(id) : Promise.resolve([])),
   );
@@ -457,24 +457,24 @@ export default function Reviews() {
     }
   }
 
-  // ---------- external issue links (canonical URLs stay in their tracker) ----------
-const [externalIssueUrl, setExternalIssueUrl] = createSignal("");
-const [externalIssueTitle, setExternalIssueTitle] = createSignal("");
-async function addExternalIssueLink(e: SubmitEvent) {
+  // ---------- external links (canonical URLs stay in their tracker) ----------
+const [externalLinkUrl, setExternalLinkUrl] = createSignal("");
+const [externalLinkTitle, setExternalLinkTitle] = createSignal("");
+async function addExternalLink(e: SubmitEvent) {
   e.preventDefault();
   const reviewId = selectedId();
-  if (!reviewId || !externalIssueUrl().trim()) return;
+  if (!reviewId || !externalLinkUrl().trim()) return;
   try {
     await reviewApi.createExternalIssueLink({
       id: newId("external-issue"), review_id: reviewId,
-      external_url: externalIssueUrl().trim(), title: externalIssueTitle().trim() || null,
+      external_url: externalLinkUrl().trim(), title: externalLinkTitle().trim() || null,
     });
-    setExternalIssueUrl(""); setExternalIssueTitle("");
-    refetchExternalIssueLinks();
+    setExternalLinkUrl(""); setExternalLinkTitle("");
+    refetchExternalLinks();
   } catch (err) { setError(String(err)); }
 }
-async function removeExternalIssueLink(id: string) {
-  try { await reviewApi.deleteExternalIssueLink(id); refetchExternalIssueLinks(); }
+async function removeExternalLink(id: string) {
+  try { await reviewApi.deleteExternalIssueLink(id); refetchExternalLinks(); }
   catch (err) { setError(String(err)); }
 }
 // ---------- external checks (CI/scanners report in; the gate waits on non-SUCCEEDED) ----------
@@ -924,17 +924,17 @@ async function removeExternalIssueLink(id: string) {
                   </form>
                 </details>
 
-                <section class="external-issue-links">
-<h3>External tickets ({externalIssueLinks()?.length ?? 0})</h3>
+                <section class="external-links">
+<h3>External links ({externalLinks()?.length ?? 0})</h3>
 <ul>
-<For each={externalIssueLinks()} fallback={<li class="hint">No external tickets linked.</li>}>
-{(link) => <li><a href={link.external_url} target="_blank" rel="noopener noreferrer">{link.title || link.external_url}</a><button class="ghost small" aria-label={`Remove external ticket ${link.title || link.external_url}`} onClick={() => removeExternalIssueLink(link.id)}>×</button></li>}
+<For each={externalLinks()} fallback={<li class="hint">No external links linked.</li>}>
+{(link) => <li><a href={link.external_url} target="_blank" rel="noopener noreferrer">{link.title || link.external_url}</a><button class="ghost small" aria-label={`Remove external link ${link.title || link.external_url}`} onClick={() => removeExternalLink(link.id)}>×</button></li>}
 </For>
 </ul>
-<form class="new-rule-form" onSubmit={addExternalIssueLink}>
-<input class="grow" type="url" placeholder="https://tracker.example/PROJ-42" value={externalIssueUrl()} onInput={(e) => setExternalIssueUrl(e.currentTarget.value)} />
-<input placeholder="Ticket title (optional)" value={externalIssueTitle()} onInput={(e) => setExternalIssueTitle(e.currentTarget.value)} />
-<button class="ghost">Link ticket</button>
+<form class="new-rule-form" onSubmit={addExternalLink}>
+<input class="grow" type="url" placeholder="GitHub issue / PR URL…" value={externalLinkUrl()} onInput={(e) => setExternalLinkUrl(e.currentTarget.value)} />
+<input placeholder="Link title (optional)" value={externalLinkTitle()} onInput={(e) => setExternalLinkTitle(e.currentTarget.value)} />
+<button class="ghost">Add link</button>
 </form>
 </section>
 <details class="gate-rules external-checks" open>

@@ -48,7 +48,7 @@ const mount = async (component: () => unknown) => {
       return Promise.resolve(reply(cmd));
     },
   };
-  registerViews(["Projects", "Project Workspace", "Project Settings", "Issues"]);
+  registerViews(["Projects", "Project Workspace", "Project Settings"]);
   setAvailableViews(null);
   initRouter(createMemoryAdapter());
   await reloadProjects();
