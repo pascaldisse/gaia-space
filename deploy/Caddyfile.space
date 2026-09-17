@@ -18,6 +18,12 @@ handle /space/livekit/* {
 	uri strip_prefix /space/livekit
 	reverse_proxy 127.0.0.1:7880
 }
+# Vaultwarden mounts its own routes under DOMAIN path (/space/vault) itself
+# (rocket basepath = CONFIG.domain_path(), see src/main.rs launch_rocket) --
+# forward the FULL path unchanged, do NOT strip the prefix.
+handle /space/vault/* {
+	reverse_proxy 127.0.0.1:8095
+}
 handle_path /space/* {
 	root * /var/www/gaia-space
 	try_files {path} /index.html
