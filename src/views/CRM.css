@@ -424,3 +424,21 @@
    note says why they are NOT added up. Muted, never a warning colour. */
 .crm-currency-note{display:block;margin-top:3px;font-size:11px;font-weight:400;color:var(--text-muted)}
 .crm-pipeline-summary span:last-child .crm-currency-note{color:var(--text-muted)}
+
+/* ── Storage state (§crmSync) ─────────────────────────────────────────────────
+   The CRM's document lives on the server; these lines are the only place the app
+   admits it could not get there. They sit in the flow, above the toolbar, because a
+   banner that scrolls away is a banner that was not read. */
+.crm-sync {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin: 0 0 10px; padding: 8px 12px; border-radius: 8px;
+  background: var(--surface-2, rgba(127,127,127,.12)); color: var(--text-1, inherit);
+  font-size: 13px; line-height: 1.4;
+}
+.crm-sync-offline { background: rgba(214, 158, 46, .16); }
+.crm-sync-conflict { background: rgba(214, 69, 69, .16); }
+.crm-sync button {
+  margin-left: 4px; padding: 4px 10px; border-radius: 6px; cursor: pointer;
+  border: 1px solid var(--border-1, rgba(127,127,127,.4)); background: transparent; color: inherit; font-size: 12px;
+}
+.crm-sync button:hover { background: rgba(127,127,127,.18); }
