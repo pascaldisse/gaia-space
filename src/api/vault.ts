@@ -8,6 +8,7 @@
 import { createSignal } from "solid-js";
 import { isTauriRuntime } from "../runtime";
 import { isMobileShell } from "../mobile";
+import { invoke } from "./invoke";
 
 const DEFAULT_VAULT_BASE = "/space/vault";
 /** The desktop Tauri window is not served from the real domain (its origin is the packaged
@@ -96,6 +97,15 @@ function authHeaders(): Record<string, string> {
   const token = accessTokenSignal();
   if (!token) throw new VaultError("HttpError", "not unlocked (no access token)");
   return { Authorization: `Bearer ${token}` };
+}
+
+// --- space bridge: vault_invite (src-tauri/src/vault.rs) --------------------
+
+/** `vault_invite {input:{email}}` — goes through the ordinary space `invoke`/`api/cmd`
+ *  bridge (unlike everything else in this file, which talks to Vaultwarden directly),
+ *  because it needs the server's `VAULTWARDEN_ADMIN_TOKEN`, which this client never sees. */
+export async function inviteToVault(email: string): Promise<{ email: string; invited: boolean }> {
+  return invoke("vault_invite", { input: { email } });
 }
 
 // --- prelogin / register / login / refresh ----------------------------------
