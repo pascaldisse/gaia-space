@@ -1,0 +1,91 @@
+{
+  "rail": [
+    {
+      "txt": "Home",
+      "href": "/space/home",
+      "cls": "rail-item active"
+    },
+    {
+      "txt": "Chats",
+      "href": "/space/channel/pushes-c2444b970b3f8110439d65f6/messages",
+      "cls": "rail-item"
+    },
+    {
+      "txt": "Tasks",
+      "href": "/space/to-do",
+      "cls": "rail-item"
+    },
+    {
+      "txt": "Projects",
+      "href": "/space/projects",
+      "cls": "rail-item"
+    },
+    {
+      "txt": "More",
+      "href": null,
+      "cls": "rail-item"
+    },
+    {
+      "txt": "Home",
+      "href": "/space/home",
+      "cls": "rail-item active"
+    },
+    {
+      "txt": "Chats\n451",
+      "href": "/space/channel/pushes-c2444b970b3f8110439d65f6/messages",
+      "cls": "rail-item"
+    },
+    {
+      "txt": "Tasks",
+      "href": "/space/to-do",
+      "cls": "rail-item"
+    },
+    {
+      "txt": "Projects",
+      "href": "/space/projects",
+      "cls": "rail-item"
+    },
+    {
+      "txt": "Library",
+      "href": "/space/documents",
+      "cls": "rail-item"
+    },
+    {
+      "txt": "Development",
+      "href": "/space/development",
+      "cls": "rail-item"
+    },
+    {
+      "txt": "CRM",
+      "href": "/space/dashboard",
+      "cls": "rail-item"
+    },
+    {
+      "txt": "More",
+      "href": null,
+      "cls": "rail-item"
+    },
+    {
+      "txt": "◀\nSidebar",
+      "href": null,
+      "cls": "rail-item sidebar-toggle"
+    }
+  ],
+  "clicked": {
+    "href": "/space/dashboard",
+    "after": "https://paloptic.com/space/dashboard"
+  },
+  "state1": {
+    "url": "https://paloptic.com/space/dashboard",
+    "crmNodes": 0,
+    "sidebar": "◀\nSidebar",
+    "head": "G\nHome\nChats\n451\nTasks\nProjects\nLibrary\nDevelopment\nCRM\nMore\n◀\nSidebar\nA\nGAIA Organization\nFUNDINGS\n+\n#\nEXIST\n1\n#\nFunding - General\n11\n#\nroom-link-live-proof\n3\nGAIA SPACE\n+\n#\nGaia Space\n1\nPALOPTIC ACA"
+  },
+  "pushed": "https://paloptic.com/space/dashboard",
+  "state2": {
+    "url": "https://paloptic.com/space/dashboard",
+    "crmNodes": 0,
+    "hasGerman": false,
+    "head": "G\nHome\nChats\n451\nTasks\nProjects\nLibrary\nDevelopment\nCRM\nMore\n◀\nSidebar\nA\nGAIA Organization\nFUNDINGS\n+\n#\nEXIST\n1\n#\nFunding - General\n11\n#\nroom-link-live-proof\n3\nGAIA SPACE\n+\n#\nGaia Space\n1\nPALOPTIC ACADEMY\n+\n#\nAcademy\n#\nPaloptic Academy\nTHE "
+  }
+}

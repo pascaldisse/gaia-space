@@ -1,0 +1,42 @@
+{
+  "probedAt": "2026-09-18T10:04:52.656Z",
+  "steps": [
+    {
+      "step": "crm-click",
+      "target": {
+        "x": 34,
+        "y": 459,
+        "tag": "A",
+        "cls": "rail-item"
+      },
+      "hit": {
+        "tag": "path",
+        "cls": "[object SVGAnimatedString]",
+        "txt": ""
+      },
+      "state": {
+        "url": "https://paloptic.com/space/dashboard",
+        "crmNodes": 0,
+        "tabs": [],
+        "hasGerman": false,
+        "head": "G\nHome\nChats\n451\nTasks\nProjects\nLibrary\nDevelopment\nCRM\nMore\n◀\nSidebar\nA\nGAIA Organization\nFUNDINGS\n+\n#\nEXIST\n1\n#\nFunding - General\n11\n#\nroom-link-live-proof\n3\nGAIA SPACE\n+\n#\nGaia Space\n1\nPALOPTIC ACADEMY\n+\n#\nAcademy\n#\nPaloptic Academy\nTHE MVP\n+\n#\nMVP Talk\n3\nOTHER CHANNELS\n+\n#\nFounders Chat\n1\n#\nFund"
+      },
+      "errors": []
+    },
+    {
+      "step": "crm-tab",
+      "tabHit": null,
+      "state": {
+        "url": "https://paloptic.com/space/dashboard",
+        "charts": 18,
+        "head": "G\nHome\nChats\n451\nTasks\nProjects\nLibrary\nDevelopment\nCRM\nMore\n◀\nSidebar\nA\nGAIA Organization\nFUNDINGS\n+\n#\nEXIST\n1\n#\nFunding - General\n11\n#\nroom-link-live-proof\n3\nGAIA SPACE\n+\n#\nGaia Space\n1\nPALOPTIC ACADEMY\n+\n#\nAcademy\n#\nPaloptic Academy\nTHE "
+      },
+      "errors": []
+    }
+  ],
+  "errorsByStep": {
+    "login": [
+      "Log: Failed to load resource: the server responded with a status of 403 () https://paloptic.com/space/api/cmd/finance_access_check"
+    ]
+  }
+}

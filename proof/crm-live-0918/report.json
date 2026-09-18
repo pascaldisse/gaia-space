@@ -1,0 +1,165 @@
+{
+  "probedAt": "2026-09-18T10:03:04.980Z",
+  "steps": [
+    {
+      "step": "pre-login",
+      "state": {
+        "url": "https://paloptic.com/space/home",
+        "inputs": [
+          {
+            "type": "text",
+            "name": "",
+            "label": null,
+            "ph": ""
+          },
+          {
+            "type": "password",
+            "name": "",
+            "label": null,
+            "ph": ""
+          },
+          {
+            "type": "text",
+            "name": "",
+            "label": null,
+            "ph": ""
+          }
+        ],
+        "buttons": [
+          "Sign in"
+        ],
+        "head": "GAIA Space\nUsername\nPassword\nAuthenticator code\n(if enabled)\nSign in"
+      },
+      "errors": [
+        "Log: Failed to load resource: the server responded with a status of 401 () https://paloptic.com/space/api/cmd/get_organization",
+        "Log: Failed to load resource: the server responded with a status of 401 () https://paloptic.com/space/api/cmd/finance_access_check",
+        "Log: Failed to load resource: the server responded with a status of 401 () https://paloptic.com/space/api/auth/me"
+      ]
+    },
+    {
+      "step": "post-login",
+      "state": {
+        "url": "https://paloptic.com/space/home",
+        "head": "G\nHome\nChats\n451\nTasks\nProjects\nLibrary\nDevelopment\nCRM\nMore\n◀\nSidebar\nA\nGAIA Organization\nFUNDINGS\n+\n#\nEXIST\n1\n#\nFunding - General\n11\n#\nroom-link-live-proof\n3\nGAIA SPACE\n+\n#\nGaia Space\n1\nPALOPTIC ACA",
+        "nav": [
+          "Home",
+          "Chats",
+          "Tasks",
+          "Projects",
+          "Home",
+          "Chats\n451",
+          "Tasks",
+          "Projects",
+          "Library",
+          "Development",
+          "CRM",
+          "A",
+          "#\nEXIST\n1",
+          "#\nFunding - General\n11",
+          "#\nroom-link-live-proof\n3",
+          "#\nGaia Space\n1",
+          "#\nAcademy",
+          "#\nPaloptic Academy",
+          "#\nMVP Talk\n3",
+          "#\nFounders Chat\n1",
+          "#\nFundings\n1",
+          "#\nGAIA Space\n2",
+          "#\nIdeas",
+          "#\nLOI Page\n15",
+          "#\nPrivate feed\n4",
+          "#\nWebsite",
+          "#\ngaia\n3",
+          "#\npushes",
+          "#\npushes",
+          "#\npushes\n406"
+        ]
+      },
+      "errors": [
+        "Log: Failed to load resource: the server responded with a status of 401 () https://paloptic.com/space/api/cmd/get_organization",
+        "Log: Failed to load resource: the server responded with a status of 401 () https://paloptic.com/space/api/cmd/finance_access_check",
+        "Log: Failed to load resource: the server responded with a status of 401 () https://paloptic.com/space/api/auth/me"
+      ]
+    },
+    {
+      "step": "crm",
+      "state": {
+        "url": "https://paloptic.com/space/dashboard",
+        "title": "GAIA Space",
+        "crmRoot": false,
+        "crmNodes": 0,
+        "tabs": [],
+        "hasGerman": false,
+        "head": "G\nHome\nChats\n451\nTasks\nProjects\nLibrary\nDevelopment\nCRM\nMore\n◀\nSidebar\nA\nGAIA Organization\nFUNDINGS\n+\n#\nEXIST\n1\n#\nFunding - General\n11\n#\nroom-link-live-proof\n3\nGAIA SPACE\n+\n#\nGaia Space\n1\nPALOPTIC ACADEMY\n+\n#\nAcademy\n#\nPaloptic Academy\nTHE MVP\n+\n#\nMVP Talk\n3\nO"
+      },
+      "errors": [
+        "Log: Failed to load resource: the server responded with a status of 403 () https://paloptic.com/space/api/cmd/finance_access_check"
+      ]
+    },
+    {
+      "step": "crm-insights",
+      "state": {
+        "url": "https://paloptic.com/space/dashboard",
+        "charts": 18,
+        "head": "G\nHome\nChats\n451\nTasks\nProjects\nLibrary\nDevelopment\nCRM\nMore\n◀\nSidebar\nA\nGAIA Organization\nFUNDINGS\n+\n#\nEXIST\n1\n#\nFunding - General\n11\n#\nroom-link-live-proof\n3\nGAIA SPACE\n+\n#\nGaia Space\n1\nPALOPTIC ACA"
+      },
+      "errors": [
+        "Log: Failed to load resource: the server responded with a status of 403 () https://paloptic.com/space/api/cmd/finance_access_check"
+      ]
+    },
+    {
+      "step": "page-home",
+      "state": {
+        "url": "https://paloptic.com/space/home",
+        "bodyLen": 1090,
+        "head": "G\nHome\nChats\n451\nTasks\nProjects\nLibrary\nDevelopment\nCRM\nMore\n◀\nSidebar\nA\nGAIA Organization\nFUNDINGS\n+\n#\nEXIST\n1\n#\nFundin"
+      },
+      "errors": [
+        "Log: Failed to load resource: the server responded with a status of 403 () https://paloptic.com/space/api/cmd/finance_access_check"
+      ]
+    },
+    {
+      "step": "page-documents",
+      "state": {
+        "url": "https://paloptic.com/space/documents",
+        "bodyLen": 572,
+        "head": "G\nHome\nChats\n451\nTasks\nProjects\nLibrary\nDevelopment\nCRM\nMore\n◀\nSidebar\nA\nGAIA Organization\nLibrary\nOTHER ORGANIZATION LI"
+      },
+      "errors": [
+        "Log: Failed to load resource: the server responded with a status of 403 () https://paloptic.com/space/api/cmd/finance_access_check"
+      ]
+    },
+    {
+      "step": "page-issues",
+      "state": {
+        "url": "https://paloptic.com/space/dashboard",
+        "bodyLen": 1298,
+        "head": "G\nHome\nChats\n451\nTasks\nProjects\nLibrary\nDevelopment\nCRM\nMore\n◀\nSidebar\nA\nGAIA Organization\nFUNDINGS\n+\n#\nEXIST\n1\n#\nFundin"
+      },
+      "errors": [
+        "Log: Failed to load resource: the server responded with a status of 403 () https://paloptic.com/space/api/cmd/finance_access_check"
+      ]
+    }
+  ],
+  "errorsByStep": {
+    "login": [
+      "Log: Failed to load resource: the server responded with a status of 401 () https://paloptic.com/space/api/cmd/get_organization",
+      "Log: Failed to load resource: the server responded with a status of 401 () https://paloptic.com/space/api/cmd/finance_access_check",
+      "Log: Failed to load resource: the server responded with a status of 401 () https://paloptic.com/space/api/auth/me"
+    ],
+    "crm": [
+      "Log: Failed to load resource: the server responded with a status of 403 () https://paloptic.com/space/api/cmd/finance_access_check"
+    ],
+    "crm-insights": [
+      "Log: Failed to load resource: the server responded with a status of 403 () https://paloptic.com/space/api/cmd/finance_access_check"
+    ],
+    "page-home": [
+      "Log: Failed to load resource: the server responded with a status of 403 () https://paloptic.com/space/api/cmd/finance_access_check"
+    ],
+    "page-documents": [
+      "Log: Failed to load resource: the server responded with a status of 403 () https://paloptic.com/space/api/cmd/finance_access_check"
+    ],
+    "page-issues": [
+      "Log: Failed to load resource: the server responded with a status of 403 () https://paloptic.com/space/api/cmd/finance_access_check"
+    ]
+  }
+}
