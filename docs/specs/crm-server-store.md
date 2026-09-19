@@ -98,3 +98,24 @@ A browser or desktop that already holds `gaia.crm.prototype.v2` must not lose it
 
 Neither lane touches the other's files. Both commit with an explicit
 `git add <paths>` — never `git add -A`, never `git commit -a`.
+
+## Proof
+
+`src/crm.e2e.proof.test.ts` is the only place the two halves meet: the untouched
+frontend modules talking HTTP to a running `space-server` as two different logged-in
+people. It skips unless `SPACE_E2E` names that server, so the normal suite stays offline.
+
+```
+SPACE_DB=/tmp/crmdb/space.db SPACE_PORT=8791 ./target/debug/space-server
+SPACE_E2E=http://127.0.0.1:8791 \
+SPACE_E2E_COOKIE_A=space_session=<jannes> \
+SPACE_E2E_COOKIE_B=space_session=<bjarne> \
+bun test src/crm.e2e.proof.test.ts
+```
+
+Measured, 2026-09-19: Jannes writes an organization and a deal; Bjarne's session reads
+both, adds a second deal with a write that names ONE deal; both deals survive; the
+`owner` strings inside the payloads come back as written ("Jannes", "Bjarne") rather
+than rebound to the calling session; `12.500` survives verbatim; a deal without an `id`
+is refused with `crm record without id` and leaves the revision unchanged; an
+unauthenticated caller is refused.
