@@ -10,7 +10,7 @@ use axum::{
 };
 use gaia_space_lib::{
     app_rights, applications, blogs, budget, calendar_feeds, calls, channel_feeds, channel_notes,
-    chat, chatbot, db, devenv, documents, events, git_hosting, issues, leads, meetings, oauth,
+    chat, chatbot, crm, db, devenv, documents, events, git_hosting, issues, leads, meetings, oauth,
     organization, package_registry, payload_dispatch, personal, pipelines, platform, review, vault,
 };
 use rand::RngCore;
@@ -2796,6 +2796,12 @@ enum CommandPolicy {
     CalendarFeedOwnerAction,
     DashboardPreferencesWrite,
     CalendarOptionsWrite,
+    /// The shared CRM. A logged-in member may read and write ALL of it — that is the
+    /// requirement, not an oversight. The gate's only job is to stamp WHO is writing,
+    /// and it must NOT run the blanket `bind_session_identity`: CRM payloads carry a
+    /// human `owner` field of their own, and rewriting it to a profile id would corrupt
+    /// every record the client stores verbatim.
+    CrmAccess,
     /// Contact leads contain private contact data; GlobalAdmin only.
     LeadRead,
     /// Erasing a contact lead is the same administrator door as reading it.
@@ -2813,6 +2819,7 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
     Some(match name {
         "create_hosted_repo" | "delete_hosted_repo" | "list_hosted_repos" | "hosted_repo_clone_url" => CommandPolicy::Session,
         "vault_invite" => CommandPolicy::Session,
+        "crm_snapshot" | "crm_put_records" | "crm_purge_records" => CommandPolicy::CrmAccess,
 "create_project" => CommandPolicy::ProjectCreate,
         "update_project" => CommandPolicy::ProjectWrite,
         "delete_project" => CommandPolicy::ProjectDelete,
@@ -3661,6 +3668,10 @@ fn authorize_command(
     } else if (!matches!(policy, CommandPolicy::AbsenceWrite) || user.role != "GlobalAdmin")
         && policy != CommandPolicy::DocumentAccessWrite
         && policy != CommandPolicy::MeetingParticipantWrite
+        // CRM payloads are stored verbatim and contain a human `owner` name; the
+        // recursive rebinding would overwrite it inside every record. The CRM arm
+        // below binds the acting identity at the top level instead.
+        && policy != CommandPolicy::CrmAccess
     {
         // Access recipient ids intentionally name *other* people/teams; rebinding them
         // to the caller would turn every share into a self-grant.
@@ -4340,6 +4351,12 @@ fn authorize_command(
                 }
                 absence.insert("profile_id".into(), json!(user.profile_id));
             }
+            Ok(())
+        }
+        CommandPolicy::CrmAccess => {
+            // Nothing is hidden and nothing is refused beyond the session gate itself;
+            // the one thing the server decides is who gets stamped as the last writer.
+            put_arg(body, "acting_profile_id", json!(user.profile_id));
             Ok(())
         }
         CommandPolicy::SessionIdentityWrite => {
@@ -5739,6 +5756,11 @@ async fn cmd(
     "budget_statement" => budget::budget_statement(document_id: String, month: Option<String>, profile_id: Option<String>),
     "budget_add_expense" => budget::budget_add_expense(document_id: String, input: budget::BudgetExpenseInput, actor: Option<String>),
     "vault_invite" => vault::vault_invite(input: vault::VaultInviteInput),
+    // The shared CRM: every member reads and writes all of it (see `crm.rs`). The
+    // acting identity arrives as `acting_profile_id`, injected by `authorize_command`.
+    "crm_snapshot" => crm::crm_snapshot(),
+    "crm_put_records" => crm::crm_put_records(organizations: Option<Vec<serde_json::Value>>, deals: Option<Vec<serde_json::Value>>, activities: Option<Vec<serde_json::Value>>, labels: Option<Vec<serde_json::Value>>, stages: Option<Vec<serde_json::Value>>, acting_profile_id: Option<String>),
+    "crm_purge_records" => crm::crm_purge_records(organization_ids: Option<Vec<String>>, deal_ids: Option<Vec<String>>, activity_ids: Option<Vec<String>>),
     "budget_export_statement" => budget::budget_export_statement(document_id: String, month: String, profile_id: Option<String>),
     "archive_document" => documents::archive_document(id: String, archived: bool),
     "delete_document" => documents::delete_document(id: String, actor_id: String),
