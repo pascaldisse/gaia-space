@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 144;
+pub const SCHEMA_VERSION: i64 = 145;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -892,6 +892,15 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if version < 144 && table_exists(&tx, "todos")? {
         tx.execute_batch(SCHEMA_V144_TODO_SEARCH)?;
     }
+    // V145: the shared CRM. ONE store for the whole space — the prototype kept it in
+    // `localStorage`, which on the web means one pipeline per browser and nobody knowing
+    // it. Rows, not one document: a write names only the records it touched, so two
+    // people editing different deals never overwrite one another. `payload_json` is the
+    // client record verbatim (`src/crmStore.ts` owns its shape — see `crm.rs`).
+    // Table-guarded on `profiles` like every other additive rung that references it.
+    if version < 145 && table_exists(&tx, "profiles")? {
+        tx.execute_batch(SCHEMA_V145_CRM)?;
+    }
     // V141: durable hosted Git repository metadata; bare objects live under data_dir/git/.
     if version < 141 && table_exists(&tx, "projects")? {
         tx.execute_batch(SCHEMA_V141)?;
@@ -1276,6 +1285,24 @@ END;
 CREATE TRIGGER IF NOT EXISTS search_todos_ad AFTER DELETE ON todos BEGIN
   DELETE FROM search_index WHERE entity_type='todo' AND entity_id=old.id;
 END;
+"#;
+/// V145: the shared CRM store. One row per record plus two whole-list settings rows;
+/// `updated_at` is the revision source, `updated_by` is accountability only.
+pub(crate) const SCHEMA_V145_CRM: &str = r#"
+CREATE TABLE IF NOT EXISTS crm_records (
+  id TEXT PRIMARY KEY,
+  kind TEXT NOT NULL CHECK(kind IN ('organization','deal','activity')),
+  payload_json TEXT NOT NULL,
+  updated_at INTEGER NOT NULL,
+  updated_by TEXT REFERENCES profiles(id)
+);
+CREATE INDEX IF NOT EXISTS crm_records_kind ON crm_records(kind);
+CREATE TABLE IF NOT EXISTS crm_settings (
+  key TEXT PRIMARY KEY CHECK(key IN ('labels','stages')),
+  payload_json TEXT NOT NULL,
+  updated_at INTEGER NOT NULL,
+  updated_by TEXT REFERENCES profiles(id)
+);
 "#;
 /// V143: one work entity = todo. Copy before renaming so every legacy fact survives.
 pub(crate) const SCHEMA_V143: &str = r#"
