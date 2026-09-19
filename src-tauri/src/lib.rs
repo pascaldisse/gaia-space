@@ -31,6 +31,8 @@ pub mod chat_links;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod chatbot;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
+pub mod crm;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod db;
 #[cfg(feature = "desktop")]
 mod debug_server;
@@ -426,6 +428,9 @@ pub fn run() {
             review::dry_run_merge,
             review::attempt_merge,
             review::create_review,
+            crm::crm_snapshot,
+            crm::crm_put_records,
+            crm::crm_purge_records,
             budget::budget_statement,
             budget::budget_add_expense,
             budget::budget_export_statement,
