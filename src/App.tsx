@@ -72,8 +72,13 @@ const homeView:View={name:"Home",icon:"home",component:Home};
 const developmentView:View={name:"Development",icon:"target",component:Development};
 
 const personalViews:View[]=[homeView,{name:"Dashboard",icon:"home",component:Dashboard},{...taskRoute,icon:"check",component:Todo},{...ledgerRoute,icon:"check",component:LedgerTodo},{name:"Absences",icon:"clock-nav",component:Absences}];
-const localOnlyViews:View[]=[{name:"Repos",icon:"repo",component:Repos},{name:"Code Reviews",icon:"review",component:Reviews},{name:"Pipelines",icon:"pipeline",component:Pipelines},{name:"CRM",icon:"columns",component:CRM}];
-const workspaceViews:View[]=[{name:"Projects",icon:"layers",component:Projects},...localOnlyViews,{name:"Chat",icon:"chat",component:Chat},{name:"Inbox",icon:"inbox",component:Inbox},{name:"Documents",icon:"book-nav",component:Documents},{name:"Blogs",icon:"book",component:Blogs},{name:"Passwords",icon:"key",component:Passwords},{name:"Calendar",icon:"calendar-nav",component:Calendar},{name:"Meetings",icon:"calendar-nav",component:Meetings},{name:"Dev Environments",icon:"repo",component:DevEnvironments},{name:"Packages",icon:"package",component:Packages},{name:"Members",icon:"org",component:Members},{name:"Locations",icon:"org",component:Locations},{name:"Admin",icon:"settings",component:Admin},{name:"Applications",icon:"grid",component:Applications}];
+/* Local-only views need something that exists only on THIS machine: a checkout, a
+   local daemon, a runner. CRM needs none of that — it is a browser-side workspace like
+   every other one, so it is NOT listed here. Listing it here hid it from the web build
+   while the rail still offered the button: clicking CRM landed on Home (§known in
+   router.ts drops an unavailable view). */
+const localOnlyViews:View[]=[{name:"Repos",icon:"repo",component:Repos},{name:"Code Reviews",icon:"review",component:Reviews},{name:"Pipelines",icon:"pipeline",component:Pipelines}];
+const workspaceViews:View[]=[{name:"Projects",icon:"layers",component:Projects},...localOnlyViews,{name:"CRM",icon:"columns",component:CRM},{name:"Chat",icon:"chat",component:Chat},{name:"Inbox",icon:"inbox",component:Inbox},{name:"Documents",icon:"book-nav",component:Documents},{name:"Blogs",icon:"book",component:Blogs},{name:"Passwords",icon:"key",component:Passwords},{name:"Calendar",icon:"calendar-nav",component:Calendar},{name:"Meetings",icon:"calendar-nav",component:Meetings},{name:"Dev Environments",icon:"repo",component:DevEnvironments},{name:"Packages",icon:"package",component:Packages},{name:"Members",icon:"org",component:Members},{name:"Locations",icon:"org",component:Locations},{name:"Admin",icon:"settings",component:Admin},{name:"Applications",icon:"grid",component:Applications}];
 const usersView:View={name:"Users",icon:"users",component:Users};
 const settingsView:View={name:"Settings",icon:"settings",component:Settings};
 const leadsView:View={name:"Leads",icon:"inbox",component:Leads};
