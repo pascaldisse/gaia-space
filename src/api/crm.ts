@@ -13,6 +13,7 @@
  *  since. A refusal is NOT an error to swallow: the caller reloads and the user is told,
  *  because silently overwriting a colleague's afternoon is the failure this prevents. */
 import { invoke } from "@tauri-apps/api/core";
+import { profileId } from "../session";
 
 export type CrmDocument = {
   /** The whole CrmData document, JSON-encoded. Empty string = nothing stored yet. */
@@ -37,9 +38,12 @@ export const conflictRevision = (reason: unknown): number | null => {
   return Number.isFinite(parsed) ? parsed : null;
 };
 
+/** The document is workspace-wide, so `profileId` scopes nothing — it names the CALLER.
+ *  The web bridge's `bind_session_identity` only REWRITES a key that is present; an
+ *  omitted one is a missing argument (400), so it is always sent, even empty. */
 export const crmApi = {
-  get: () => invoke<CrmDocument>("get_crm_document", {}),
+  get: () => invoke<CrmDocument>("get_crm_document", { profileId: profileId() ?? "" }),
   /** `baseRevision` is the revision this data was derived from. */
   save: (data: string, baseRevision: number) =>
-    invoke<CrmDocument>("save_crm_document", { data, baseRevision }),
+    invoke<CrmDocument>("save_crm_document", { data, baseRevision, profileId: profileId() ?? "" }),
 };
