@@ -49,6 +49,7 @@ import Users from "./views/Users";
 import Settings from "./views/Settings";
 import Leads from "./views/Leads";
 import Finance from "./views/Finance";
+import CRM from "./views/CRM";
 import { financeApi } from "./api/finance";
 import Goto from "./components/Goto";
 import Login from "./components/Login";
@@ -68,8 +69,9 @@ type AppProps = { online?: boolean };
 // layout, deep-linkable, and normalized by the same router policy as the rest.
 const homeView:View={name:"Home",icon:"home",component:Home};
 const developmentView:View={name:"Development",icon:"target",component:Development};
+
 const personalViews:View[]=[homeView,{name:"Dashboard",icon:"home",component:Dashboard},{...taskRoute,icon:"check",component:Todo},{...ledgerRoute,icon:"check",component:LedgerTodo},{name:"Absences",icon:"clock-nav",component:Absences}];
-const localOnlyViews:View[]=[{name:"Repos",icon:"repo",component:Repos},{name:"Code Reviews",icon:"review",component:Reviews},{name:"Pipelines",icon:"pipeline",component:Pipelines}];
+const localOnlyViews:View[]=[{name:"Repos",icon:"repo",component:Repos},{name:"Code Reviews",icon:"review",component:Reviews},{name:"Pipelines",icon:"pipeline",component:Pipelines},{name:"CRM",icon:"columns",component:CRM}];
 const workspaceViews:View[]=[{name:"Projects",icon:"layers",component:Projects},...localOnlyViews,{name:"Chat",icon:"chat",component:Chat},{name:"Inbox",icon:"inbox",component:Inbox},{name:"Documents",icon:"book-nav",component:Documents},{name:"Blogs",icon:"book",component:Blogs},{name:"Calendar",icon:"calendar-nav",component:Calendar},{name:"Meetings",icon:"calendar-nav",component:Meetings},{name:"Dev Environments",icon:"repo",component:DevEnvironments},{name:"Packages",icon:"package",component:Packages},{name:"Members",icon:"org",component:Members},{name:"Locations",icon:"org",component:Locations},{name:"Admin",icon:"settings",component:Admin},{name:"Applications",icon:"grid",component:Applications}];
 const usersView:View={name:"Users",icon:"users",component:Users};
 const settingsView:View={name:"Settings",icon:"settings",component:Settings};

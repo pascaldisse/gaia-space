@@ -1,0 +1,50 @@
+{
+  "1440x1000": {
+    "rule": {
+      "selector": ".home-cal .day.has-event::after",
+      "top": "calc(50% + 0.67em)",
+      "transform": "translateY(-50%)",
+      "bottom": null,
+      "css": ".home-cal .day.has-event::after { content: \"\"; position: absolute; top: calc(50% + 0.67em); transform: translateY(-50%); width: 5px; height: 5px; border-radius: 50%; background: var(--hc-teal); }"
+    },
+    "geom": {
+      "day": "13",
+      "cellH": 34.94,
+      "fontSizePx": 16,
+      "afterTopPx": 28.19,
+      "expectedPx": 28.19,
+      "delta": 0,
+      "dotH": 5,
+      "transform": "matrix(1, 0, 0, 1, 0, -2.5)",
+      "bottom": "1.75px",
+      "insideCell": true,
+      "belowNumeralCenter": true
+    },
+    "syntheticClass": true,
+    "errors": []
+  },
+  "390x844": {
+    "rule": {
+      "selector": ".home-cal .day.has-event::after",
+      "top": "calc(50% + 0.67em)",
+      "transform": "translateY(-50%)",
+      "bottom": null,
+      "css": ".home-cal .day.has-event::after { content: \"\"; position: absolute; top: calc(50% + 0.67em); transform: translateY(-50%); width: 5px; height: 5px; border-radius: 50%; background: var(--hc-teal); }"
+    },
+    "geom": {
+      "day": "13",
+      "cellH": 34.94,
+      "fontSizePx": 16,
+      "afterTopPx": 28.19,
+      "expectedPx": 28.19,
+      "delta": 0,
+      "dotH": 5,
+      "transform": "matrix(1, 0, 0, 1, 0, -2.5)",
+      "bottom": "1.75px",
+      "insideCell": true,
+      "belowNumeralCenter": true
+    },
+    "syntheticClass": true,
+    "errors": []
+  }
+}

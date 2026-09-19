@@ -112,7 +112,7 @@ export const viewLabel = (view: string) => VIEW_LABELS[view] ?? view;
 // to. Storing it would let the two disagree, which is exactly the defect this
 // mapping exists to prevent.
 // ---------------------------------------------------------------------------
-export type RailMode = "home" | "chats" | "tasks" | "projects" | "library" | "development" | "more";
+export type RailMode = "home" | "chats" | "tasks" | "projects" | "library" | "development" | "crm" | "more";
 export type NavPlacement = "left" | "right" | "top" | "bottom";
 export type MobileNavPlacement = "top" | "bottom";
 export const MOBILE_RAIL_MODES: readonly RailMode[] = ["home", "chats", "tasks", "projects", "more"];
@@ -158,6 +158,7 @@ const MODE_OF_VIEW: Record<string, RailMode> = {
   Pipelines: "development",
   "Dev Environments": "development",
   Packages: "development",
+  CRM: "crm",
 };
 
 export const railModeOfView = (view: string): RailMode => {

@@ -1,7 +1,7 @@
 import { describe, expect, test, beforeEach, afterAll } from "bun:test";
 import {
   buildPath, parsePath, registerViews, setAvailableViews, navigate, route,
-  createMemoryAdapter, initRouter, hrefFor, entityView, setRoutePending, linkContainer, channelTabs, projectTabs, type RouterAdapter,
+  createMemoryAdapter, initRouter, hrefFor, entityView, setRoutePending, linkContainer, channelTabs, projectTabs, crmTabs, type RouterAdapter,
 } from "./router";
 
 const VIEWS = ["Dashboard", "To-Do", "Team Tasks", "Projects", "Project Workspace", "Project Overview", "Project Tasks", "Project Steering", "Project Settings", "Calendar", "Code Reviews", "Chat", "Documents", "Meetings", "Members", "Users"];
@@ -401,6 +401,24 @@ describe("project workspace routes", () => {
     expect(parsePath("projects/p-1/steering")).toMatchObject({ view: "Project Steering", projectId: "p-1" });
     expect(buildPath({ view: "Project Settings", projectId: "p-1" })).toBe("projects/p-1/settings");
     expect(parsePath("projects/p-1/settings")).toMatchObject({ view: "Project Settings", projectId: "p-1" });
+  });
+});
+
+describe("CRM work views", () => {
+  beforeEach(() => { registerViews([...VIEWS, "CRM"]); setAvailableViews(null); });
+
+  test("every CRM work view round-trips as its own address", () => {
+    for (const tab of crmTabs) {
+      expect(parsePath(`crm/${tab}`)).toMatchObject({ view: "CRM", tab });
+      expect(buildPath({ view: "CRM", tab })).toBe(`crm/${tab}`);
+    }
+  });
+
+  test("the v1 spellings resolve to their successor instead of silently showing the board", () => {
+    // A shipped link to "closed" meant won+lost in one list; won is its truthful heir.
+    expect(parsePath("crm/closed")).toMatchObject({ view: "CRM", tab: "won" });
+    expect(parsePath("crm/calendar")).toMatchObject({ view: "CRM", tab: "activities" });
+    expect(parsePath("crm/nonsense").tab).toBeUndefined();
   });
 });
 

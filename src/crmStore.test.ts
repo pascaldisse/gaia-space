@@ -1,0 +1,366 @@
+import { expect, test } from "bun:test";
+import {
+  activitiesOf, closeDeal, customers, dealProbability, dealsOf, defaultPipelineStages, ensureLabel, labelsOf,
+  archiveLead, archivedLeads, convertLead, emptyOrganization, leadInbox, leadInvariantViolations, restoreLead,
+  migrateV1, moveDeal, normalize, openDeals, purge, restore, seed, setPipelineStages, softDeleteDeal,
+  softDeleteOrganization, stageAge, stageAgeTone, stageName, stageProbability, daysInStage, trash,
+  STAGE_AGE_STALE_DAYS, STAGE_AGE_WARN_DAYS, type CrmData,
+} from "./crmStore";
+
+const v1Account = (over: Record<string, unknown> = {}) => ({
+  id: "account-1", name: "Optik Nord", website: "", locationCount: 1, employees: "9", labels: ["Messe"], software: "", source: "Messe",
+  owner: "Jannes", stage: "Qualified", status: "Aktiv", dealScope: "Betrieb",
+  locations: [{
+    id: "location-1", name: "Optik Nord · Zentrale", stage: "Qualified", status: "Aktiv", address: "Hauptstr. 1\n20095 Hamburg",
+    employees: "9", emails: [], phones: [], nextStep: "Angebot senden", nextStepDate: "2026-10-01",
+    contacts: [{ id: "c1", name: "Ida", role: "Inhaberin", emails: [], phones: [], preferred: "" }],
+    notes: [{ id: "n1", title: "Erstkontakt", body: "Interesse an Software", author: "Jannes", createdAt: "2026-09-01T10:00:00.000Z" }],
+    activities: [{ id: "a1", kind: "Anruf", title: "Rückruf", dueDate: "2026-09-20", outcome: "", done: false }],
+    files: [],
+  }],
+  ...over,
+});
+
+test("v1 accounts migrate into separate organizations and deals", () => {
+  const data = migrateV1([v1Account()]);
+  expect(data.version).toBe(2);
+  expect(data.organizations).toHaveLength(1);
+  expect(data.deals).toHaveLength(1);
+  const [org] = data.organizations;
+  const [deal] = data.deals;
+  expect(org.name).toBe("Optik Nord");
+  expect(deal.organizationId).toBe(org.id);
+  // Stage/status split: a v1 "Aktiv" account is an OPEN deal, not a stage called won.
+  expect(deal.status).toBe("Offen");
+  expect(deal.stage).toBe("Qualified");
+  // Conversation history is deal-owned after migration, not location-owned.
+  expect(deal.notes.map(note => note.title)).toEqual(["Erstkontakt"]);
+  expect(deal.activities).toHaveLength(1);
+  expect(org.locations[0].contacts[0].name).toBe("Ida");
+  expect((org.locations[0] as Record<string, unknown>).notes).toBeUndefined();
+});
+
+test("v1 'Gewonnen' stage becomes a won status and leaves the open pipeline", () => {
+  const data = migrateV1([v1Account({ stage: "Gewonnen" })]);
+  expect(data.deals[0].status).toBe("Gewonnen");
+  expect(data.deals[0].closedAt).not.toBeNull();
+  expect(openDeals(data)).toHaveLength(0);
+  expect(customers(data).map(org => org.name)).toEqual(["Optik Nord"]);
+});
+
+test("per-site v1 accounts migrate to one deal per location", () => {
+  const account = v1Account({
+    dealScope: "Standorte",
+    locations: [
+      { id: "l1", name: "Nord", stage: "Qualified", status: "Aktiv", address: "", employees: "", emails: [], phones: [], contacts: [], notes: [], activities: [], files: [] },
+      { id: "l2", name: "Süd", stage: "Angebot erstellt", status: "Verloren", address: "", employees: "", emails: [], phones: [], contacts: [], notes: [], activities: [], files: [] },
+    ],
+  });
+  const data = migrateV1([account]);
+  expect(data.organizations).toHaveLength(1);
+  expect(data.deals.map(deal => deal.title)).toEqual(["Nord", "Süd"]);
+  expect(data.deals.map(deal => deal.status)).toEqual(["Offen", "Verloren"]);
+  expect(data.deals[1].locationId).toBe("l2");
+});
+
+test("migrated labels land in the central library and are referenced by id", () => {
+  const data = migrateV1([v1Account(), v1Account({ id: "account-2", name: "Optik Süd", labels: ["Messe", "Kette"] })]);
+  expect(data.labels.map(label => label.name)).toEqual(expect.arrayContaining(["Kette", "Messe"]));
+  const messe = data.labels.find(label => label.name === "Messe")!;
+  expect(data.organizations.every(org => org.labels.includes(messe.id))).toBe(true);
+  expect(labelsOf(data, data.organizations[1].labels).map(label => label.name)).toEqual(["Messe", "Kette"]);
+  expect(data.labels.every(label => /^#/.test(label.color))).toBe(true);
+});
+
+test("ensureLabel is case-insensitive and never duplicates a name", () => {
+  const data = seed();
+  const first = ensureLabel(data, "Priorität");
+  expect(ensureLabel(data, "priorität")).toBe(first);
+  expect(data.labels.filter(label => label.name === "Priorität")).toHaveLength(1);
+});
+
+test("normalize accepts a v2 document, a v1 array and junk", () => {
+  const v2 = seed();
+  expect(normalize(JSON.parse(JSON.stringify(v2))).deals).toHaveLength(1);
+  expect(normalize([v1Account()]).organizations).toHaveLength(1);
+  expect(normalize(null).version).toBe(2);
+  expect(normalize({ hello: "world" }).version).toBe(2);
+});
+
+test("deleting a deal keeps it discoverable in trash and restorable", () => {
+  const data = seed();
+  const dealId = data.deals[0].id;
+  softDeleteDeal(data, dealId);
+  expect(openDeals(data)).toHaveLength(0);
+  expect(trash(data).deals.map(deal => deal.id)).toEqual([dealId]);
+  restore(data, dealId);
+  expect(openDeals(data)).toHaveLength(1);
+  expect(trash(data).deals).toHaveLength(0);
+});
+
+test("deleting an organization takes its deals along and restores them together", () => {
+  const data = seed();
+  const orgId = data.organizations[0].id;
+  softDeleteOrganization(data, orgId);
+  expect(trash(data).organizations).toHaveLength(1);
+  expect(trash(data).deals).toHaveLength(1);
+  expect(dealsOf(data, orgId)).toHaveLength(0);
+  restore(data, orgId);
+  expect(dealsOf(data, orgId)).toHaveLength(1);
+});
+
+test("purge removes a record permanently with its deals", () => {
+  const data = seed();
+  const orgId = data.organizations[0].id;
+  softDeleteOrganization(data, orgId);
+  purge(data, orgId);
+  // The purged record and ITS deals are gone; the seeded lead is a different record
+  // and is untouched — purging is never a sweep.
+  expect(data.organizations.map(org => org.id)).not.toContain(orgId);
+  expect(data.deals).toHaveLength(0);
+});
+
+test("closing and moving a deal flips status without inventing a stage", () => {
+  const data = seed();
+  const deal = data.deals[0];
+  closeDeal(data, deal.id, "Verloren");
+  expect(data.deals[0].status).toBe("Verloren");
+  expect(openDeals(data)).toHaveLength(0);
+  moveDeal(data, deal.id, "Angebot erstellt");
+  expect(data.deals[0].status).toBe("Offen");
+  expect(data.deals[0].stage).toBe("Angebot erstellt");
+  expect(data.deals[0].closedAt).toBeNull();
+});
+
+// ── The lead inbox ───────────────────────────────────────────────────────────
+const inboxDoc = (): CrmData =>
+  ({ version: 2, organizations: [], deals: [], labels: [], pipelineStages: defaultPipelineStages(), activities: [] });
+
+test("a lead is a STORED state, and converting adds a deal, not a second record", () => {
+  const data = inboxDoc();
+  data.organizations.push({ ...emptyOrganization("Optik Sonne", "Jannes"), source: "Website-Formular", nextStep: "Rückruf" });
+  expect(leadInbox(data).map(org => org.name)).toEqual(["Optik Sonne"]);
+  expect(customers(data)).toHaveLength(0);
+  const deal = convertLead(data, data.organizations[0].id, { stage: "Qualified", value: "12500" })!;
+  // Lossless: one record, the deal carries its facts over, the org keeps everything.
+  expect(data.organizations).toHaveLength(1);
+  expect(deal.stage).toBe("Qualified");
+  expect(deal.value).toBe("12500");
+  expect(deal.source).toBe("Website-Formular");
+  expect(deal.nextStep).toBe("Rückruf");
+  expect(data.organizations[0].leadState).toBe("converted");
+  expect(leadInbox(data)).toHaveLength(0);
+  closeDeal(data, deal.id, "Gewonnen");
+  expect(customers(data)).toHaveLength(1);
+});
+
+test("a lead converts exactly once, however often the action is fired", () => {
+  const data = inboxDoc();
+  data.organizations.push(emptyOrganization("Optik Zwilling"));
+  const orgId = data.organizations[0].id;
+  expect(convertLead(data, orgId)).toBeDefined();
+  expect(convertLead(data, orgId)).toBeUndefined();
+  expect(convertLead(data, orgId)).toBeUndefined();
+  expect(data.deals).toHaveLength(1);
+});
+
+test("archiving is triage, not deletion: the record stays live and restorable", () => {
+  const data = inboxDoc();
+  data.organizations.push(emptyOrganization("Optik Archiv"));
+  const orgId = data.organizations[0].id;
+  archiveLead(data, orgId);
+  expect(leadInbox(data)).toHaveLength(0);
+  expect(archivedLeads(data).map(org => org.name)).toEqual(["Optik Archiv"]);
+  expect(trash(data).organizations).toHaveLength(0);
+  restoreLead(data, orgId);
+  expect(leadInbox(data).map(org => org.name)).toEqual(["Optik Archiv"]);
+  // Deleting is still the trash, and it is a different act from archiving.
+  softDeleteOrganization(data, orgId);
+  expect(leadInbox(data)).toHaveLength(0);
+  expect(trash(data).organizations).toHaveLength(1);
+});
+
+test("an archived lead cannot be converted behind the user's back", () => {
+  const data = inboxDoc();
+  data.organizations.push(emptyOrganization("Optik Ruhe"));
+  archiveLead(data, data.organizations[0].id);
+  expect(archivedLeads(data)).toHaveLength(1);
+  // Converting from the archive is allowed only after restoring — but if it happens,
+  // the record leaves the archive rather than living in two places at once.
+  const deal = convertLead(data, data.organizations[0].id)!;
+  expect(deal).toBeDefined();
+  expect(archivedLeads(data)).toHaveLength(0);
+  expect(data.organizations[0].leadState).toBe("converted");
+});
+
+test("INVARIANT: an active lead never owns a deal, so it cannot reach pipeline, customers or insights", () => {
+  // Migration: a record with deals was qualified at some point, one without was not.
+  const migrated = migrateV1([v1Account()]);
+  expect(migrated.organizations[0].leadState).toBe("converted");
+  expect(leadInbox(migrated)).toHaveLength(0);
+  expect(leadInvariantViolations(migrated)).toEqual([]);
+
+  // A stored document that contradicts itself is REPAIRED on read, never trusted.
+  const broken = { ...migrated, organizations: migrated.organizations.map(org => ({ ...org, leadState: "active" })) };
+  const repaired = normalize(JSON.parse(JSON.stringify(broken)));
+  expect(repaired.organizations[0].leadState).toBe("converted");
+  expect(leadInvariantViolations(repaired)).toEqual([]);
+
+  // A document written before lead states existed: no deal → the inbox, and the
+  // pipeline stays exactly as long as it was.
+  const legacy = JSON.parse(JSON.stringify(migrated));
+  legacy.organizations.push({ ...emptyOrganization("Optik Neu"), leadState: undefined });
+  const read = normalize(legacy);
+  expect(leadInbox(read).map(org => org.name)).toEqual(["Optik Neu"]);
+  expect(read.deals).toHaveLength(migrated.deals.length);
+  expect(customers(read).some(org => org.name === "Optik Neu")).toBe(false);
+  expect(openDeals(read).some(deal => deal.organizationId === read.organizations[1].id)).toBe(false);
+  expect(leadInvariantViolations(read)).toEqual([]);
+});
+
+test("the seed states both halves of the model and holds the invariant", () => {
+  const data = seed();
+  expect(leadInbox(data).map(org => org.name)).toEqual(["Optik Sonnenschein"]);
+  expect(leadInvariantViolations(data)).toEqual([]);
+});
+
+test("organization activity rollup is derived from its deals", () => {
+  const data = migrateV1([v1Account()]);
+  const orgId = data.organizations[0].id;
+  expect(activitiesOf(data, orgId).map(entry => entry.activity.title)).toEqual(["Rückruf"]);
+  expect(activitiesOf(data, orgId)[0].deal.id).toBe(data.deals[0].id);
+});
+
+// ── The pipeline owns the win probability ───────────────────────────────────
+test("stage defaults are the pipeline's, and a deal reads its probability from its stage", () => {
+  const data = seed();
+  expect(data.pipelineStages.map(stage => [stage.id, stage.probability])).toEqual([
+    ["Non-Qualified", 10], ["Qualified", 20], ["Kontakt hergestellt", 30],
+    ["Gespräch vereinbart", 40], ["Angebot erstellt", 50], ["Abgeschlossen", 70],
+  ]);
+  const deal = data.deals[0];
+  expect(dealProbability(data, deal)).toBe(20);            // Qualified
+  moveDeal(data, deal.id, "Angebot erstellt");
+  expect(dealProbability(data, data.deals[0])).toBe(50);
+  closeDeal(data, deal.id, "Gewonnen");
+  expect(dealProbability(data, data.deals[0])).toBe(100);  // won is settled, not estimated
+  closeDeal(data, deal.id, "Verloren");
+  expect(dealProbability(data, data.deals[0])).toBe(0);
+});
+
+test("renaming a stage changes the display name only; deals keep the stable stage key", () => {
+  const data = seed();
+  setPipelineStages(data, data.pipelineStages.map(stage => stage.id === "Qualified" ? { ...stage, name: "Erstkontakt geprüft", probability: 35 } : stage));
+  expect(data.deals[0].stage).toBe("Qualified");
+  expect(stageName(data, "Qualified")).toBe("Erstkontakt geprüft");
+  expect(stageProbability(data, "Qualified")).toBe(35);
+  // Persisting and reading back keeps the configuration and clamps junk percentages.
+  const round = normalize(JSON.parse(JSON.stringify(data)));
+  expect(stageName(round, "Qualified")).toBe("Erstkontakt geprüft");
+  expect(stageProbability(round, "Qualified")).toBe(35);
+});
+
+test("a stored document without or with a broken pipeline configuration falls back per stage", () => {
+  const base = seed();
+  const raw: any = JSON.parse(JSON.stringify(base));
+  delete raw.pipelineStages;
+  expect(normalize(raw).pipelineStages).toEqual(defaultPipelineStages());
+  const broken = normalize({ ...raw, pipelineStages: [{ id: "Unbekannt", name: "X", probability: 5 }, { id: "Abgeschlossen", name: "", probability: 480 }] });
+  expect(broken.pipelineStages.map(stage => stage.id)).toEqual(defaultPipelineStages().map(stage => stage.id));
+  expect(stageName(broken, "Abgeschlossen")).toBe("Abgeschlossen");
+  expect(stageProbability(broken, "Abgeschlossen")).toBe(100);
+});
+
+test("a legacy per-deal probability is dropped on read: the stage is the only source", () => {
+  const raw: any = JSON.parse(JSON.stringify(seed()));
+  raw.deals[0].probability = 90;
+  const data = normalize(raw);
+  expect("probability" in data.deals[0]).toBe(false);
+  expect(dealProbability(data, data.deals[0])).toBe(20);
+});
+
+// ── Deal aging: the stage clock ─────────────────────────────────────────────
+const daysAgo = (days: number) => new Date(Date.now() - days * 86_400_000).toISOString();
+
+test("a deal's age counts from the stage it entered, and only a real change restarts it", () => {
+  const data = seed();
+  const deal = data.deals[0];
+  deal.stageEnteredAt = daysAgo(12);
+  expect(daysInStage(data.deals[0])).toBe(12);
+  // Dropping the card back into the column it already sits in must not launder it.
+  moveDeal(data, deal.id, "Qualified");
+  expect(daysInStage(data.deals[0])).toBe(12);
+  expect(data.deals[0].stageEnteredAt).toBe(deal.stageEnteredAt);
+  // An actual stage change is a fresh start.
+  moveDeal(data, deal.id, "Angebot erstellt");
+  expect(daysInStage(data.deals[0])).toBe(0);
+  expect(Date.parse(data.deals[0].stageEnteredAt)).toBeGreaterThan(Date.parse(daysAgo(1)));
+  // Reopening a closed deal in the same stage leaves the clock alone.
+  const stamped = data.deals[0].stageEnteredAt;
+  closeDeal(data, deal.id, "Verloren");
+  moveDeal(data, deal.id, "Angebot erstellt");
+  expect(data.deals[0].stageEnteredAt).toBe(stamped);
+  expect(data.deals[0].status).toBe("Offen");
+});
+
+test("aging tones: up to seven days is neutral, then amber, past thirty days red", () => {
+  expect([0, 1, 7].map(stageAgeTone)).toEqual(["fresh", "fresh", "fresh"]);
+  expect([8, 30].map(stageAgeTone)).toEqual(["warn", "warn"]);
+  expect([31, 400].map(stageAgeTone)).toEqual(["stale", "stale"]);
+  expect(STAGE_AGE_WARN_DAYS).toBe(7);
+  expect(STAGE_AGE_STALE_DAYS).toBe(30);
+});
+
+test("stageAge reads a fixed clock and speaks German singular and plural", () => {
+  const data = seed();
+  const deal = data.deals[0];
+  deal.stageEnteredAt = "2026-09-01T10:00:00.000Z";
+  const at = (iso: string) => stageAge(deal, new Date(iso));
+  expect(at("2026-09-01T23:00:00.000Z")).toMatchObject({ days: 0, tone: "fresh", label: "0 Tage in dieser Phase" });
+  expect(at("2026-09-02T10:00:00.000Z").label).toBe("1 Tag in dieser Phase");
+  expect(at("2026-09-08T10:00:00.000Z")).toMatchObject({ days: 7, tone: "fresh" });
+  expect(at("2026-09-09T10:00:00.000Z")).toMatchObject({ days: 8, tone: "warn", label: "8 Tage in dieser Phase" });
+  expect(at("2026-10-02T10:00:00.000Z").tone).toBe("stale");
+  // A clock that runs backwards (edited stamp, other timezone) never reports negatives.
+  expect(at("2026-08-20T10:00:00.000Z").days).toBe(0);
+});
+
+test("documents without a stage stamp fall back to the creation date, never to junk", () => {
+  const raw: any = JSON.parse(JSON.stringify(seed()));
+  raw.deals[0].createdAt = daysAgo(40);
+  delete raw.deals[0].stageEnteredAt;
+  const migrated = normalize(raw);
+  expect(migrated.deals[0].stageEnteredAt).toBe(raw.deals[0].createdAt);
+  expect(stageAge(migrated.deals[0]).tone).toBe("stale");
+  // Empty or unparseable stamps read as day zero instead of inventing an age.
+  const broken = normalize({ ...raw, deals: [{ ...raw.deals[0], stageEnteredAt: "" }] });
+  expect(broken.deals[0].stageEnteredAt).toBe(raw.deals[0].createdAt);
+  expect(daysInStage({ ...broken.deals[0], stageEnteredAt: "kaputt", createdAt: "" })).toBe(0);
+  // v1 records carry their creation date into the stage clock.
+  const v1 = migrateV1([v1Account({ deals: [{ id: "d1", title: "Optik Nord", stage: "Qualified", status: "Aktiv", createdAt: daysAgo(9) }] })]);
+  expect(v1.deals[0].stageEnteredAt).toBe(v1.deals[0].createdAt);
+  expect(stageAge(v1.deals[0]).tone).toBe("warn");
+});
+
+// Regression: destroying a record's last deal in the trash left the ORGANIZATION behind
+// as "converted" — a record claiming an opportunity that no longer exists. It then stood
+// in no list at all: not the inbox (it counts as triaged), not the pipeline and not the
+// customers (it owns no deal), reachable only through an export. A record the app holds
+// must be a record the app shows.
+test("purging the last deal hands the organization back to the inbox instead of hiding it", () => {
+  const data = normalize(null);
+  const org = leadInbox(data)[0];
+  const deal = convertLead(data, org.id)!;
+  expect(leadInbox(data).map(item => item.id)).not.toContain(org.id);
+
+  softDeleteDeal(data, deal.id);
+  // Still converted while the deal is only in the trash: it can be restored unchanged.
+  expect(data.organizations.find(item => item.id === org.id)!.leadState).toBe("converted");
+
+  purge(data, deal.id);
+  expect(leadInbox(data).map(item => item.id)).toContain(org.id);
+  // And a document stored in the broken state is repaired on the next read.
+  const reread = normalize(JSON.parse(JSON.stringify({ ...data, organizations: data.organizations.map(item => ({ ...item, leadState: "converted" })) })));
+  expect(leadInbox(reread).map(item => item.id)).toContain(org.id);
+  expect(leadInvariantViolations(reread)).toEqual([]);
+});

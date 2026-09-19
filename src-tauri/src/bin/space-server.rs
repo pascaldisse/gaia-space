@@ -10,8 +10,9 @@ use axum::{
 };
 use gaia_space_lib::{
     app_rights, applications, blogs, budget, calendar_feeds, calls, channel_feeds, channel_notes,
-    chat, chatbot, db, devenv, documents, events, git_hosting, issues, leads, meetings, oauth,
-    organization, package_registry, payload_dispatch, personal, pipelines, platform, review,
+    chat, chatbot, crm, db, devenv, documents, events, git_hosting, issues, leads, meetings,
+    oauth, organization, package_registry, payload_dispatch, personal, pipelines, platform,
+    review,
 };
 use rand::RngCore;
 use rusqlite::{params, OptionalExtension};
@@ -2849,6 +2850,10 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         "create_channel_note" | "update_channel_note" | "delete_channel_note" => {
             CommandPolicy::ChannelNoteWrite
         }
+        // The CRM document is workspace-wide: any authenticated session may read or
+        // save it, exactly like `create_meeting` and the other plain `Session` writes.
+        // The optimistic-concurrency conflict check lives in crm.rs, not here.
+        "get_crm_document" | "save_crm_document" => CommandPolicy::Session,
         "mark_notification_read" => CommandPolicy::NotificationWrite,
         "create_absence" | "update_absence" | "delete_absence" => CommandPolicy::AbsenceWrite,
         "create_meeting" | "create_channel_call" => CommandPolicy::SessionIdentityWrite,
@@ -2965,7 +2970,11 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         "get_issue" | "get_issue_detail" | "list_issues" => CommandPolicy::IssueRead,
         "list_issue_assignees" | "set_issue_assignees" => CommandPolicy::IssueAssign,
         "add_project_member" | "remove_project_member" => CommandPolicy::ProjectMemberAdmin,
-        "get_document" | "get_document_publication" | "list_doc_versions" | "read_document_file" => CommandPolicy::DocumentRead,
+        "get_document"
+        | "get_document_publication"
+        | "list_doc_versions"
+        | "read_document_file"
+        | "get_document_file" => CommandPolicy::DocumentRead,
         // Favourites are caller-scoped: `bind_session_identity` forces `profile_id` to
         // the session, and the read scope inside the query does the rest.
         "list_favorite_documents" | "set_document_favorite" | "move_favorite_document" => {
@@ -3397,6 +3406,7 @@ fn document_id(body: &Value, name: &str) -> Option<String> {
             | "budget_export_statement"
             | "list_doc_versions"
             | "read_document_file"
+            | "get_document_file"
             | "get_document_publication"
             | "publish_document"
             | "list_document_access"
@@ -5798,6 +5808,8 @@ async fn cmd(
     "create_channel_note" => channel_notes::create_channel_note(input: channel_notes::ChannelNoteInput),
     "update_channel_note" => channel_notes::update_channel_note(note: channel_notes::ChannelNote),
     "delete_channel_note" => channel_notes::delete_channel_note(id: String, profile_id: String),
+    "get_crm_document" => crm::get_crm_document(profile_id: String),
+    "save_crm_document" => crm::save_crm_document(data: String, base_revision: i64, profile_id: String),
     "dry_run_merge" => review::dry_run_merge(id: String, repo_path: String, review_id: String, source_branch: String, target_branch: String),
     "emit_notification" => personal::emit_notification(input: personal::NotificationInput),
     "evaluate_quality_gate" => review::evaluate_quality_gate(review_id: String),
@@ -5839,6 +5851,7 @@ async fn cmd(
     "list_deployments_for_target" => pipelines::list_deployments_for_target(target_id: String),
     "list_doc_versions" => documents::list_doc_versions_scoped(document_id: String, profile_id: String),
     "read_document_file" => documents::read_document_file(document_id: String, max_bytes: Option<u64>),
+    "get_document_file" => documents::get_document_file(document_id: String),
     "list_document_access" => documents::list_document_access(document_id: String),
     "update_document_access" => documents::update_document_access(document_id: String, permissions: Vec<documents::DocumentAccessRecipient>),
     "list_document_folders" => documents::list_document_folders_scoped(profile_id: String),
@@ -6520,7 +6533,11 @@ mod tests {
 
     #[test]
     fn document_detail_commands_have_scoped_policies_and_ids() {
-        for name in ["get_document_publication", "read_document_file"] {
+        for name in [
+            "get_document_publication",
+            "read_document_file",
+            "get_document_file",
+        ] {
             assert!(matches!(command_policy(name), Some(CommandPolicy::DocumentRead)), "{name}");
             assert_eq!(document_id(&json!({"documentId": "doc-preview", "maxBytes": null}), name), Some("doc-preview".into()));
         }
@@ -9582,6 +9599,88 @@ mod tests {
         assert_eq!(left, 0);
     }
 
+    #[test]
+    fn crm_commands_are_session_scoped() {
+        for name in ["get_crm_document", "save_crm_document"] {
+            assert!(
+                matches!(command_policy(name), Some(CommandPolicy::Session)),
+                "{name}"
+            );
+        }
+    }
+
+    /// The CRM document over HTTP: refused without a session, reachable with one, and
+    /// a stale save is refused as a conflict rather than silently overwriting.
+    #[tokio::test]
+    async fn crm_document_endpoints_require_a_session_and_reach_the_real_router() {
+        let _serial = test_lock();
+        setup();
+
+        // The real client always names itself; the session overwrites whatever it says
+        // (see the forged-author save below), but the key must be present for
+        // `bind_session_identity` to have something to rewrite — it patches existing
+        // keys, it does not invent missing ones.
+        let (status, _) = call(
+            HeaderMap::new(),
+            "get_crm_document",
+            json!({"profile_id":"pa"}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        let (status, _) = call(
+            HeaderMap::new(),
+            "save_crm_document",
+            json!({"data":"{}","base_revision":0,"profile_id":"pa"}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+        // A logged-in session reaches the real router and sees the empty starting state.
+        let (status, value) = call(cookie("ta"), "get_crm_document", json!({"profile_id":"ta"})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        assert_eq!(value["value"]["revision"], json!(0));
+        assert_eq!(value["value"]["data"], json!(""));
+
+        // Alice saves while claiming Bob as the author; the session wins.
+        let (status, value) = call(
+            cookie("ta"),
+            "save_crm_document",
+            json!({"data":"{\"deals\":[]}","base_revision":0,"profile_id":"pb"}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        assert_eq!(value["value"]["revision"], json!(1));
+        assert_eq!(
+            value["value"]["updatedBy"],
+            json!("pa"),
+            "a forged author is replaced by the session"
+        );
+
+        // Bob still has the stale revision 0 and is refused a conflict, not a silent stomp.
+        let (status, value) = call(
+            cookie("tb"),
+            "save_crm_document",
+            json!({"data":"{}","base_revision":0,"profile_id":"pb"}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(value["error"], json!("crm-conflict:1"), "{value}");
+
+        // Bob re-reads the current revision and saves cleanly on top of it.
+        let (status, value) = call(cookie("tb"), "get_crm_document", json!({"profile_id":"tb"})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        let current_revision = value["value"]["revision"].as_i64().unwrap();
+        let (status, value) = call(
+            cookie("tb"),
+            "save_crm_document",
+            json!({"data":"{\"deals\":[{\"id\":\"d1\"}]}","base_revision":current_revision,"profile_id":"pb"}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        assert_eq!(value["value"]["revision"], json!(2));
+        assert_eq!(value["value"]["updatedBy"], json!("pb"));
+    }
+
     #[tokio::test]
     async fn todo_endpoints_bind_the_session_profile_and_refuse_foreign_todos() {
         let _serial = test_lock();
@@ -12109,6 +12208,55 @@ mod tests {
             StatusCode::BAD_REQUEST,
             "plain http off localhost stays out: {value}"
         );
+    }
+
+    #[tokio::test]
+    async fn get_document_file_is_acl_scoped_and_id_strict_over_http() {
+        let _serial = test_lock();
+        setup();
+        let c = db::conn().unwrap();
+        c.execute("INSERT INTO documents(id,container_type,container_id,doc_type,title,body,version,archived,created_by) VALUES('file-acl','my-docs','pa','file','Spec','',1,0,'pa')", []).unwrap();
+        c.execute("INSERT INTO document_files(document_id,filename,mime,size,stored_path,uploaded_by) VALUES('file-acl','spec.pdf','application/pdf',7,'/var/space/blobs/file-acl.pdf','pa')", []).unwrap();
+        drop(c);
+
+        // Through the real router: `/api/cmd/{command}` with the production
+        // cookie header, not a direct handler call.
+        let post = |session: Option<&str>, body: Value| {
+            let mut request = axum::http::Request::builder()
+                .method("POST")
+                .uri("/api/cmd/get_document_file")
+                .header(header::CONTENT_TYPE, "application/json");
+            if let Some(token) = session {
+                request = request.header(header::COOKIE, format!("space_session={token}"));
+            }
+            let request = request.body(Body::from(body.to_string())).unwrap();
+            async move {
+                status_and_body(app_router().oneshot(request).await.unwrap().into_response()).await
+            }
+        };
+
+        let (status, value) = post(Some("ta"), json!({"document_id":"file-acl"})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        assert_eq!(value["value"]["filename"], json!("spec.pdf"));
+        assert_eq!(value["value"]["mime"], json!("application/pdf"));
+        let rendered = value.to_string();
+        assert!(
+            !rendered.contains("stored_path") && !rendered.contains("/var/space/blobs"),
+            "the on-disk location never leaves the server: {rendered}"
+        );
+
+        let (status, _) = post(Some("ta"), json!({"id":"file-acl"})).await;
+        assert_eq!(
+            status,
+            StatusCode::BAD_REQUEST,
+            "a generic `id` is not an accepted document id"
+        );
+
+        let (status, _) = post(Some("tb"), json!({"documentId":"file-acl"})).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "a stranger cannot read it");
+
+        let (status, _) = post(None, json!({"document_id":"file-acl"})).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED, "no session, no read");
     }
 
     /// Without a session there is no resource owner to consent.

@@ -82,6 +82,8 @@ const PATHS = {
   grid: () => <path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z" />,
   columns: () => <path d="M4 4h4v16H4zM10 4h4v16h-4zM16 4h4v16h-4z" />,
   layers: () => <path d="M12 3 3 8l9 5 9-5zM3 13l9 5 9-5M3 8v0" />,
+  // Reports: bars standing on an axis — the shape of a counted result, not a trend line.
+  chart: () => <path d="M4 20V4M4 20h16M8 20v-6M13 20v-10M18 20v-4" />,
   calendar: () => <path d="M4 6h16v14H4zM4 10h16M8 3v4M16 3v4" />,
   // `*-nav` aliases are retained only for existing call sites; with factory
   // glyphs the original shared-node problem they worked around is gone.
@@ -115,6 +117,8 @@ const PATHS = {
   folder: () => <path d="M4 6h5l2 2h9v11H4z" />,
   /* An uploaded file: a page with an arrow into it. */
   upload: () => <path d="M6 3h8l4 4v14H6zM14 3v4h4M12 17v-6M9.5 13.5 12 11l2.5 2.5" />,
+  /** The mirror of `upload`: the same document, the arrow pointing out of the app. */
+  download: () => <path d="M6 3h8l4 4v14H6zM14 3v4h4M12 11v6M9.5 14.5 12 17l2.5-2.5" />,
   /* Something still open, asking to be done. Deliberately NOT a tick: a tick on an
      unfinished task reads as "already done" — the exact confusion this replaces. */
   alert: () => (

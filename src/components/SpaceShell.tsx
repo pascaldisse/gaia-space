@@ -47,6 +47,7 @@ const RAIL: { mode: Exclude<RailMode, "more">; label: string; landing: string; i
   { mode: "projects", label: "Projects", landing: "Projects", icon: "layers" },
   { mode: "library", label: "Library", landing: "Documents", icon: "book-nav" },
   { mode: "development", label: "Development", landing: "Development", icon: "target" },
+  { mode: "crm", label: "CRM", landing: "CRM", icon: "columns" },
 ];
 const mobileRail = () => RAIL.filter((entry) => MOBILE_RAIL_MODES.includes(entry.mode));
 /** The rail entries the NARROW rail has no room for. They are not lost: the More
@@ -60,7 +61,7 @@ const desktopRail = () => RAIL.filter((entry) => entry.mode !== "development" ||
  *  arrives filtered, and back/forward tell the truth.
  *  They used to be destinations wearing the costume of filters — Assigned went to Team
  *  Tasks, Reviews to Code Reviews, Mentions was `provisional` and went nowhere. */
-type SideEntry = { label: string; view: string; icon: IconName; strong?: boolean; filter?: ActivityFilter; badge?: "chat" | "mentions" };
+type SideEntry = { label: string; view: string; icon: IconName; strong?: boolean; filter?: ActivityFilter; tab?: string; badge?: "chat" | "mentions" };
 
 /** Per-mode sidebar links. Threads and Mentions are no longer permanent global entries:
  *  Threads lives in Chats (a thread IS a conversation), Mentions in Activity (it is one
@@ -111,11 +112,30 @@ const MODE_LINKS: Record<RailMode, SideEntry[]> = {
     { label: "Packages", view: "Packages", icon: "package" },
     { label: "Dev environments", view: "Dev Environments", icon: "repo" },
   ],
+  /* The CRM rail names the v2 model out loud: the lead inbox holds enquiries that
+     have not produced a deal (a STORED state, not "unwon"), the pipeline and the
+     three deal lists are opportunities, trash is restorable. Won and lost are separate entries because "abgeschlossen" hid two
+     opposite outcomes behind one word. */
+  crm: [
+    { label: "Leads", view: "CRM", icon: "org", tab: "leads" },
+
+    { label: "Pipeline", view: "CRM", icon: "columns", strong: true, tab: "pipeline" },
+    { label: "Offene Deals", view: "CRM", icon: "target", tab: "open" },
+    { label: "Gewonnen", view: "CRM", icon: "check", tab: "won" },
+    { label: "Verloren", view: "CRM", icon: "close", tab: "lost" },
+    { label: "Papierkorb", view: "CRM", icon: "trash", tab: "trash" },
+    { label: "Aktivitäten", view: "CRM", icon: "calendar", tab: "activities" },
+    { label: "Kunden", view: "CRM", icon: "users", tab: "customers" },
+    /* Einblicke are the READING of the CRM document (won value, weighted pipeline,
+       win rate, activity load). They stay inside the CRM and never merge into the
+       global dashboard, whose subject is the whole workspace, not the sales data. */
+    { label: "Einblicke", view: "CRM", icon: "chart", tab: "insights" },
+  ],
   more: [],
 };
 
 const MODE_TITLE: Record<RailMode, string> = {
-  home: "Home", chats: "Chats", tasks: "Tasks", projects: "Projects", library: "Library", development: "Development", more: "More",
+  home: "Home", chats: "Chats", tasks: "Tasks", projects: "Projects", library: "Library", development: "Development", crm: "CRM", more: "More",
 };
 
 /** Section order for the Chats/Home conversation list (Pascal, 2026-09-04: "direct
@@ -530,7 +550,7 @@ const [mobileSidebarOpen, setMobileSidebarOpen] = createSignal(false);
   /** A filter entry is active when the route's filter is its own; every other entry is
    *  active when its view is the open one. Exactly one entry lights either way. */
   const entryActive = (entry: SideEntry) =>
-    entry.filter ? route().view === "Inbox" && activityFilter() === entry.filter : props.active === entry.view;
+    entry.filter ? route().view === "Inbox" && activityFilter() === entry.filter : entry.tab ? props.active === entry.view && route().tab === entry.tab : props.active === entry.view;
   /** A filter's own count, from the same source as the badge. A count of 0 is drawn
    *  without tone (`metricTone`'s rule) rather than hidden — the filter is still real. */
   const entryCount = (entry: SideEntry) =>
@@ -657,7 +677,7 @@ const [mobileSidebarOpen, setMobileSidebarOpen] = createSignal(false);
       classList={{ active: entryActive(entry) }}
       {...navLink(() => (entry.filter && entry.filter !== "all"
         ? { view: entry.view, tab: entry.filter }
-        : { view: entry.view }))}
+        : entry.tab ? { view: entry.view, tab: entry.tab } : { view: entry.view }))}
     >
       <span class="side-icon" aria-hidden="true"><Icon name={entry.icon} size={15} /></span>
       {entry.strong ? <strong>{entry.label}</strong> : entry.label}

@@ -34,6 +34,16 @@ export type Route = {
 export const activityFilters = ["mentions", "messages", "assigned", "reviews", "updates"] as const;
 const isActivityFilter = (value: string): value is typeof activityFilters[number] =>
   activityFilters.includes(value as typeof activityFilters[number]);
+/** CRM is one destination with several work views; preserving the selected view in the
+ * address makes the CRM rail truthful and lets a shared link open the same workspace.
+ * The views follow the v2 model: leads are ORGANIZATIONS without a win, the pipeline
+ * and the open/won/lost lists are DEALS, trash is the restorable graveyard of both. */
+export const crmTabs = ["leads", "pipeline", "open", "won", "lost", "trash", "activities", "customers", "insights"] as const;
+const isCrmTab = (value: string): value is typeof crmTabs[number] => crmTabs.includes(value as typeof crmTabs[number]);
+/** Shipped links keep working: the v1 spellings resolve to their v2 successor rather
+ * than degrading to the pipeline, which would silently change what the link showed. */
+const crmTabAliases: Record<string, typeof crmTabs[number]> = { closed: "won", calendar: "activities", reports: "insights", berichte: "insights" };
+export const canonicalCrmTab = (value: string) => isCrmTab(value) ? value : crmTabAliases[value];
 
 /** Channel workspace tabs (communication-first shell). `messages` is the default surface;
  *  the work tabs mount EXISTING views scoped to the channel's project (ChannelWorkspace),
@@ -186,6 +196,10 @@ export function parsePath(path: string): Route {
     return { view: FALLBACK_VIEW };
   }
 
+  // /crm/<view> — the CRM's own work views, beneath one top-level destination.
+  if (slugToView[head] === "CRM" && rest.length === 1 && canonicalCrmTab(rest[0]))
+    return norm({ view: "CRM", tab: canonicalCrmTab(rest[0]) });
+
   // /inbox/<filter> — Activity's worklist, narrowed. Keyed off the registered slug,
   // not a hardcoded word, so it follows the view's own routing key.
   if (slugToView[head] === "Inbox" && rest.length === 1 && isActivityFilter(rest[0]))
@@ -241,6 +255,7 @@ export function buildPath(r: Route): string {
   if (r.view === "Project Tasks" && r.projectId) return `projects/${enc(r.projectId)}/tasks`;
   if (r.view === "Calendar" && r.projectId) return `projects/${enc(r.projectId)}/calendar`;
   if (r.view === "Documents" && r.projectId && !r.containerType) return `projects/${enc(r.projectId)}/knowledge`;
+  if (view === "CRM" && isCrmTab(r.tab ?? "")) return `${slug}/${r.tab}`;
   if (view === "Inbox" && isActivityFilter(r.tab ?? "")) return `${slug}/${r.tab}`;
   if (r.entityType === "channel" && r.entityId && isChannelTab(r.tab ?? ""))
     return `channel/${enc(r.entityId)}/${r.tab}`;
