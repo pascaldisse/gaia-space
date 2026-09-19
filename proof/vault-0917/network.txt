@@ -1,0 +1,8 @@
+POST /space/vault/identity/accounts/register 200
+POST /space/vault/identity/connect/token 200
+GET /space/vault/api/sync 200
+POST /space/vault/api/ciphers 200
+GET /space/vault/api/sync 200
+POST /space/vault/identity/accounts/prelogin 200
+POST /space/vault/identity/connect/token 200
+GET /space/vault/api/sync 200

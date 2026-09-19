@@ -1,0 +1,18 @@
+[Unit]
+Description=Vaultwarden password backend for GAIA Space
+After=network.target
+
+[Service]
+Type=simple
+User=vaultwarden
+Group=vaultwarden
+EnvironmentFile=/etc/vaultwarden/vaultwarden.env
+ExecStart=/usr/local/bin/vaultwarden
+WorkingDirectory=/var/lib/vaultwarden
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

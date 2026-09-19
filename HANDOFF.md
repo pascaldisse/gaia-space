@@ -1,3 +1,9 @@
+# Passwords vault (lane B) — feat/vault-ui
+- backend=Vaultwarden 1.37.3 same-origin `/space/vault` (infra lane, `deploy/vaultwarden/INSTALL.md`); spec=`docs/specs/passwords-vault.md`.
+- shipped: `src/vault/crypto.ts`(PBKDF2/HKDF-expand/EncString-2/TOTP, pure WebCrypto) · `src/api/vault.ts`(prelogin/register/login/refresh/sync/ciphers + `inviteToVault` space-cmd) · `src-tauri/src/vault.rs`(`vault_invite`, admin cookie bridge, `VAULTWARDEN_PATH` default `/space/vault`) · `src/views/Passwords.tsx`+css (rail "Passwords", route `/passwords`, unlock/autolock/search/chips/detail/drawer).
+- gate: `bun test`=939 pass/0 fail · `bun run check` clean · `cargo test --features desktop`=all pass (3 vault-specific).
+- UNVERIFIED at commit time: live admin-invite/register/login roundtrip through the deployed edge (crypto is unit-proven offline; see room reply for the browser proof once done).
+
 # KB tables + budget — merge lane
 - branch=`feat/kb-tables-budget` · base=`master@92b6083` · merges=`8f1f058`(sheet-v2) → `8702ab2`(budget-core) → `8dbd690`(budget-ui)
 - fixes=`379c5e5`(baseline clippy) · `5ad03e7`(budget test assertion) · live=`977c945`.

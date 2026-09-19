@@ -83,6 +83,8 @@ pub mod review;
 pub mod rights;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod secretbox;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+pub mod vault;
 
 #[cfg(feature = "desktop")]
 use serde::Serialize;
@@ -429,6 +431,7 @@ pub fn run() {
             budget::budget_statement,
             budget::budget_add_expense,
             budget::budget_export_statement,
+            vault::vault_invite,
             documents::list_documents,
             documents::get_document,
             documents::list_favorite_documents,
