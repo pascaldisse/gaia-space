@@ -514,6 +514,14 @@ const [mobileSidebarOpen, setMobileSidebarOpen] = createSignal(false);
     const hidden = new Set(hiddenGroups());
     return new Set(NAV_GROUPS.filter((group) => hidden.has(group.id)).flatMap((group) => group.views));
   };
+  /** A rail button that cannot arrive is worse than a missing one: the router drops an
+   *  unavailable view and the click lands on Home, silently. So the rail is filtered by
+   *  what this build ACTUALLY offers (`props.views`) — the same list the router was
+   *  given — instead of being a hard-coded constant. */
+  const availableRail = (entries: (typeof RAIL)[number][]) => {
+    const offered = new Set(props.views.map((view) => view.name));
+    return entries.filter((entry) => offered.has(entry.landing));
+  };
   const moreViews = () =>
     props.views.filter(
       (view) =>
@@ -734,12 +742,12 @@ const [mobileSidebarOpen, setMobileSidebarOpen] = createSignal(false);
         <p class="space-shell-error" role="alert">{channelError()}</p>
       </Show>
       <aside class="rail mobile-rail" aria-label="Mobile navigation">
-        <For each={mobileRail()}>{entry => <a class="rail-item" aria-label={entry.label} classList={{ active: mode() === entry.mode }} onPointerDown={() => entry.mode === "chats" && setMobileSidebarOpen(true)} {...navLink(() => landingRoute(entry))}><span class="rail-icon"><Icon name={entry.icon} size={18} /></span><span class="rail-label">{entry.label}</span></a>}</For>
+        <For each={availableRail(mobileRail())}>{entry => <a class="rail-item" aria-label={entry.label} classList={{ active: mode() === entry.mode }} onPointerDown={() => entry.mode === "chats" && setMobileSidebarOpen(true)} {...navLink(() => landingRoute(entry))}><span class="rail-icon"><Icon name={entry.icon} size={18} /></span><span class="rail-label">{entry.label}</span></a>}</For>
         <button class="rail-item" aria-label="More" classList={{ active: moreOpen() || mode() === "more" }} onClick={() => setMoreOpen(open => !open)}><span class="rail-icon"><Icon name="menu" size={18} /></span><span class="rail-label">More</span></button>
       </aside>
       <aside class="rail desktop-rail" aria-label="Main navigation">
         <div class="mark" aria-hidden="true">G</div>
-        <For each={desktopRail()}>{railItem}</For>
+        <For each={availableRail(desktopRail())}>{railItem}</For>
         <button
           class="rail-item"
           title="More"
@@ -782,7 +790,7 @@ const [mobileSidebarOpen, setMobileSidebarOpen] = createSignal(false);
           <Show when={railDroppedOnMobile().length}>
             <div class="more-mobile-only">
               <h2>Destinations</h2>
-              <For each={railDroppedOnMobile()}>
+              <For each={availableRail(railDroppedOnMobile())}>
                 {(entry) => (
                   <a
                     class="more-item"
