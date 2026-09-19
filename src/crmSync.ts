@@ -21,7 +21,9 @@ import { CRM_STORAGE_KEY, normalize, type Activity, type CrmData, type Deal, typ
 export { CRM_STORAGE_KEY };
 /** The local document is RENAMED after a successful upload, never deleted: a backup
  *  nobody asked for is still better than a hole. Its presence is also the "already
- *  migrated" flag, so the offer is made exactly once. */
+ *  decided" FLAG, and that is load-bearing: the view keeps writing the live key as a
+ *  local mirror (§crmStore.saveCrm), so "the key exists" alone would offer the upload
+ *  again on every reload. */
 export const CRM_MIGRATED_KEY = `${CRM_STORAGE_KEY}.migrated`;
 
 const json = (value: unknown) => JSON.stringify(value);
