@@ -892,10 +892,13 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if version < 144 && table_exists(&tx, "todos")? {
         tx.execute_batch(SCHEMA_V144_TODO_SEARCH)?;
     }
-    // V145: CRM sales data moves out of browser localStorage into space.db so the
-    // production backup covers it (see crm.rs). One workspace-wide document plus a
-    // capped revision history for recovery from an accidental overwrite.
-    if version < 145 {
+    // V145: the shared CRM. ONE store for the whole space — the prototype kept it in
+    // `localStorage`, which on the web means one pipeline per browser and nobody knowing
+    // it. Rows, not one document: a write names only the records it touched, so two
+    // people editing different deals never overwrite one another. `payload_json` is the
+    // client record verbatim (`src/crmStore.ts` owns its shape — see `crm.rs`).
+    // Table-guarded on `profiles` like every other additive rung that references it.
+    if version < 145 && table_exists(&tx, "profiles")? {
         tx.execute_batch(SCHEMA_V145_CRM)?;
     }
     // V141: durable hosted Git repository metadata; bare objects live under data_dir/git/.
@@ -1283,6 +1286,24 @@ CREATE TRIGGER IF NOT EXISTS search_todos_ad AFTER DELETE ON todos BEGIN
   DELETE FROM search_index WHERE entity_type='todo' AND entity_id=old.id;
 END;
 "#;
+/// V145: the shared CRM store. One row per record plus two whole-list settings rows;
+/// `updated_at` is the revision source, `updated_by` is accountability only.
+pub(crate) const SCHEMA_V145_CRM: &str = r#"
+CREATE TABLE IF NOT EXISTS crm_records (
+  id TEXT PRIMARY KEY,
+  kind TEXT NOT NULL CHECK(kind IN ('organization','deal','activity')),
+  payload_json TEXT NOT NULL,
+  updated_at INTEGER NOT NULL,
+  updated_by TEXT REFERENCES profiles(id)
+);
+CREATE INDEX IF NOT EXISTS crm_records_kind ON crm_records(kind);
+CREATE TABLE IF NOT EXISTS crm_settings (
+  key TEXT PRIMARY KEY CHECK(key IN ('labels','stages')),
+  payload_json TEXT NOT NULL,
+  updated_at INTEGER NOT NULL,
+  updated_by TEXT REFERENCES profiles(id)
+);
+"#;
 /// V143: one work entity = todo. Copy before renaming so every legacy fact survives.
 pub(crate) const SCHEMA_V143: &str = r#"
 
@@ -1328,24 +1349,6 @@ ALTER TABLE issue_links RENAME TO issue_links_legacy;
 ALTER TABLE issue_assignees RENAME TO issue_assignees_legacy;
 ALTER TABLE issue_board_positions RENAME TO issue_board_positions_legacy;
 ALTER TABLE issue_tags RENAME TO issue_tags_legacy;
-"#;
-/// V145: workspace CRM document + capped revision history. See crm.rs module docs.
-pub(crate) const SCHEMA_V145_CRM: &str = r#"
-CREATE TABLE IF NOT EXISTS crm_documents (
-    id TEXT PRIMARY KEY,
-    data TEXT NOT NULL,
-    revision INTEGER NOT NULL,
-    updated_at INTEGER NOT NULL,
-    updated_by TEXT
-);
-CREATE TABLE IF NOT EXISTS crm_document_revisions (
-    document_id TEXT NOT NULL,
-    revision INTEGER NOT NULL,
-    data TEXT NOT NULL,
-    saved_at INTEGER NOT NULL,
-    saved_by TEXT,
-    PRIMARY KEY(document_id,revision)
-);
 "#;
 /// V141: durable hosted Git repository metadata.
 pub(crate) const SCHEMA_V141: &str = r#"
@@ -3780,7 +3783,7 @@ mod v145_contract_tests {
     use super::*;
 
     #[test]
-    fn v145_upgrade_adds_crm_tables_and_preserves_existing_rows() {
+    fn v145_upgrade_adds_crm_record_tables_and_preserves_existing_rows() {
         let temp = TempDb::new("gaia-space-v145-crm");
         let conn = open_at(&temp).unwrap();
         migrate(&conn).unwrap();
@@ -3790,7 +3793,8 @@ mod v145_contract_tests {
             [],
         )
         .unwrap();
-        // Simulate a database pinned at V144 and migrate forward again.
+        // Simulate a database pinned at V144 and migrate forward again — the real ladder
+        // this deploy runs on production (schema 144 → 145).
         conn.pragma_update(None, "user_version", 144).unwrap();
         migrate(&conn).expect("v145");
         assert_eq!(
@@ -3800,7 +3804,7 @@ mod v145_contract_tests {
         );
         let tables: i64 = conn
             .query_row(
-                "SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN ('crm_documents','crm_document_revisions')",
+                "SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN ('crm_records','crm_settings')",
                 [],
                 |r| r.get(0),
             )
@@ -3815,5 +3819,31 @@ mod v145_contract_tests {
             .unwrap();
         assert_eq!(kept, "Legacy", "existing rows are untouched");
         migrate(&conn).expect("idempotent");
+    }
+
+    #[test]
+    fn v145_crm_records_round_trip_through_the_real_migration_path() {
+        let temp = TempDb::new("gaia-space-v145-crm-roundtrip");
+        let conn = open_at(&temp).unwrap();
+        migrate(&conn).unwrap();
+        seed(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO profiles(id,username,display_name,created_at) VALUES('p-a','a','A',0)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO crm_records(id,kind,payload_json,updated_at,updated_by) VALUES('org-1','organization','{\"id\":\"org-1\",\"name\":\"Acme\"}',1,'p-a')",
+            [],
+        )
+        .unwrap();
+        let name: String = conn
+            .query_row(
+                "SELECT json_extract(payload_json,'$.name') FROM crm_records WHERE id='org-1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(name, "Acme", "the row is addressable and the payload round-trips");
     }
 }

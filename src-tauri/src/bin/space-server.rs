@@ -10,9 +10,8 @@ use axum::{
 };
 use gaia_space_lib::{
     app_rights, applications, blogs, budget, calendar_feeds, calls, channel_feeds, channel_notes,
-    chat, chatbot, crm, db, devenv, documents, events, git_hosting, issues, leads, meetings,
-    oauth, organization, package_registry, payload_dispatch, personal, pipelines, platform,
-    review, vault,
+    chat, chatbot, crm, db, devenv, documents, events, git_hosting, issues, leads, meetings, oauth,
+    organization, package_registry, payload_dispatch, personal, pipelines, platform, review, vault,
 };
 use rand::RngCore;
 use rusqlite::{params, OptionalExtension};
@@ -2797,6 +2796,12 @@ enum CommandPolicy {
     CalendarFeedOwnerAction,
     DashboardPreferencesWrite,
     CalendarOptionsWrite,
+    /// The shared CRM. A logged-in member may read and write ALL of it — that is the
+    /// requirement, not an oversight. The gate's only job is to stamp WHO is writing,
+    /// and it must NOT run the blanket `bind_session_identity`: CRM payloads carry a
+    /// human `owner` field of their own, and rewriting it to a profile id would corrupt
+    /// every record the client stores verbatim.
+    CrmAccess,
     /// Contact leads contain private contact data; GlobalAdmin only.
     LeadRead,
     /// Erasing a contact lead is the same administrator door as reading it.
@@ -2814,6 +2819,7 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
     Some(match name {
         "create_hosted_repo" | "delete_hosted_repo" | "list_hosted_repos" | "hosted_repo_clone_url" => CommandPolicy::Session,
         "vault_invite" => CommandPolicy::Session,
+        "crm_snapshot" | "crm_put_records" | "crm_purge_records" => CommandPolicy::CrmAccess,
 "create_project" => CommandPolicy::ProjectCreate,
         "update_project" => CommandPolicy::ProjectWrite,
         "delete_project" => CommandPolicy::ProjectDelete,
@@ -2851,10 +2857,6 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         "create_channel_note" | "update_channel_note" | "delete_channel_note" => {
             CommandPolicy::ChannelNoteWrite
         }
-        // The CRM document is workspace-wide: any authenticated session may read or
-        // save it, exactly like `create_meeting` and the other plain `Session` writes.
-        // The optimistic-concurrency conflict check lives in crm.rs, not here.
-        "get_crm_document" | "save_crm_document" => CommandPolicy::Session,
         "mark_notification_read" => CommandPolicy::NotificationWrite,
         "create_absence" | "update_absence" | "delete_absence" => CommandPolicy::AbsenceWrite,
         "create_meeting" | "create_channel_call" => CommandPolicy::SessionIdentityWrite,
@@ -3666,6 +3668,10 @@ fn authorize_command(
     } else if (!matches!(policy, CommandPolicy::AbsenceWrite) || user.role != "GlobalAdmin")
         && policy != CommandPolicy::DocumentAccessWrite
         && policy != CommandPolicy::MeetingParticipantWrite
+        // CRM payloads are stored verbatim and contain a human `owner` name; the
+        // recursive rebinding would overwrite it inside every record. The CRM arm
+        // below binds the acting identity at the top level instead.
+        && policy != CommandPolicy::CrmAccess
     {
         // Access recipient ids intentionally name *other* people/teams; rebinding them
         // to the caller would turn every share into a self-grant.
@@ -4345,6 +4351,12 @@ fn authorize_command(
                 }
                 absence.insert("profile_id".into(), json!(user.profile_id));
             }
+            Ok(())
+        }
+        CommandPolicy::CrmAccess => {
+            // Nothing is hidden and nothing is refused beyond the session gate itself;
+            // the one thing the server decides is who gets stamped as the last writer.
+            put_arg(body, "acting_profile_id", json!(user.profile_id));
             Ok(())
         }
         CommandPolicy::SessionIdentityWrite => {
@@ -5744,6 +5756,11 @@ async fn cmd(
     "budget_statement" => budget::budget_statement(document_id: String, month: Option<String>, profile_id: Option<String>),
     "budget_add_expense" => budget::budget_add_expense(document_id: String, input: budget::BudgetExpenseInput, actor: Option<String>),
     "vault_invite" => vault::vault_invite(input: vault::VaultInviteInput),
+    // The shared CRM: every member reads and writes all of it (see `crm.rs`). The
+    // acting identity arrives as `acting_profile_id`, injected by `authorize_command`.
+    "crm_snapshot" => crm::crm_snapshot(),
+    "crm_put_records" => crm::crm_put_records(organizations: Option<Vec<serde_json::Value>>, deals: Option<Vec<serde_json::Value>>, activities: Option<Vec<serde_json::Value>>, labels: Option<Vec<serde_json::Value>>, stages: Option<Vec<serde_json::Value>>, acting_profile_id: Option<String>),
+    "crm_purge_records" => crm::crm_purge_records(organization_ids: Option<Vec<String>>, deal_ids: Option<Vec<String>>, activity_ids: Option<Vec<String>>),
     "budget_export_statement" => budget::budget_export_statement(document_id: String, month: String, profile_id: Option<String>),
     "archive_document" => documents::archive_document(id: String, archived: bool),
     "delete_document" => documents::delete_document(id: String, actor_id: String),
@@ -5810,8 +5827,6 @@ async fn cmd(
     "create_channel_note" => channel_notes::create_channel_note(input: channel_notes::ChannelNoteInput),
     "update_channel_note" => channel_notes::update_channel_note(note: channel_notes::ChannelNote),
     "delete_channel_note" => channel_notes::delete_channel_note(id: String, profile_id: String),
-    "get_crm_document" => crm::get_crm_document(profile_id: String),
-    "save_crm_document" => crm::save_crm_document(data: String, base_revision: i64, profile_id: String),
     "dry_run_merge" => review::dry_run_merge(id: String, repo_path: String, review_id: String, source_branch: String, target_branch: String),
     "emit_notification" => personal::emit_notification(input: personal::NotificationInput),
     "evaluate_quality_gate" => review::evaluate_quality_gate(review_id: String),
@@ -9599,88 +9614,6 @@ mod tests {
             .query_row("SELECT count(*) FROM channel_notes", [], |r| r.get(0))
             .unwrap();
         assert_eq!(left, 0);
-    }
-
-    #[test]
-    fn crm_commands_are_session_scoped() {
-        for name in ["get_crm_document", "save_crm_document"] {
-            assert!(
-                matches!(command_policy(name), Some(CommandPolicy::Session)),
-                "{name}"
-            );
-        }
-    }
-
-    /// The CRM document over HTTP: refused without a session, reachable with one, and
-    /// a stale save is refused as a conflict rather than silently overwriting.
-    #[tokio::test]
-    async fn crm_document_endpoints_require_a_session_and_reach_the_real_router() {
-        let _serial = test_lock();
-        setup();
-
-        // The real client always names itself; the session overwrites whatever it says
-        // (see the forged-author save below), but the key must be present for
-        // `bind_session_identity` to have something to rewrite — it patches existing
-        // keys, it does not invent missing ones.
-        let (status, _) = call(
-            HeaderMap::new(),
-            "get_crm_document",
-            json!({"profile_id":"pa"}),
-        )
-        .await;
-        assert_eq!(status, StatusCode::UNAUTHORIZED);
-        let (status, _) = call(
-            HeaderMap::new(),
-            "save_crm_document",
-            json!({"data":"{}","base_revision":0,"profile_id":"pa"}),
-        )
-        .await;
-        assert_eq!(status, StatusCode::UNAUTHORIZED);
-
-        // A logged-in session reaches the real router and sees the empty starting state.
-        let (status, value) = call(cookie("ta"), "get_crm_document", json!({"profile_id":"ta"})).await;
-        assert_eq!(status, StatusCode::OK, "{value}");
-        assert_eq!(value["value"]["revision"], json!(0));
-        assert_eq!(value["value"]["data"], json!(""));
-
-        // Alice saves while claiming Bob as the author; the session wins.
-        let (status, value) = call(
-            cookie("ta"),
-            "save_crm_document",
-            json!({"data":"{\"deals\":[]}","base_revision":0,"profile_id":"pb"}),
-        )
-        .await;
-        assert_eq!(status, StatusCode::OK, "{value}");
-        assert_eq!(value["value"]["revision"], json!(1));
-        assert_eq!(
-            value["value"]["updatedBy"],
-            json!("pa"),
-            "a forged author is replaced by the session"
-        );
-
-        // Bob still has the stale revision 0 and is refused a conflict, not a silent stomp.
-        let (status, value) = call(
-            cookie("tb"),
-            "save_crm_document",
-            json!({"data":"{}","base_revision":0,"profile_id":"pb"}),
-        )
-        .await;
-        assert_eq!(status, StatusCode::BAD_REQUEST);
-        assert_eq!(value["error"], json!("crm-conflict:1"), "{value}");
-
-        // Bob re-reads the current revision and saves cleanly on top of it.
-        let (status, value) = call(cookie("tb"), "get_crm_document", json!({"profile_id":"tb"})).await;
-        assert_eq!(status, StatusCode::OK, "{value}");
-        let current_revision = value["value"]["revision"].as_i64().unwrap();
-        let (status, value) = call(
-            cookie("tb"),
-            "save_crm_document",
-            json!({"data":"{\"deals\":[{\"id\":\"d1\"}]}","base_revision":current_revision,"profile_id":"pb"}),
-        )
-        .await;
-        assert_eq!(status, StatusCode::OK, "{value}");
-        assert_eq!(value["value"]["revision"], json!(2));
-        assert_eq!(value["value"]["updatedBy"], json!("pb"));
     }
 
     #[tokio::test]

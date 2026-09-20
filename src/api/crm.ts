@@ -1,49 +1,63 @@
-/** ── CRM persistence: one workspace document, stored in space.db ──────────────
- *  The CRM used to live ONLY in localStorage: every browser held a different sales
- *  history, nothing was shared, and nothing was in the production backup — the one
- *  place customer data must be. The server now owns the document; localStorage keeps
- *  its role as a CACHE for first paint and for a broken connection.
- *
- *  The document is a JSON string on purpose. The CRM's shape is owned by crmStore.ts
- *  (`CrmData`, §normalize), which already migrates v1 → v2 documents on read; a second,
- *  Rust-side copy of that model would be a second thing to keep true.
- *
- *  CONCURRENCY — `revision` is the whole protocol. A save states which revision it was
- *  editing; the server refuses (`crm-conflict:<current>`) when someone else has written
- *  since. A refusal is NOT an error to swallow: the caller reloads and the user is told,
- *  because silently overwriting a colleague's afternoon is the failure this prevents. */
 import { invoke } from "@tauri-apps/api/core";
-import { profileId } from "../session";
 
-export type CrmDocument = {
-  /** The whole CrmData document, JSON-encoded. Empty string = nothing stored yet. */
-  data: string;
-  /** 0 when the workspace has never saved. Every successful save increments it. */
+/** ── The shared CRM store (§docs/specs/crm-server-store.md) ───────────────────
+ *  ONE CRM for the whole space, held by the server, identical on desktop and web.
+ *  Storage is a ROW PER RECORD, never one document: a write names only the records it
+ *  touched, so two people editing two different deals cannot revert each other.
+ *
+ *  The server does not re-model a record. `payload_json` is the client record verbatim
+ *  (`Organization` | `Deal` | `Activity` from `crmStore.ts`), and `normalize()` on the
+ *  client stays the single place that decides what a valid record is. The server owns
+ *  identity, time and access — nothing else. */
+
+/** A record as it travels: the client shape, unread by the server. */
+export type CrmRecordJson = Record<string, unknown>;
+
+/** `revision` = MAX(updated_at) over the CRM tables, `0` when empty. It exists so a
+ *  poller can skip a redundant re-render — it is NOT a lock and grants no exclusivity. */
+export type CrmSnapshot = {
+  organizations: CrmRecordJson[];
+  deals: CrmRecordJson[];
+  activities: CrmRecordJson[];
+  labels: CrmRecordJson[];
+  stages: CrmRecordJson[];
   revision: number;
-  /** Unix millis of the last write; 0 when never written. */
-  updatedAt: number;
-  updatedBy: string | null;
 };
 
-/** Thrown-error prefix the server uses for a refused stale write (§save). */
-export const CRM_CONFLICT = "crm-conflict:";
-
-/** The revision the server holds, parsed out of a conflict error, or null if the
- *  failure was something else entirely (offline, permission, a real bug). */
-export const conflictRevision = (reason: unknown): number | null => {
-  const text = typeof reason === "string" ? reason : reason instanceof Error ? reason.message : String(reason ?? "");
-  const at = text.indexOf(CRM_CONFLICT);
-  if (at < 0) return null;
-  const parsed = Number.parseInt(text.slice(at + CRM_CONFLICT.length), 10);
-  return Number.isFinite(parsed) ? parsed : null;
+/** Upsert by `id`; a list that is absent is UNTOUCHED, an absent record is untouched.
+ *  `labels`/`stages` are whole lists — small shared config, one settings row each. */
+export type CrmPutRecords = {
+  organizations?: CrmRecordJson[];
+  deals?: CrmRecordJson[];
+  activities?: CrmRecordJson[];
+  labels?: CrmRecordJson[];
+  stages?: CrmRecordJson[];
 };
 
-/** The document is workspace-wide, so `profileId` scopes nothing — it names the CALLER.
- *  The web bridge's `bind_session_identity` only REWRITES a key that is present; an
- *  omitted one is a missing argument (400), so it is always sent, even empty. */
+/** The hard delete. Soft delete (`deletedAt`) lives INSIDE the payload — the trash is
+ *  client logic, and only emptying it removes a row. */
+export type CrmPurgeRecords = {
+  organizationIds?: string[];
+  dealIds?: string[];
+  activityIds?: string[];
+};
+
+export type CrmRevision = { revision: number };
+
+/** Every authenticated member may read and write the whole CRM; there is no owner
+ *  filter and no admin gate, because that is the requirement — a UI that pretended
+ *  otherwise would be lying about what the server does. */
 export const crmApi = {
-  get: () => invoke<CrmDocument>("get_crm_document", { profileId: profileId() ?? "" }),
-  /** `baseRevision` is the revision this data was derived from. */
-  save: (data: string, baseRevision: number) =>
-    invoke<CrmDocument>("save_crm_document", { data, baseRevision, profileId: profileId() ?? "" }),
+  snapshot: () => invoke<CrmSnapshot>("crm_snapshot"),
+  putRecords: (records: CrmPutRecords) => invoke<CrmRevision>("crm_put_records", records as Record<string, unknown>),
+  purgeRecords: (ids: CrmPurgeRecords) => invoke<CrmRevision>("crm_purge_records", ids as Record<string, unknown>),
 };
+
+export const emptySnapshot = (): CrmSnapshot =>
+  ({ organizations: [], deals: [], activities: [], labels: [], stages: [], revision: 0 });
+
+/** "The server holds no CRM yet" — asked of the RECORDS, never of `revision` alone,
+ *  so a store that only ever held a stage rename is not mistaken for a fresh one. */
+export const isEmptySnapshot = (snapshot: CrmSnapshot): boolean =>
+  !snapshot.organizations?.length && !snapshot.deals?.length && !snapshot.activities?.length
+  && !snapshot.labels?.length && !snapshot.stages?.length;

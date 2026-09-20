@@ -164,7 +164,13 @@ export const dealAmount = (deal: Pick<Deal, "value">): number =>
 
 export const LABEL_COLORS = ["#00C2A8", "#2F6BFF", "#6B3D8B", "#B2500F", "#0F1B33", "#118C5C", "#8B2E5A", "#5A6473"] as const;
 
-const KEY_V2 = "gaia.crm.prototype.v2";
+/** The local document. Since the CRM became a SHARED, server-held store (§crmSync) this
+ *  key is no longer the truth — it is a mirror: what the last session saw, so a reload
+ *  has something honest to show while the first snapshot is in flight and an unreachable
+ *  server shows the last known CRM instead of an empty one. Every write still goes
+ *  through `crmSync`, and the one-time upload renames this key (§CRM_MIGRATED_KEY). */
+export const CRM_STORAGE_KEY = "gaia.crm.prototype.v2";
+const KEY_V2 = CRM_STORAGE_KEY;
 const KEY_V1 = "gaia.crm.prototype.v1";
 export const id = (prefix: string) => `${prefix}-${crypto.randomUUID()}`;
 const now = () => new Date().toISOString();
@@ -646,21 +652,8 @@ export const normalize = (raw: any): CrmData => {
   return seed();
 };
 
-/** What this browser has ACTUALLY STORED, or null when it has stored nothing. The
- *  difference matters exactly once: on the first pull (§crmSync), a browser that never
- *  wrote a document must not stamp the demo seed onto an empty workspace, while a
- *  browser carrying the prototype's real sales data must have it adopted. `loadCrm`
- *  cannot answer this — it returns a seed for "nothing stored" and for "broken". */
-export const storedCrm = (): CrmData | null => {
-  try {
-    const rawV2 = localStorage.getItem(KEY_V2);
-    if (rawV2) return normalize(JSON.parse(rawV2));
-    const rawV1 = localStorage.getItem(KEY_V1);
-    if (rawV1) return migrateV1(JSON.parse(rawV1));
-    return null;
-  } catch { return null; }
-};
-
+/** Reads the local MIRROR (§CRM_STORAGE_KEY). The shared document arrives from the
+ *  server a moment later and replaces whatever this returned. */
 export const loadCrm = (): CrmData => {
   try {
     const rawV2 = localStorage.getItem(KEY_V2);
@@ -670,4 +663,6 @@ export const loadCrm = (): CrmData => {
     return seed();
   } catch { return seed(); }
 };
+/** Writes the local MIRROR. This is a cache, not the save: persistence is
+ *  `crmSync.persist`, which writes the touched records to the shared store. */
 export const saveCrm = (data: CrmData) => { try { localStorage.setItem(KEY_V2, JSON.stringify(data)); } catch { /* storage unavailable */ } };

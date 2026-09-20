@@ -19,7 +19,7 @@ import {
   type Organization, type PipelineStage, type RecordInput, type DealInput,
   LEAD_STATE_LABELS,
 } from "../crmStore";
-import { crmSync } from "../crmSync";
+import { createCrmSync, initialSyncState, type CrmSyncState } from "../crmSync";
 import { formatAmount, formatMoney, moneyOf, MIXED_CURRENCY_LABEL } from "../crmInsights";
 import { importLeads, type ImportRow } from "../crmImport";
 import CrmImportDialog from "./CrmImportDialog";
@@ -74,51 +74,24 @@ export default function CRM() {
   const [tab, setTab] = createSignal<CrmTab>(tabOf(route().tab));
   createEffect(() => setTab(tabOf(route().tab)));
 
-  /* ── PERSISTENCE (§crmSync) ────────────────────────────────────────────────
-     The CRM used to live only in this browser. It now lives in space.db — which is
-     what the production backup copies — and localStorage is the cache that keeps the
-     view painting instantly and keeps working without a server.
-
-     Three states are SAID, never hidden: unsynced (no server), adopted (this browser's
-     prototype data just became the workspace document), and conflict — somebody else
-     saved while this document was open. A conflict does NOT resolve itself: the user's
-     unsaved document stays on screen and they choose which one survives. */
-  const [syncState, setSyncState] = createSignal<"loading" | "synced" | "offline" | "adopted" | "conflict">("loading");
-  let hydrated = false;
-  let pushTimer: ReturnType<typeof setTimeout> | undefined;
-
-  onMount(async () => {
-    const pulled = await crmSync.pull();
-    setData(pulled.data);
-    hydrated = true;
-    setSyncState(pulled.source === "offline" ? "offline" : pulled.source === "adopted" ? "adopted" : "synced");
+  /** ── Persistence ────────────────────────────────────────────────────────────
+   *  The CRM is ONE shared document on the server (§crmSync). The signal above starts
+   *  from the local mirror so the first paint is instant and a reload is never blank;
+   *  the snapshot replaces it as soon as it arrives, and every mutation writes back the
+   *  records it touched — never the whole document, so two people editing two deals
+   *  cannot revert each other. `saveCrm` keeps the mirror, nothing more. */
+  const [sync, setSync] = createSignal<CrmSyncState>(initialSyncState());
+  const crmSync = createCrmSync({ apply: setData, onState: setSync });
+  createEffect(on(data, document => { saveCrm(document); void crmSync.persist(document); }));
+  onMount(() => {
+    void crmSync.start();
+    // Another member's write must arrive without a secret reload gesture; an unchanged
+    // revision costs nothing and re-renders nothing (§crmSync.poll).
+    const refresh = () => { void crmSync.poll(); };
+    const interval = window.setInterval(refresh, 15_000);
+    window.addEventListener("focus", refresh);
+    onCleanup(() => { window.clearInterval(interval); window.removeEventListener("focus", refresh); });
   });
-
-  /* The cache is written on EVERY change, synchronously; the server write is debounced,
-     because a drag across the board is one intention, not thirty documents. `defer`
-     keeps the first render from pushing the pre-hydration document back up. */
-  createEffect(on(data, current => {
-    saveCrm(current);
-    if (!hydrated || syncState() === "conflict") return;
-    clearTimeout(pushTimer);
-    pushTimer = setTimeout(async () => {
-      const outcome = await crmSync.push(current);
-      setSyncState(outcome.status === "saved" ? "synced" : outcome.status === "conflict" ? "conflict" : "offline");
-    }, 700);
-  }, { defer: true }));
-  onCleanup(() => clearTimeout(pushTimer));
-
-  /** Conflict, resolved by the person who has the context: take theirs (this document
-     is discarded) or keep mine (theirs is overwritten, deliberately). */
-  const takeServerVersion = async () => {
-    const pulled = await crmSync.pull();
-    setData(pulled.data);
-    setSyncState(pulled.source === "offline" ? "offline" : "synced");
-  };
-  const keepMyVersion = async () => {
-    const outcome = await crmSync.overwrite(data());
-    setSyncState(outcome.status === "saved" ? "synced" : outcome.status === "conflict" ? "conflict" : "offline");
-  };
 
   const mutate = (fn: (draft: CrmData) => void) => setData(current => { const next = structuredClone(current); fn(next); return next; });
   const orgOf = (deal: Deal) => organizationOf(data(), deal);
@@ -281,21 +254,7 @@ export default function CRM() {
 
   return <section class="crm-view">
     <PageHeader icon="columns" title="CRM" subline="Organisationen, Deals und Aktivitäten im Vertrieb." chips={<Chip value={count()} label={chipLabel()} />} />
-    {/* The storage state is part of the data, not a toast that disappears: a person
-        typing into an unsynced CRM has a right to know before the hour is over. */}
-    <Show when={syncState() === "offline"}>
-      <p class="crm-sync crm-sync-offline" role="status"><Icon name="alert" size={16} /> Nicht synchronisiert — Server nicht erreichbar. Änderungen liegen nur in diesem Browser und sind nicht im Backup.</p>
-    </Show>
-    <Show when={syncState() === "adopted"}>
-      <p class="crm-sync" role="status"><Icon name="upload" size={16} /> Die bisher nur lokal gespeicherten CRM-Daten dieses Browsers wurden übernommen und liegen jetzt auf dem Server.</p>
-    </Show>
-    <Show when={syncState() === "conflict"}>
-      <p class="crm-sync crm-sync-conflict" role="alert">
-        <Icon name="alert" size={16} /> Jemand anderes hat das CRM inzwischen gespeichert. Deine Änderungen sind noch <strong>nicht</strong> gespeichert.
-        <button type="button" onClick={keepMyVersion}>Meine Version speichern</button>
-        <button type="button" onClick={takeServerVersion}>Server-Version laden</button>
-      </p>
-    </Show>
+    <CrmSyncBanner state={sync} onRetry={() => void crmSync.start()} onMigrate={() => void crmSync.migrate()} onDismiss={() => crmSync.dismissMigration()} />
     <nav class="page-actionbar crm-toolbar" aria-label="CRM actions">
       <Show when={tab() !== "insights"}>
         <div class="crm-search"><Icon name="search" size={17} /><input value={query()} onInput={e => setQuery(e.currentTarget.value)} placeholder="Organisation, Standort oder Adresse suchen" aria-label="CRM durchsuchen" /></div>
@@ -437,6 +396,44 @@ export default function CRM() {
       </Show>
     </>}</Show>
   </section>;
+}
+
+/** ── What the CRM says about its own storage ────────────────────────────────
+ *  A CRM that cannot reach the server must SAY so. The two failure modes it replaces
+ *  are both lies: an empty board ("your pipeline is gone") and an edit that looks saved
+ *  and is not. So the banner states the situation and, where a decision is due, asks
+ *  for it — the local document is never uploaded without a click and a record count.
+ *  Styling is inline on purpose: `CRM.css` belongs to another lane in this change. */
+function CrmSyncBanner(props: { state: () => CrmSyncState; onRetry: () => void; onMigrate: () => void; onDismiss: () => void }) {
+  const tone = () => props.state().status === "offline" ? "#B2500F" : props.state().status === "migration" ? "#2F6BFF" : "#5A6473";
+  const style = () => ({
+    display: "flex", "align-items": "center", gap: "10px", "flex-wrap": "wrap" as const,
+    margin: "0 0 12px", padding: "10px 14px", "border-radius": "10px", "font-size": "13px",
+    border: `1px solid ${tone()}`, color: tone(), background: `${tone()}12`,
+  });
+  const button = { border: "1px solid currentColor", background: "transparent", color: "inherit", "border-radius": "7px", padding: "4px 10px", cursor: "pointer", font: "inherit" } as const;
+  return <Show when={props.state().status !== "online"}>
+    <div class="crm-sync-banner" data-sync-status={props.state().status} role="status" style={style()}>
+      <Show when={props.state().status === "loading"}>
+        <span>Gemeinsames CRM wird vom Server geladen …</span>
+      </Show>
+      <Show when={props.state().status === "offline"}>
+        <Icon name="alert" size={16} />
+        <span>
+          <strong>Server nicht erreichbar.</strong> Angezeigt wird der zuletzt bekannte Stand;
+          {props.state().pending ? ` ${props.state().pending} geänderte Datensätze sind NICHT auf dem Server gespeichert.` : " Änderungen werden derzeit nicht auf dem Server gespeichert."}
+          <Show when={props.state().error}><small style={{ display: "block", opacity: "0.8" }}>{props.state().error}</small></Show>
+        </span>
+        <button type="button" style={button} onClick={props.onRetry}>Erneut verbinden</button>
+      </Show>
+      <Show when={props.state().status === "migration"}>
+        <Icon name="upload" size={16} />
+        <span>Auf dem Server liegt noch kein CRM. Dieser Rechner hat <strong>{props.state().localRecords}</strong> lokale Datensätze.</span>
+        <button type="button" style={button} onClick={props.onMigrate}>{props.state().localRecords} Datensätze hochladen</button>
+        <button type="button" style={button} onClick={props.onDismiss}>Leeres Server-CRM verwenden</button>
+      </Show>
+    </div>
+  </Show>;
 }
 
 /** The four things a drag can mean, named on screen while the record is in flight. */

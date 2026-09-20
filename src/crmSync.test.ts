@@ -1,157 +1,212 @@
-import { describe, expect, test } from "bun:test";
-import { createCrmSync, type CrmCache, type CrmTransport } from "./crmSync";
-import { CRM_CONFLICT, conflictRevision, type CrmDocument } from "./api/crm";
-import { createOrganization, seed, type CrmData } from "./crmStore";
+import { afterEach, beforeEach, expect, mock, test } from "bun:test";
 
-const doc = (data: string, revision: number): CrmDocument => ({ data, revision, updatedAt: revision, updatedBy: null });
+// The invoke layer is the ONLY thing stubbed: the sync engine below runs its real
+// diffing, its real `normalize()` pass and its real migration decision, and the calls
+// asserted here are the ones the Rust commands will actually receive
+// (§docs/specs/crm-server-store.md — the commands do not exist at runtime yet).
+type Call = { cmd: string; args: any };
+const calls: Call[] = [];
+let handler: (cmd: string, args: any) => Promise<any> = () => Promise.reject(new Error("no server"));
+mock.module("@tauri-apps/api/core", () => ({
+  invoke: (cmd: string, args?: any) => { calls.push({ cmd, args }); return handler(cmd, args); },
+}));
 
-/** A cache that behaves like localStorage does for this module: `stored` is null until
- *  something has actually been written, `load` always renders something. */
-function memoryCache(initial?: CrmData): CrmCache & { current: () => CrmData } {
-  let held: CrmData | null = initial ?? null;
-  const fallback = seed();
-  return { load: () => held ?? fallback, stored: () => held, save: (data) => { held = data; }, current: () => held ?? fallback };
-}
+import { isEmptySnapshot, type CrmSnapshot } from "./api/crm";
+import {
+  CRM_MIGRATED_KEY, CRM_STORAGE_KEY, countRecords, createCrmSync, crmWriteFor, snapshotToCrmData,
+  type CrmSyncState,
+} from "./crmSync";
+import { emptyActivity, emptyDeal, emptyOrganization, normalize, type CrmData } from "./crmStore";
 
-function server(initial?: CrmDocument) {
-  let stored = initial ?? doc("", 0);
-  const calls: Array<{ data: string; baseRevision: number }> = [];
-  const transport: CrmTransport = {
-    get: async () => stored,
-    save: async (data, baseRevision) => {
-      calls.push({ data, baseRevision });
-      if (baseRevision !== stored.revision) throw new Error(`${CRM_CONFLICT}${stored.revision}`);
-      stored = doc(data, stored.revision + 1);
-      return stored;
-    },
-  };
-  return { transport, calls, stored: () => stored };
-}
+const snapshot = (parts: Partial<CrmSnapshot> = {}): CrmSnapshot =>
+  ({ organizations: [], deals: [], activities: [], labels: [], stages: [], revision: 0, ...parts });
 
-/** A document with exactly one organization. `createOrganization` mutates the document
- *  it is handed and returns the record, so the document is what we keep. */
-const withOrg = (name: string): CrmData => { const data = seed(); createOrganization(data, { name }); return data; };
-
-describe("first pull", () => {
-  test("a stored workspace document wins over whatever this browser cached", async () => {
-    const theirs = withOrg("Serverfirma");
-    const cache = memoryCache(withOrg("Browserfirma"));
-    const sync = createCrmSync(server(doc(JSON.stringify(theirs), 7)).transport, cache);
-
-    const result = await sync.pull();
-
-    expect(result.source).toBe("server");
-    expect(result.revision).toBe(7);
-    expect(result.data.organizations.map(org => org.name)).toContain("Serverfirma");
-    // The cache is rewritten, so a reload paints the workspace document, not the old one.
-    expect(cache.current().organizations.map(org => org.name)).toContain("Serverfirma");
-    expect(cache.current().organizations.map(org => org.name)).not.toContain("Browserfirma");
-  });
-
-  test("an empty server ADOPTS the prototype data this browser still holds", async () => {
-    const cache = memoryCache(withOrg("Altbestand"));
-    const remote = server();
-    const sync = createCrmSync(remote.transport, cache);
-
-    const result = await sync.pull();
-
-    expect(result.source).toBe("adopted");
-    expect(sync.revision()).toBe(1);
-    expect(JSON.parse(remote.stored().data).organizations.map((org: { name: string }) => org.name)).toContain("Altbestand");
-  });
-
-  test("an empty server and a browser that never stored anything adopt NOTHING — the demo seed never claims a workspace", async () => {
-    const remote = server();
-    const sync = createCrmSync(remote.transport, memoryCache());
-
-    const result = await sync.pull();
-
-    expect(result.source).toBe("empty");
-    expect(remote.calls).toHaveLength(0);
-    expect(remote.stored().revision).toBe(0);
-  });
-
-  test("an unreachable server yields the cache, marked unsynced", async () => {
-    const cache = memoryCache(withOrg("Offline GmbH"));
-    const sync = createCrmSync({ get: async () => { throw new Error("network"); }, save: async () => { throw new Error("network"); } }, cache);
-
-    const result = await sync.pull();
-
-    expect(result.source).toBe("offline");
-    expect(result.data.organizations.map(org => org.name)).toContain("Offline GmbH");
-    expect(sync.online()).toBe(false);
-  });
-
-  test("a stored document that will not parse never blanks the view", async () => {
-    const cache = memoryCache(withOrg("Cachefirma"));
-    const sync = createCrmSync(server(doc("{not json", 3)).transport, cache);
-
-    const result = await sync.pull();
-
-    expect(result.source).toBe("offline");
-    expect(result.data.organizations.map(org => org.name)).toContain("Cachefirma");
-  });
+const fixture = (): CrmData => {
+  const org = { ...emptyOrganization("Optik Nord", "Jannes"), id: "org-1" };
+  const deal = { ...emptyDeal("org-1", "Optik Nord"), id: "deal-1", value: "12.000" };
+  const inbox = { ...emptyActivity({ title: "Rückruf" }), id: "activity-1" };
+  return normalize({ version: 2, organizations: [org], deals: [deal], activities: [inbox], labels: [], pipelineStages: [] });
+};
+const asSnapshot = (data: CrmData, revision = 1): CrmSnapshot => snapshot({
+  organizations: data.organizations as any, deals: data.deals as any, activities: data.activities as any,
+  labels: data.labels as any, stages: data.pipelineStages as any, revision,
 });
 
-describe("push", () => {
-  test("saves against the held revision and moves forward", async () => {
-    const remote = server(doc(JSON.stringify(seed()), 4));
-    const sync = createCrmSync(remote.transport, memoryCache());
-    await sync.pull();
+const track = () => {
+  const applied: CrmData[] = [];
+  const states: CrmSyncState[] = [];
+  const sync = createCrmSync({ apply: data => applied.push(data), onState: state => states.push({ ...state }) });
+  return { applied, states, sync, last: () => states[states.length - 1] };
+};
 
-    const outcome = await sync.push(withOrg("Neu AG"));
+beforeEach(() => { calls.length = 0; localStorage.clear(); handler = () => Promise.reject(new Error("no server")); });
+// The module mock is GLOBAL to the test process: a handler left behind would answer
+// another suite's CRM mount with this file's fixture. Reset to the real-world default
+// (no Tauri host -> the call rejects).
+afterEach(() => { localStorage.clear(); handler = () => Promise.reject(new Error("no server")); });
 
-    expect(outcome).toEqual({ status: "saved", revision: 5 });
-    expect(remote.calls[remote.calls.length - 1].baseRevision).toBe(4);
-  });
-
-  test("a stale write is REFUSED and reports the revision that exists", async () => {
-    const remote = server(doc(JSON.stringify(seed()), 4));
-    const sync = createCrmSync(remote.transport, memoryCache());
-    await sync.pull();
-    // Somebody else saves in between.
-    const other = createCrmSync(remote.transport, memoryCache());
-    await other.pull();
-    await other.push(withOrg("Fremde Firma"));
-
-    const outcome = await sync.push(withOrg("Meine Firma"));
-
-    expect(outcome).toEqual({ status: "conflict", revision: 5 });
-    // And the other person's document is still the one stored.
-    expect(JSON.parse(remote.stored().data).organizations.map((org: { name: string }) => org.name)).toContain("Fremde Firma");
-  });
-
-  test("the local edit survives a conflict in the cache — nothing typed is thrown away", async () => {
-    const cache = memoryCache();
-    const sync = createCrmSync({
-      get: async () => doc(JSON.stringify(seed()), 2),
-      save: async () => { throw new Error(`${CRM_CONFLICT}9`); },
-    }, cache);
-    await sync.pull();
-
-    const mine = withOrg("Meine Eingabe");
-    const outcome = await sync.push(mine);
-
-    expect(outcome.status).toBe("conflict");
-    expect(cache.current().organizations.map(org => org.name)).toContain("Meine Eingabe");
-  });
-
-  test("an offline push keeps working locally and says so", async () => {
-    const cache = memoryCache();
-    const sync = createCrmSync({ get: async () => doc("", 0), save: async () => { throw new Error("fetch failed"); } }, cache);
-
-    const outcome = await sync.push(withOrg("Zug ohne Netz"));
-
-    expect(outcome.status).toBe("offline");
-    expect(cache.current().organizations.map(org => org.name)).toContain("Zug ohne Netz");
-  });
+test("a snapshot becomes the CrmData the app already knows, through the one normalize()", () => {
+  const data = fixture();
+  const round = snapshotToCrmData(asSnapshot(data));
+  expect(round).toEqual(normalize(data));
+  expect(round.organizations.map(org => org.id)).toEqual(["org-1"]);
+  expect(round.deals[0]!.value).toBe("12.000");
+  expect(round.activities.map(activity => activity.title)).toEqual(["Rückruf"]);
+  // An empty store is an EMPTY CRM, never the seed: a shared CRM nobody filled yet is
+  // a fact, and inventing example records would write them into everyone's pipeline.
+  expect(countRecords(snapshotToCrmData(snapshot()))).toBe(0);
+  expect(isEmptySnapshot(snapshot())).toBe(true);
+  expect(isEmptySnapshot(asSnapshot(data))).toBe(false);
 });
 
-describe("protocol details", () => {
-  test("conflictRevision reads the server's number out of any error shape", () => {
-    expect(conflictRevision(new Error("crm-conflict:12"))).toBe(12);
-    expect(conflictRevision("crm-conflict:0")).toBe(0);
-    expect(conflictRevision("permission denied")).toBeNull();
-    expect(conflictRevision(undefined)).toBeNull();
-  });
+test("a mutation writes ONLY the records it touched", async () => {
+  const before = fixture();
+  handler = async (cmd) => cmd === "crm_snapshot" ? asSnapshot(before, 5) : { revision: 6 };
+  const { sync } = track();
+  await sync.start();
+  calls.length = 0;
+
+  const after = structuredClone(before);
+  after.deals[0]!.stage = "Angebot erstellt";
+  await sync.persist(after);
+
+  const put = calls.filter(call => call.cmd === "crm_put_records");
+  expect(put).toHaveLength(1);
+  expect(Object.keys(put[0]!.args)).toEqual(["deals"]);
+  expect(put[0]!.args.deals.map((deal: any) => deal.id)).toEqual(["deal-1"]);
+  expect(calls.some(call => call.cmd === "crm_purge_records")).toBe(false);
+  expect(sync.state().status).toBe("online");
+  expect(sync.state().revision).toBe(6);
+
+  // Persisting an unchanged document is not a write at all.
+  calls.length = 0;
+  await sync.persist(structuredClone(after));
+  expect(calls).toHaveLength(0);
+});
+
+test("a purge names the removed ids, and labels/stages travel as whole lists", () => {
+  const before = fixture();
+  const after = structuredClone(before);
+  after.deals = [];
+  after.labels = [...after.labels, { id: "label-x", name: "Neu", color: "#00C2A8" }];
+  after.pipelineStages[0]!.probability = 15;
+  const write = crmWriteFor(before, after);
+  expect(write.purge).toEqual({ dealIds: ["deal-1"] });
+  expect(write.put.labels).toHaveLength(after.labels.length);
+  expect(write.put.stages).toHaveLength(after.pipelineStages.length);
+  expect(write.put.organizations).toBeUndefined();
+  expect(write.put.deals).toBeUndefined();
+});
+
+test("polling with an unchanged revision does not re-render", async () => {
+  const data = fixture();
+  handler = async () => asSnapshot(data, 7);
+  const { applied, sync } = track();
+  await sync.start();
+  expect(applied).toHaveLength(1);
+  await sync.poll();
+  await sync.poll();
+  expect(applied).toHaveLength(1);
+  expect(calls.filter(call => call.cmd === "crm_snapshot")).toHaveLength(3);
+
+  // A newer revision — somebody else wrote — IS adopted.
+  const next = structuredClone(data);
+  next.deals[0]!.title = "Optik Nord · Filiale";
+  handler = async () => asSnapshot(next, 8);
+  await sync.poll();
+  expect(applied).toHaveLength(2);
+  expect(applied[1]!.deals[0]!.title).toBe("Optik Nord · Filiale");
+});
+
+test("local data is offered once, uploaded only on the explicit choice, and the key is renamed", async () => {
+  const local = fixture();
+  localStorage.setItem(CRM_STORAGE_KEY, JSON.stringify(local));
+  handler = async (cmd) => cmd === "crm_snapshot" ? snapshot() : { revision: 42 };
+  const { applied, sync } = track();
+
+  await sync.start();
+  // Offered, NOT performed: nothing was written and the count is stated.
+  expect(sync.state().status).toBe("migration");
+  expect(sync.state().localRecords).toBe(countRecords(local));
+  expect(calls.some(call => call.cmd === "crm_put_records")).toBe(false);
+  expect(applied).toHaveLength(0);
+
+  await sync.migrate();
+  const put = calls.filter(call => call.cmd === "crm_put_records");
+  expect(put).toHaveLength(1);
+  expect(put[0]!.args.organizations.map((org: any) => org.id)).toEqual(["org-1"]);
+  expect(put[0]!.args.deals.map((deal: any) => deal.id)).toEqual(["deal-1"]);
+  expect(sync.state().status).toBe("online");
+  expect(sync.state().revision).toBe(42);
+  expect(localStorage.getItem(CRM_STORAGE_KEY)).toBeNull();
+  expect(JSON.parse(localStorage.getItem(CRM_MIGRATED_KEY)!).deals[0].id).toBe("deal-1");
+
+  // Runs ONCE: the renamed key is also the "already decided" flag, so a mirror written
+  // afterwards cannot make the offer reappear.
+  localStorage.setItem(CRM_STORAGE_KEY, JSON.stringify(local));
+  const second = track();
+  await second.sync.start();
+  expect(second.sync.state().status).toBe("online");
+  expect(second.sync.state().localRecords).toBe(0);
+});
+
+test("a non-empty server is never overwritten by the local document", async () => {
+  const local = fixture();
+  const server = structuredClone(local);
+  server.deals[0]!.title = "Server gewinnt";
+  localStorage.setItem(CRM_STORAGE_KEY, JSON.stringify(local));
+  handler = async (cmd) => cmd === "crm_snapshot" ? asSnapshot(server, 3) : { revision: 4 };
+  const { applied, sync } = track();
+
+  await sync.start();
+  expect(sync.state().status).toBe("online");
+  expect(applied[0]!.deals[0]!.title).toBe("Server gewinnt");
+  expect(calls.some(call => call.cmd === "crm_put_records")).toBe(false);
+
+  // Even asked directly — the offer could have been made a minute before somebody else
+  // filled the CRM — the upload refuses and adopts the shared document instead.
+  calls.length = 0;
+  await sync.migrate();
+  expect(calls.some(call => call.cmd === "crm_put_records")).toBe(false);
+  expect(localStorage.getItem(CRM_STORAGE_KEY)).not.toBeNull();
+});
+
+test("an unreachable server is stated, never turned into an empty CRM or a lost edit", async () => {
+  handler = () => Promise.reject(new Error("could not connect"));
+  const { applied, sync } = track();
+  await sync.start();
+  expect(sync.state().status).toBe("offline");
+  expect(sync.state().error).toContain("could not connect");
+  // Nothing was applied, so the view keeps showing the last known document.
+  expect(applied).toHaveLength(0);
+
+  // An edit while offline is NOT sent and NOT silently accepted: it is counted and said.
+  const edited = fixture();
+  await sync.persist(edited);
+  expect(sync.state().status).toBe("offline");
+  expect(sync.state().pending).toBe(countRecords(edited));
+  expect(calls.some(call => call.cmd === "crm_put_records")).toBe(false);
+});
+
+test("an edit that fails mid-flight stays pending and is written on the next poll", async () => {
+  const data = fixture();
+  handler = async (cmd) => cmd === "crm_snapshot" ? asSnapshot(data, 9) : { revision: 10 };
+  const { sync } = track();
+  await sync.start();
+
+  handler = async (cmd) => cmd === "crm_snapshot" ? asSnapshot(data, 9) : Promise.reject(new Error("socket closed"));
+  const edited = structuredClone(data);
+  edited.organizations[0]!.owner = "Bjarne";
+  await sync.persist(edited);
+  expect(sync.state().status).toBe("offline");
+  expect(sync.state().pending).toBe(1);
+
+  handler = async (cmd) => cmd === "crm_snapshot" ? asSnapshot(data, 9) : { revision: 11 };
+  calls.length = 0;
+  await sync.poll();
+  const put = calls.filter(call => call.cmd === "crm_put_records");
+  expect(put).toHaveLength(1);
+  expect(put[0]!.args.organizations[0].owner).toBe("Bjarne");
+  expect(sync.state().status).toBe("online");
+  expect(sync.state().pending).toBe(0);
 });

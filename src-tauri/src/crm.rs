@@ -1,264 +1,494 @@
-//! The workspace CRM document.
+//! CRM — ONE shared store on the server, not one per browser.
 //!
-//! ── ONE DOCUMENT, EVERY BACKUP ──────────────────────────────────────────────────
-//! CRM sales data used to live only in each browser's `localStorage` (`src/crmStore.ts`
-//! `loadCrm`/`saveCrm`), invisible to `space.db`'s production backup. There is exactly
-//! one workspace-wide document (`id='default'`), an opaque JSON blob this module never
-//! parses beyond validating it *is* JSON — the shape is the TypeScript side's contract,
-//! not this module's.
+//! Contract: `docs/specs/crm-server-store.md` (frozen; the frontend lane builds
+//! against exactly these three commands).
 //!
-//! ── OPTIMISTIC CONCURRENCY, NOT LOCKING ─────────────────────────────────────────
-//! A save names the revision it started from (`base_revision`). If the stored revision
-//! has moved since, the write is refused with `crm-conflict:<current>` and nothing is
-//! touched: a stale client must re-read and retry, never silently stomp a concurrent
-//! edit. The revision check and the write happen inside the same transaction, so two
-//! concurrent savers can never both believe they won.
+//! ── WHY ROWS, NOT ONE DOCUMENT ────────────────────────────────────────────────
+//! A single blob would make every save a last-write-wins over the WHOLE CRM: Bjarne
+//! writing a note would silently revert Jannes' deal. Storage is therefore one row
+//! per record (`crm_records`), and a write names only the records it touched. Two
+//! people editing DIFFERENT records never collide — that is the entire point, and
+//! `two_puts_of_different_records_do_not_clobber_each_other` proves it.
 //!
-//! ── HISTORY IS RECOVERY, NOT AN AUDIT LOG ───────────────────────────────────────
-//! Every accepted save appends the document's PREVIOUS state into
-//! `crm_document_revisions` before overwriting it, and only the newest 50 rows survive
-//! per document: a blob overwrite must be recoverable from an accidental paste, not
-//! reconstructible forever.
-use crate::db;
+//! ── WHAT THE SERVER OWNS ──────────────────────────────────────────────────────
+//! Identity, time and access. NOT the shape of a record: `payload_json` is the
+//! client record verbatim, because `normalize()` in `src/crmStore.ts` must stay the
+//! single place that decides what a valid record is. Soft delete (`deletedAt`) lives
+//! INSIDE the payload — the trash view is client logic. `crm_purge_records` is the
+//! hard delete.
+//!
+//! ── WHO MAY READ AND WRITE ────────────────────────────────────────────────────
+//! Every authenticated member, all of it. No admin gate, no owner filter: that is
+//! the requirement ("jeder muss ALLES gleich sehen und bearbeiten können"), and a
+//! hidden row would be a lie in a shared pipeline. The existing session gate refuses
+//! unauthenticated callers, like for any other command. `updated_by` is
+//! accountability, never a restriction.
+//!
+//! ── WHO WROTE LAST ────────────────────────────────────────────────────────────
+//! `actor::resolve` first (the native authority — the webview may never name who
+//! acts), and only when the installation cannot tell — the normal case on the
+//! multi-profile web server — the identity the HTTP gate bound onto the request
+//! (`acting_profile_id`, injected in `space-server.rs`, never trusted from a body
+//! that was not rebound). An id that is not a live profile is dropped to NULL rather
+//! than failing a save: attribution is not worth losing a person's work over.
+use crate::{actor, db};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
 type Result<T> = std::result::Result<T, String>;
+
+/// The three record kinds, matching the table's CHECK constraint and the client's
+/// `Organization` / `Deal` / `Activity`.
+const KIND_ORGANIZATION: &str = "organization";
+const KIND_DEAL: &str = "deal";
+const KIND_ACTIVITY: &str = "activity";
+
+/// The two settings keys, matching the table's CHECK constraint. Whole lists, not
+/// per-record rows: they are small shared config.
+const SETTING_LABELS: &str = "labels";
+const SETTING_STAGES: &str = "stages";
+
+/// The refusal named in the contract. Any record missing a usable `id` fails the
+/// WHOLE call — a half-written CRM is worse than a rejected save.
+const ERR_NO_ID: &str = "crm record without id";
+
 fn err<T>(result: rusqlite::Result<T>) -> Result<T> {
     result.map_err(|error| error.to_string())
 }
-/// The only document that exists today. A future multi-document surface would take an
-/// id from the caller instead of hard-coding this.
-const DOCUMENT_ID: &str = "default";
-/// How many prior versions of the document `save_crm_document` keeps for recovery.
-const MAX_REVISIONS: i64 = 50;
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CrmDocument {
-    pub data: String,
+fn connect() -> Result<Connection> {
+    db::conn()
+}
+
+/// Everything the client needs to render the CRM, in one round trip.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CrmSnapshot {
+    pub organizations: Vec<Value>,
+    pub deals: Vec<Value>,
+    pub activities: Vec<Value>,
+    pub labels: Vec<Value>,
+    pub stages: Vec<Value>,
+    /// `MAX(updated_at)` over both tables, `0` when the store is empty. A hint for a
+    /// poller that nothing changed — NOT a lock, and never compared for equality
+    /// before a write.
     pub revision: i64,
-    pub updated_at: i64,
-    pub updated_by: Option<String>,
 }
 
-fn now_millis() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as i64
+/// What both writing commands return: the new revision, so the caller that just
+/// wrote does not re-render on its own change.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CrmRevision {
+    pub revision: i64,
 }
 
-/// An absent document is not an error: it is the empty, never-saved state every
-/// workspace starts in.
-fn document_on(c: &Connection, id: &str) -> Result<CrmDocument> {
-    let found: Option<CrmDocument> = err(c
+/// The acting profile, or NULL.
+///
+/// `actor::resolve` is asked FIRST: on the desktop it reads native state the webview
+/// cannot reach, so a page cannot claim to be somebody else. It is unresolvable on
+/// the shared server (many profiles), and only there does the HTTP-gate-bound
+/// identity apply.
+fn updated_by(c: &Connection, bound: Option<String>) -> Result<Option<String>> {
+    if let Ok((profile_id, _)) = actor::resolve(c) {
+        return Ok(Some(profile_id));
+    }
+    let Some(candidate) = bound.map(|v| v.trim().to_owned()).filter(|v| !v.is_empty()) else {
+        return Ok(None);
+    };
+    let live: Option<()> = err(c
         .query_row(
-            "SELECT data,revision,updated_at,updated_by FROM crm_documents WHERE id=?1",
-            [id],
-            |row| {
-                Ok(CrmDocument {
-                    data: row.get(0)?,
-                    revision: row.get(1)?,
-                    updated_at: row.get(2)?,
-                    updated_by: row.get(3)?,
-                })
-            },
+            "SELECT 1 FROM profiles WHERE id=?1 AND archived=0",
+            [&candidate],
+            |_| Ok(()),
         )
         .optional())?;
-    Ok(found.unwrap_or(CrmDocument {
-        data: String::new(),
-        revision: 0,
-        updated_at: 0,
-        updated_by: None,
-    }))
+    Ok(live.map(|_| candidate))
 }
 
-/// Reads are workspace-wide: `profile_id` names the caller for authorization at the
-/// dispatch layer (`CommandPolicy::Session`), not a scope on the data itself — every
-/// member reads the same document.
+/// The `id` of one client record, or the contract's refusal.
+///
+/// Deliberately strict: only a non-empty STRING counts. A numeric or missing id
+/// would make the upsert silently invent rows that no client can address again.
+fn record_id(payload: &Value) -> Result<String> {
+    payload
+        .get("id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .map(str::to_owned)
+        .ok_or_else(|| ERR_NO_ID.to_string())
+}
+
+/// Strictly increasing write stamp.
+///
+/// The server clock in whole seconds, except that two writes within the same second
+/// must still produce two different revisions — otherwise a poller would skip the
+/// second one. So: `max(now, current_revision + 1)`. Reported deviation from a plain
+/// `unixepoch()`; it only ever moves the stamp forward, never backwards.
+fn write_stamp(c: &Connection) -> Result<i64> {
+    let now: i64 = err(c.query_row("SELECT unixepoch()", [], |row| row.get(0)))?;
+    let current = revision_on(c)?;
+    Ok(now.max(current + 1))
+}
+
+fn revision_on(c: &Connection) -> Result<i64> {
+    err(c.query_row(
+        "SELECT MAX(value) FROM (\
+           SELECT COALESCE(MAX(updated_at),0) AS value FROM crm_records \
+           UNION ALL \
+           SELECT COALESCE(MAX(updated_at),0) AS value FROM crm_settings)",
+        [],
+        |row| row.get(0),
+    ))
+}
+
+fn records_of_kind(c: &Connection, kind: &str) -> Result<Vec<Value>> {
+    let mut statement = err(
+        c.prepare("SELECT payload_json FROM crm_records WHERE kind=?1 ORDER BY id")
+    )?;
+    let rows = err(statement.query_map([kind], |row| row.get::<_, String>(0)))?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|e| e.to_string())?;
+    rows.into_iter()
+        .map(|json| serde_json::from_str(&json).map_err(|e| e.to_string()))
+        .collect()
+}
+
+/// A settings row holds a whole LIST. A stored value that is not a list is reported
+/// rather than silently reshaped — the client owns that shape, so a mismatch is a
+/// bug worth seeing.
+fn setting_list(c: &Connection, key: &str) -> Result<Vec<Value>> {
+    let stored: Option<String> = err(c
+        .query_row(
+            "SELECT payload_json FROM crm_settings WHERE key=?1",
+            [key],
+            |row| row.get(0),
+        )
+        .optional())?;
+    let Some(stored) = stored else {
+        return Ok(Vec::new());
+    };
+    match serde_json::from_str::<Value>(&stored).map_err(|e| e.to_string())? {
+        Value::Array(items) => Ok(items),
+        _ => Err(format!("crm setting `{key}` is not a list")),
+    }
+}
+
+// ── COMMANDS ──────────────────────────────────────────────────────────────────
+
+/// The whole shared CRM. Cheap enough to poll (15 s, like `TeamTasks.tsx`).
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn get_crm_document(profile_id: String) -> Result<CrmDocument> {
-    let _ = profile_id;
-    let c = db::conn()?;
-    document_on(&c, DOCUMENT_ID)
+pub fn crm_snapshot() -> Result<CrmSnapshot> {
+    snapshot_on(&connect()?)
 }
 
-#[cfg_attr(feature = "desktop", tauri::command)]
-pub fn save_crm_document(
-    data: String,
-    base_revision: i64,
-    profile_id: String,
-) -> Result<CrmDocument> {
-    let mut c = db::conn()?;
-    save_crm_document_on(&mut c, DOCUMENT_ID, data, base_revision, profile_id)
-}
-
-fn save_crm_document_on(
-    c: &mut Connection,
-    id: &str,
-    data: String,
-    base_revision: i64,
-    profile_id: String,
-) -> Result<CrmDocument> {
-    if serde_json::from_str::<serde_json::Value>(&data).is_err() {
-        return Err("crm document is not valid JSON".into());
-    }
-    let tx = err(c.transaction())?;
-    // Revision check and write share one transaction: nothing observes a state
-    // between "checked" and "written" that another saver could race against.
-    let current = document_on(&tx, id)?;
-    if current.revision != base_revision {
-        return Err(format!("crm-conflict:{}", current.revision));
-    }
-    // Only a real prior document (revision > 0) has anything worth archiving; the
-    // first save of a workspace has no predecessor to protect.
-    if current.revision > 0 {
-        err(tx.execute(
-            "INSERT INTO crm_document_revisions(document_id,revision,data,saved_at,saved_by) VALUES(?1,?2,?3,?4,?5)",
-            params![id, current.revision, current.data, now_millis(), current.updated_by],
-        ))?;
-        err(tx.execute(
-            "DELETE FROM crm_document_revisions WHERE document_id=?1 AND revision NOT IN \
-             (SELECT revision FROM crm_document_revisions WHERE document_id=?1 ORDER BY revision DESC LIMIT ?2)",
-            params![id, MAX_REVISIONS],
-        ))?;
-    }
-    let new_revision = current.revision + 1;
-    let updated_at = now_millis();
-    err(tx.execute(
-        "INSERT INTO crm_documents(id,data,revision,updated_at,updated_by) VALUES(?1,?2,?3,?4,?5) \
-         ON CONFLICT(id) DO UPDATE SET data=excluded.data,revision=excluded.revision,updated_at=excluded.updated_at,updated_by=excluded.updated_by",
-        params![id, data, new_revision, updated_at, profile_id],
-    ))?;
+pub fn snapshot_on(c: &Connection) -> Result<CrmSnapshot> {
+    // One transaction, so a concurrent write cannot be half-visible across the five
+    // lists and the revision.
+    let tx = err(c.unchecked_transaction())?;
+    let snapshot = CrmSnapshot {
+        organizations: records_of_kind(&tx, KIND_ORGANIZATION)?,
+        deals: records_of_kind(&tx, KIND_DEAL)?,
+        activities: records_of_kind(&tx, KIND_ACTIVITY)?,
+        labels: setting_list(&tx, SETTING_LABELS)?,
+        stages: setting_list(&tx, SETTING_STAGES)?,
+        revision: revision_on(&tx)?,
+    };
     err(tx.commit())?;
-    Ok(CrmDocument {
-        data,
-        revision: new_revision,
-        updated_at,
-        updated_by: Some(profile_id),
-    })
+    Ok(snapshot)
+}
+
+/// Upsert by `id`. Records NOT named are untouched — this is what keeps two people
+/// editing different records from overwriting one another.
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn crm_put_records(
+    organizations: Option<Vec<Value>>,
+    deals: Option<Vec<Value>>,
+    activities: Option<Vec<Value>>,
+    labels: Option<Vec<Value>>,
+    stages: Option<Vec<Value>>,
+    acting_profile_id: Option<String>,
+) -> Result<CrmRevision> {
+    put_records_on(
+        &connect()?,
+        organizations,
+        deals,
+        activities,
+        labels,
+        stages,
+        acting_profile_id,
+    )
+}
+
+pub fn put_records_on(
+    c: &Connection,
+    organizations: Option<Vec<Value>>,
+    deals: Option<Vec<Value>>,
+    activities: Option<Vec<Value>>,
+    labels: Option<Vec<Value>>,
+    stages: Option<Vec<Value>>,
+    acting_profile_id: Option<String>,
+) -> Result<CrmRevision> {
+    // Validate EVERY payload before opening the transaction's first write: the
+    // contract says one bad record fails the whole call with nothing written.
+    let mut records: Vec<(String, &'static str, &Value)> = Vec::new();
+    for (kind, payloads) in [
+        (KIND_ORGANIZATION, &organizations),
+        (KIND_DEAL, &deals),
+        (KIND_ACTIVITY, &activities),
+    ] {
+        for payload in payloads.iter().flat_map(|list| list.iter()) {
+            records.push((record_id(payload)?, kind, payload));
+        }
+    }
+
+    let author = updated_by(c, acting_profile_id)?;
+    let tx = err(c.unchecked_transaction())?;
+    let stamp = write_stamp(&tx)?;
+    for (id, kind, payload) in &records {
+        err(tx.execute(
+            "INSERT INTO crm_records(id,kind,payload_json,updated_at,updated_by) \
+             VALUES(?1,?2,?3,?4,?5) \
+             ON CONFLICT(id) DO UPDATE SET \
+               kind=excluded.kind, payload_json=excluded.payload_json, \
+               updated_at=excluded.updated_at, updated_by=excluded.updated_by",
+            params![
+                id,
+                kind,
+                serde_json::to_string(payload).map_err(|e| e.to_string())?,
+                stamp,
+                author
+            ],
+        ))?;
+    }
+    for (key, list) in [(SETTING_LABELS, &labels), (SETTING_STAGES, &stages)] {
+        let Some(list) = list else { continue };
+        err(tx.execute(
+            "INSERT INTO crm_settings(key,payload_json,updated_at,updated_by) \
+             VALUES(?1,?2,?3,?4) \
+             ON CONFLICT(key) DO UPDATE SET \
+               payload_json=excluded.payload_json, updated_at=excluded.updated_at, \
+               updated_by=excluded.updated_by",
+            params![
+                key,
+                serde_json::to_string(list).map_err(|e| e.to_string())?,
+                stamp,
+                author
+            ],
+        ))?;
+    }
+    let revision = revision_on(&tx)?;
+    err(tx.commit())?;
+    Ok(CrmRevision { revision })
+}
+
+/// The HARD delete. The trash view's soft delete stays inside the payload; this is
+/// what empties the trash, and the rows are gone afterwards.
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn crm_purge_records(
+    organization_ids: Option<Vec<String>>,
+    deal_ids: Option<Vec<String>>,
+    activity_ids: Option<Vec<String>>,
+) -> Result<CrmRevision> {
+    purge_records_on(&connect()?, organization_ids, deal_ids, activity_ids)
+}
+
+pub fn purge_records_on(
+    c: &Connection,
+    organization_ids: Option<Vec<String>>,
+    deal_ids: Option<Vec<String>>,
+    activity_ids: Option<Vec<String>>,
+) -> Result<CrmRevision> {
+    let tx = err(c.unchecked_transaction())?;
+    for (kind, ids) in [
+        (KIND_ORGANIZATION, &organization_ids),
+        (KIND_DEAL, &deal_ids),
+        (KIND_ACTIVITY, &activity_ids),
+    ] {
+        for id in ids.iter().flat_map(|list| list.iter()) {
+            // The kind is part of the predicate: a deal id may not erase an
+            // organization row even if the client confuses the two lists.
+            err(tx.execute(
+                "DELETE FROM crm_records WHERE id=?1 AND kind=?2",
+                params![id, kind],
+            ))?;
+        }
+    }
+    let revision = revision_on(&tx)?;
+    err(tx.commit())?;
+    Ok(CrmRevision { revision })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     fn fixture() -> Connection {
         let c = db::open_in_memory().unwrap();
         db::migrate(&c).unwrap();
+        c.execute(
+            "INSERT INTO profiles(id,username,display_name,created_at) \
+             VALUES('p-jannes','jannes','Jannes Zude',1),('p-bjarne','bjarne','Bjarne Design',2)",
+            [],
+        )
+        .unwrap();
         c
     }
 
+    fn org(id: &str, name: &str) -> Value {
+        json!({"id": id, "name": name, "owner": "Jannes", "labels": ["A"], "deletedAt": null})
+    }
+
     #[test]
-    fn an_absent_document_reads_as_empty_at_revision_zero() {
+    fn an_empty_store_answers_with_empty_lists_and_revision_zero() {
         let c = fixture();
-        let doc = get_crm_document_on(&c);
-        assert_eq!(doc.data, "");
-        assert_eq!(doc.revision, 0);
-        assert_eq!(doc.updated_at, 0);
-        assert_eq!(doc.updated_by, None);
-    }
-
-    /// `get_crm_document` itself opens its own connection via `db::conn()`, which a
-    /// unit test cannot redirect at an in-memory database — so the read half is
-    /// exercised through the same `document_on` helper the command calls.
-    fn get_crm_document_on(c: &Connection) -> CrmDocument {
-        document_on(c, DOCUMENT_ID).unwrap()
+        let snapshot = snapshot_on(&c).unwrap();
+        assert!(snapshot.organizations.is_empty());
+        assert!(snapshot.deals.is_empty());
+        assert!(snapshot.activities.is_empty());
+        assert!(snapshot.labels.is_empty());
+        assert!(snapshot.stages.is_empty());
+        assert_eq!(snapshot.revision, 0, "nothing written, nothing to poll for");
     }
 
     #[test]
-    fn a_save_round_trips_the_exact_json_and_advances_the_revision() {
-        let mut c = fixture();
-        let saved = save_crm_document_on(
-            &mut c,
-            DOCUMENT_ID,
-            r#"{"deals":[{"id":"d1","amount":500}]}"#.into(),
-            0,
-            "pa".into(),
+    fn a_put_then_snapshot_returns_the_payload_verbatim() {
+        let c = fixture();
+        let organization = org("org-1", "Paloptic");
+        let deal = json!({"id":"deal-1","organizationId":"org-1","title":"Pilot","owner":"Bjarne"});
+        let activity = json!({"id":"act-1","dealId":"deal-1","kind":"call","owner":"Charles"});
+        put_records_on(
+            &c,
+            Some(vec![organization.clone()]),
+            Some(vec![deal.clone()]),
+            Some(vec![activity.clone()]),
+            Some(vec![json!({"id":"l-1","name":"Hot"})]),
+            Some(vec![json!("Non-Qualified"), json!("Won")]),
+            Some("p-jannes".into()),
         )
         .unwrap();
-        assert_eq!(saved.revision, 1);
-        assert_eq!(saved.updated_by.as_deref(), Some("pa"));
-        assert!(saved.updated_at > 0);
-        let read_back = get_crm_document_on(&c);
-        assert_eq!(read_back.data, r#"{"deals":[{"id":"d1","amount":500}]}"#);
-        assert_eq!(read_back.revision, 1);
-        assert_eq!(read_back.updated_by.as_deref(), Some("pa"));
+        let snapshot = snapshot_on(&c).unwrap();
+        assert_eq!(snapshot.organizations, vec![organization]);
+        assert_eq!(snapshot.deals, vec![deal]);
+        assert_eq!(snapshot.activities, vec![activity]);
+        assert_eq!(snapshot.labels, vec![json!({"id":"l-1","name":"Hot"})]);
+        assert_eq!(snapshot.stages, vec![json!("Non-Qualified"), json!("Won")]);
     }
 
     #[test]
-    fn a_stale_base_revision_is_refused_and_the_stored_revision_does_not_move() {
-        let mut c = fixture();
-        save_crm_document_on(&mut c, DOCUMENT_ID, "{}".into(), 0, "pa".into()).unwrap();
-        // Bob still thinks the document is at revision 0.
-        let refused =
-            save_crm_document_on(&mut c, DOCUMENT_ID, r#"{"x":1}"#.into(), 0, "pb".into())
-                .unwrap_err();
-        assert_eq!(refused, "crm-conflict:1");
-        let stored = get_crm_document_on(&c);
-        assert_eq!(stored.data, "{}", "the stale write never lands");
-        assert_eq!(stored.revision, 1, "the stored revision does not move");
-        assert_eq!(
-            stored.updated_by.as_deref(),
-            Some("pa"),
-            "authorship is unchanged by the refused write"
-        );
+    fn two_puts_of_different_records_do_not_clobber_each_other() {
+        let c = fixture();
+        // The whole reason the store is rows: Jannes and Bjarne save at the same
+        // time, each naming only their own record.
+        put_records_on(&c, Some(vec![org("org-1", "Paloptic")]), None, None, None, None, Some("p-jannes".into())).unwrap();
+        put_records_on(&c, Some(vec![org("org-2", "Bjarne GmbH")]), None, None, None, None, Some("p-bjarne".into())).unwrap();
+        let snapshot = snapshot_on(&c).unwrap();
+        assert_eq!(snapshot.organizations.len(), 2, "neither save erased the other");
+        assert_eq!(snapshot.organizations[0]["name"], json!("Paloptic"));
+        assert_eq!(snapshot.organizations[1]["name"], json!("Bjarne GmbH"));
+        // And a second write to ONE of them leaves the other untouched.
+        put_records_on(&c, Some(vec![org("org-1", "Paloptic AG")]), None, None, None, None, Some("p-jannes".into())).unwrap();
+        let snapshot = snapshot_on(&c).unwrap();
+        assert_eq!(snapshot.organizations.len(), 2);
+        assert_eq!(snapshot.organizations[0]["name"], json!("Paloptic AG"), "an upsert by id");
+        assert_eq!(snapshot.organizations[1]["name"], json!("Bjarne GmbH"), "untouched");
     }
 
     #[test]
-    fn invalid_json_is_rejected_on_save() {
-        let mut c = fixture();
-        let refused =
-            save_crm_document_on(&mut c, DOCUMENT_ID, "not json".into(), 0, "pa".into())
-                .unwrap_err();
-        assert!(refused.contains("not valid JSON"), "{refused}");
-        assert_eq!(
-            get_crm_document_on(&c).revision,
-            0,
-            "a rejected save never touches the document"
-        );
-        // Empty string is not valid JSON either, and is explicitly rejected.
-        let refused_empty =
-            save_crm_document_on(&mut c, DOCUMENT_ID, "".into(), 0, "pa".into()).unwrap_err();
-        assert!(refused_empty.contains("not valid JSON"), "{refused_empty}");
-    }
-
-    #[test]
-    fn revision_history_is_capped_at_fifty_and_holds_the_pre_save_document() {
-        let mut c = fixture();
-        for n in 0..55 {
-            let data = format!(r#"{{"n":{n}}}"#);
-            save_crm_document_on(&mut c, DOCUMENT_ID, data, n, "pa".into()).unwrap();
+    fn a_record_without_an_id_is_refused_and_writes_nothing() {
+        let c = fixture();
+        put_records_on(&c, Some(vec![org("org-1", "Paloptic")]), None, None, None, None, None).unwrap();
+        let before = snapshot_on(&c).unwrap();
+        for bad in [json!({"name":"Nameless"}), json!({"id":"","name":"Empty"}), json!({"id":7})] {
+            let error = put_records_on(
+                &c,
+                Some(vec![org("org-2", "Would-be")]),
+                Some(vec![bad.clone()]),
+                None,
+                None,
+                None,
+                None,
+            )
+            .unwrap_err();
+            assert_eq!(error, "crm record without id", "the contract's exact words");
         }
-        let current = get_crm_document_on(&c);
-        assert_eq!(current.revision, 55, "55 accepted saves");
-        let count: i64 = c
-            .query_row(
-                "SELECT count(*) FROM crm_document_revisions WHERE document_id=?1",
-                [DOCUMENT_ID],
-                |r| r.get(0),
-            )
+        let after = snapshot_on(&c).unwrap();
+        assert_eq!(after, before, "no half write: the good record in the same call is not stored either");
+    }
+
+    #[test]
+    fn purging_removes_the_rows() {
+        let c = fixture();
+        put_records_on(
+            &c,
+            Some(vec![org("org-1", "Paloptic"), org("org-2", "Other")]),
+            Some(vec![json!({"id":"deal-1","title":"Pilot"})]),
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        purge_records_on(&c, Some(vec!["org-1".into()]), None, None).unwrap();
+        let snapshot = snapshot_on(&c).unwrap();
+        assert_eq!(snapshot.organizations.len(), 1);
+        assert_eq!(snapshot.organizations[0]["id"], json!("org-2"));
+        assert_eq!(snapshot.deals.len(), 1, "a purge names its kind");
+        // An id from the wrong list erases nothing.
+        purge_records_on(&c, Some(vec!["deal-1".into()]), None, None).unwrap();
+        assert_eq!(snapshot_on(&c).unwrap().deals.len(), 1);
+        purge_records_on(&c, None, Some(vec!["deal-1".into()]), None).unwrap();
+        assert!(snapshot_on(&c).unwrap().deals.is_empty());
+    }
+
+    #[test]
+    fn the_revision_advances_on_every_write() {
+        let c = fixture();
+        assert_eq!(snapshot_on(&c).unwrap().revision, 0);
+        let first = put_records_on(&c, Some(vec![org("org-1", "Paloptic")]), None, None, None, None, None)
+            .unwrap()
+            .revision;
+        assert!(first > 0, "a write is visible to a poller");
+        assert_eq!(snapshot_on(&c).unwrap().revision, first, "a read never moves it");
+        // Same second, second write: still a different revision, or the poller
+        // would skip this change.
+        let second = put_records_on(&c, Some(vec![org("org-2", "Other")]), None, None, None, None, None)
+            .unwrap()
+            .revision;
+        assert!(second > first, "{second} must be newer than {first}");
+        let third = put_records_on(&c, None, None, None, Some(vec![json!("Hot")]), None, None)
+            .unwrap()
+            .revision;
+        assert!(third > second, "settings writes move the revision too");
+        let purged = purge_records_on(&c, Some(vec!["org-2".into()]), None, None).unwrap().revision;
+        assert_eq!(purged, third, "a purge deletes rows; MAX(updated_at) of what remains is the truth");
+        assert_eq!(snapshot_on(&c).unwrap().revision, purged);
+    }
+
+    #[test]
+    fn the_writer_is_recorded_from_the_bound_session_identity() {
+        let c = fixture();
+        put_records_on(&c, Some(vec![org("org-1", "Paloptic")]), None, None, None, None, Some("p-bjarne".into())).unwrap();
+        let author: Option<String> = c
+            .query_row("SELECT updated_by FROM crm_records WHERE id='org-1'", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(count, MAX_REVISIONS, "only the newest 50 survive");
-        // The document just before the final save (revision 54, body {"n":53}, set by
-        // the 54th call) is the pre-save snapshot appended by the 55th save and must
-        // be present.
-        let pre_save: String = c
-            .query_row(
-                "SELECT data FROM crm_document_revisions WHERE document_id=?1 AND revision=54",
-                [DOCUMENT_ID],
-                |r| r.get(0),
-            )
+        assert_eq!(author.as_deref(), Some("p-bjarne"));
+        // An id that is not a live profile costs the attribution, never the record.
+        put_records_on(&c, Some(vec![org("org-2", "Other")]), None, None, None, None, Some("ghost".into())).unwrap();
+        let author: Option<String> = c
+            .query_row("SELECT updated_by FROM crm_records WHERE id='org-2'", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(pre_save, r#"{"n":53}"#);
-        // The oldest snapshots (revision 1..=4) were pruned to stay at the cap.
-        let oldest_kept: i64 = c
-            .query_row(
-                "SELECT min(revision) FROM crm_document_revisions WHERE document_id=?1",
-                [DOCUMENT_ID],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert_eq!(oldest_kept, 5, "revisions 1..4 were pruned to hold the cap at 50");
+        assert_eq!(author, None, "a bogus id is dropped, the save still happens");
+    }
+
+    #[test]
+    fn every_member_sees_the_same_crm() {
+        // There is no owner filter and no admin gate by design: the snapshot does not
+        // take a profile at all, so two members cannot be shown different pipelines.
+        let c = fixture();
+        put_records_on(&c, Some(vec![org("org-1", "Paloptic")]), None, None, None, None, Some("p-jannes".into())).unwrap();
+        put_records_on(&c, Some(vec![org("org-2", "Other")]), None, None, None, None, Some("p-bjarne".into())).unwrap();
+        assert_eq!(snapshot_on(&c).unwrap().organizations.len(), 2);
     }
 }
