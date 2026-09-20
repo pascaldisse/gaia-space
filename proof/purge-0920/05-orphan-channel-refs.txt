@@ -1,0 +1,22 @@
+OC count: 38
+message_drafts.channel_id: 0
+message_polls.channel_id: 0
+channel_notes.channel_id: 0
+channel_notification_preferences.channel_id: 0
+channel_subscriptions.channel_id: 0
+channel_typing.channel_id: 0
+review_discussions.channel_id: 0
+reviews.channel_id: 0
+document_discussions.channel_id: 0
+scheduled_messages.channel_id: 0
+thread_channels.parent_channel_id: 0
+thread_channels.channel_id: 0
+locations.channel_id: 0
+meetings.channel_id (not already organizer-captured): 0
+messages.channel_id total: 33
+messages.channel_id author NOT in T: 0
+private_feeds.channel_id total: 23
+private_feeds.profile_id NOT in T: 0
+read_state.channel_id total: 19
+read_state.profile_id NOT in T: 0
+channel_members.channel_id total: 53

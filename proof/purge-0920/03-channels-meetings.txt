@@ -1,0 +1,94 @@
+=== channels touched by T (via channel_members) ===
+private-feed:profile-13d2ea312faf
+private-feed:profile-269c110cd75d
+private-feed:profile-27321953fef1
+private-feed:profile-2edac9d32451
+private-feed:profile-31ab39273b9a
+private-feed:profile-32c52a3a65cb
+private-feed:profile-45f7c24907fb
+private-feed:profile-4b68218d43ad
+private-feed:profile-5599c1396365
+private-feed:profile-576a9e8a9c65
+private-feed:profile-7f9e2093feed
+private-feed:profile-8d81cab2dd22
+private-feed:profile-958c16daaecc
+private-feed:profile-9d29557fbec2
+private-feed:profile-a50e1eb294fe
+private-feed:profile-aac421a2c037
+private-feed:profile-ac9e55146780
+private-feed:profile-b853718f23bf
+private-feed:profile-c1752aad1b2b
+private-feed:profile-d264ef33b4ed
+private-feed:profile-df145a20a0ac
+private-feed:profile-f9fa261c6c32
+private-feed:profile-fd349faa72a9
+zz-proof-call-1788550766634-26530e97
+zz-proof-call-1788550859194-8585cc45
+zz-proof-call-1788550919050-11335b63
+zz-proof-call-1788550978582-d1c1c4e6
+zz-proof-channel-1788551657975-42c6cb9e
+zz-proof-channel-1788553906342-046a8b80
+zz-proof-channel-1788553943433-2542dc16
+zz-proof-channel-1788553986124-ce85d9f2
+zz-proof-channel-1788554014394-3ed2aae6
+zz-proof-channel-1788554088788-98e2339f
+zz-proof-http-1788553906342-046a8b80
+zz-proof-http-1788553943433-2542dc16
+zz-proof-http-1788553986124-ce85d9f2
+zz-proof-http-1788554014394-3ed2aae6
+zz-proof-http-1788554088788-98e2339f
+=== per-channel: total members vs T members vs channel type/name ===
+=== meetings organizer/video_ended in T ===
+zz-proof-http-meeting-1788553906342-046a8b80 | title=Direct API proof | organizer_id=profile-269c110cd75d | video_ended_by= | organizer_in_T=1 | total_participants=2 | T_participants=2 | channel_id=zz-proof-http-1788553906342-046a8b80
+meeting-bf6878d1-0484-4f5f-bbcd-42d2233d6c59 | title=dm | organizer_id=profile-269c110cd75d | video_ended_by= | organizer_in_T=1 | total_participants=2 | T_participants=2 | channel_id=zz-proof-channel-1788553906342-046a8b80
+zz-proof-http-meeting-1788553943433-2542dc16 | title=Direct API proof | organizer_id=profile-8d81cab2dd22 | video_ended_by= | organizer_in_T=1 | total_participants=2 | T_participants=2 | channel_id=zz-proof-http-1788553943433-2542dc16
+meeting-4fdb511e-4e06-4796-b837-988423e70426 | title=dm | organizer_id=profile-8d81cab2dd22 | video_ended_by= | organizer_in_T=1 | total_participants=2 | T_participants=2 | channel_id=zz-proof-channel-1788553943433-2542dc16
+zz-proof-http-meeting-1788553986124-ce85d9f2 | title=Direct API proof | organizer_id=profile-2edac9d32451 | video_ended_by= | organizer_in_T=1 | total_participants=2 | T_participants=2 | channel_id=zz-proof-http-1788553986124-ce85d9f2
+meeting-d80d604a-b231-49c4-9a8d-44c9a5d1bd74 | title=dm | organizer_id=profile-2edac9d32451 | video_ended_by= | organizer_in_T=1 | total_participants=2 | T_participants=2 | channel_id=zz-proof-channel-1788553986124-ce85d9f2
+zz-proof-http-meeting-1788554014394-3ed2aae6 | title=Direct API proof | organizer_id=profile-fd349faa72a9 | video_ended_by= | organizer_in_T=1 | total_participants=2 | T_participants=2 | channel_id=zz-proof-http-1788554014394-3ed2aae6
+meeting-88aef967-8802-4575-a927-3a06fe16ee6a | title=dm | organizer_id=profile-fd349faa72a9 | video_ended_by= | organizer_in_T=1 | total_participants=2 | T_participants=2 | channel_id=zz-proof-channel-1788554014394-3ed2aae6
+zz-proof-http-meeting-1788554088788-98e2339f | title=Direct API proof | organizer_id=profile-576a9e8a9c65 | video_ended_by= | organizer_in_T=1 | total_participants=2 | T_participants=2 | channel_id=zz-proof-http-1788554088788-98e2339f
+meeting-6672e931-0e6b-4495-93e6-8e653c63a284 | title=dm | organizer_id=profile-576a9e8a9c65 | video_ended_by= | organizer_in_T=1 | total_participants=2 | T_participants=2 | channel_id=zz-proof-channel-1788554088788-98e2339f
+=== meeting_participants for those meetings, ALL rows (to see non-T participants) ===
+meeting-4fdb511e-4e06-4796-b837-988423e70426 | profile_id=profile-8d81cab2dd22 | in_T=1
+meeting-4fdb511e-4e06-4796-b837-988423e70426 | profile_id=profile-c1752aad1b2b | in_T=1
+meeting-6672e931-0e6b-4495-93e6-8e653c63a284 | profile_id=profile-31ab39273b9a | in_T=1
+meeting-6672e931-0e6b-4495-93e6-8e653c63a284 | profile_id=profile-576a9e8a9c65 | in_T=1
+meeting-88aef967-8802-4575-a927-3a06fe16ee6a | profile_id=profile-5599c1396365 | in_T=1
+meeting-88aef967-8802-4575-a927-3a06fe16ee6a | profile_id=profile-fd349faa72a9 | in_T=1
+meeting-bf6878d1-0484-4f5f-bbcd-42d2233d6c59 | profile_id=profile-269c110cd75d | in_T=1
+meeting-bf6878d1-0484-4f5f-bbcd-42d2233d6c59 | profile_id=profile-27321953fef1 | in_T=1
+meeting-d80d604a-b231-49c4-9a8d-44c9a5d1bd74 | profile_id=profile-2edac9d32451 | in_T=1
+meeting-d80d604a-b231-49c4-9a8d-44c9a5d1bd74 | profile_id=profile-9d29557fbec2 | in_T=1
+zz-proof-http-meeting-1788553906342-046a8b80 | profile_id=profile-269c110cd75d | in_T=1
+zz-proof-http-meeting-1788553906342-046a8b80 | profile_id=profile-27321953fef1 | in_T=1
+zz-proof-http-meeting-1788553943433-2542dc16 | profile_id=profile-8d81cab2dd22 | in_T=1
+zz-proof-http-meeting-1788553943433-2542dc16 | profile_id=profile-c1752aad1b2b | in_T=1
+zz-proof-http-meeting-1788553986124-ce85d9f2 | profile_id=profile-2edac9d32451 | in_T=1
+zz-proof-http-meeting-1788553986124-ce85d9f2 | profile_id=profile-9d29557fbec2 | in_T=1
+zz-proof-http-meeting-1788554014394-3ed2aae6 | profile_id=profile-5599c1396365 | in_T=1
+zz-proof-http-meeting-1788554014394-3ed2aae6 | profile_id=profile-fd349faa72a9 | in_T=1
+zz-proof-http-meeting-1788554088788-98e2339f | profile_id=profile-31ab39273b9a | in_T=1
+zz-proof-http-meeting-1788554088788-98e2339f | profile_id=profile-576a9e8a9c65 | in_T=1
+=== private_feeds for T ===
+=== notifications.recipient_id in T (sample types) ===
+=== read_state.profile_id in T (channel refs) ===
+zz-proof-call-1788550766634-26530e97 | profile_id=profile-45f7c24907fb
+zz-proof-call-1788550766634-26530e97 | profile_id=profile-a50e1eb294fe
+zz-proof-call-1788550859194-8585cc45 | profile_id=profile-32c52a3a65cb
+zz-proof-call-1788550859194-8585cc45 | profile_id=profile-aac421a2c037
+zz-proof-call-1788550919050-11335b63 | profile_id=profile-7f9e2093feed
+zz-proof-call-1788550919050-11335b63 | profile_id=profile-958c16daaecc
+zz-proof-call-1788550978582-d1c1c4e6 | profile_id=profile-13d2ea312faf
+zz-proof-call-1788550978582-d1c1c4e6 | profile_id=profile-df145a20a0ac
+zz-proof-channel-1788551657975-42c6cb9e | profile_id=profile-4b68218d43ad
+zz-proof-channel-1788553906342-046a8b80 | profile_id=profile-269c110cd75d
+zz-proof-channel-1788553906342-046a8b80 | profile_id=profile-27321953fef1
+zz-proof-channel-1788553943433-2542dc16 | profile_id=profile-8d81cab2dd22
+zz-proof-channel-1788553943433-2542dc16 | profile_id=profile-c1752aad1b2b
+zz-proof-channel-1788553986124-ce85d9f2 | profile_id=profile-2edac9d32451
+zz-proof-channel-1788553986124-ce85d9f2 | profile_id=profile-9d29557fbec2
+zz-proof-channel-1788554014394-3ed2aae6 | profile_id=profile-5599c1396365
+zz-proof-channel-1788554014394-3ed2aae6 | profile_id=profile-fd349faa72a9
+zz-proof-channel-1788554088788-98e2339f | profile_id=profile-31ab39273b9a
+zz-proof-channel-1788554088788-98e2339f | profile_id=profile-576a9e8a9c65

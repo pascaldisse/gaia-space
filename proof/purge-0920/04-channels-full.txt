@@ -1,0 +1,104 @@
+=== per-channel composition (channels touched by T members) ===
+private-feed:profile-13d2ea312faf | content_type=private | name=Private feed | total_members=1 | T_members=1 | messages_total=1 | messages_by_nonT=0 | is_orphan=YES
+private-feed:profile-269c110cd75d | content_type=private | name=Private feed | total_members=1 | T_members=1 | messages_total=1 | messages_by_nonT=0 | is_orphan=YES
+private-feed:profile-27321953fef1 | content_type=private | name=Private feed | total_members=1 | T_members=1 | messages_total=3 | messages_by_nonT=0 | is_orphan=YES
+private-feed:profile-2edac9d32451 | content_type=private | name=Private feed | total_members=1 | T_members=1 | messages_total=1 | messages_by_nonT=0 | is_orphan=YES
+private-feed:profile-31ab39273b9a | content_type=private | name=Private feed | total_members=1 | T_members=1 | messages_total=3 | messages_by_nonT=0 | is_orphan=YES
+private-feed:profile-32c52a3a65cb | content_type=private | name=Private feed | total_members=1 | T_members=1 | messages_total=1 | messages_by_nonT=0 | is_orphan=YES
+private-feed:profile-45f7c24907fb | content_type=private | name=Private feed | total_members=1 | T_members=1 | messages_total=1 | messages_by_nonT=0 | is_orphan=YES
+private-feed:profile-4b68218d43ad | content_type=private | name=Private feed | total_members=1 | T_members=1 | messages_total=1 | messages_by_nonT=0 | is_orphan=YES
+private-feed:profile-5599c1396365 | content_type=private | name=Private feed | total_members=1 | T_members=1 | messages_total=3 | messages_by_nonT=0 | is_orphan=YES
+private-feed:profile-576a9e8a9c65 | content_type=private | name=Private feed | total_members=1 | T_members=1 | messages_total=1 | messages_by_nonT=0 | is_orphan=YES
+private-feed:profile-7f9e2093feed | content_type=private | name=Private feed | total_members=1 | T_members=1 | messages_total=1 | messages_by_nonT=0 | is_orphan=YES
+private-feed:profile-8d81cab2dd22 | content_type=private | name=Private feed | total_members=1 | T_members=1 | messages_total=1 | messages_by_nonT=0 | is_orphan=YES
+private-feed:profile-958c16daaecc | content_type=private | name=Private feed | total_members=1 | T_members=1 | messages_total=1 | messages_by_nonT=0 | is_orphan=YES
+private-feed:profile-9d29557fbec2 | content_type=private | name=Private feed | total_members=1 | T_members=1 | messages_total=3 | messages_by_nonT=0 | is_orphan=YES
+private-feed:profile-a50e1eb294fe | content_type=private | name=Private feed | total_members=1 | T_members=1 | messages_total=1 | messages_by_nonT=0 | is_orphan=YES
+private-feed:profile-aac421a2c037 | content_type=private | name=Private feed | total_members=1 | T_members=1 | messages_total=1 | messages_by_nonT=0 | is_orphan=YES
+private-feed:profile-ac9e55146780 | content_type=private | name=Private feed | total_members=1 | T_members=1 | messages_total=1 | messages_by_nonT=0 | is_orphan=YES
+private-feed:profile-b853718f23bf | content_type=private | name=Private feed | total_members=1 | T_members=1 | messages_total=1 | messages_by_nonT=0 | is_orphan=YES
+private-feed:profile-c1752aad1b2b | content_type=private | name=Private feed | total_members=1 | T_members=1 | messages_total=3 | messages_by_nonT=0 | is_orphan=YES
+private-feed:profile-d264ef33b4ed | content_type=private | name=Private feed | total_members=1 | T_members=1 | messages_total=1 | messages_by_nonT=0 | is_orphan=YES
+private-feed:profile-df145a20a0ac | content_type=private | name=Private feed | total_members=1 | T_members=1 | messages_total=1 | messages_by_nonT=0 | is_orphan=YES
+private-feed:profile-f9fa261c6c32 | content_type=private | name=Private feed | total_members=1 | T_members=1 | messages_total=1 | messages_by_nonT=0 | is_orphan=YES
+private-feed:profile-fd349faa72a9 | content_type=private | name=Private feed | total_members=1 | T_members=1 | messages_total=1 | messages_by_nonT=0 | is_orphan=YES
+zz-proof-call-1788550766634-26530e97 | content_type=dm | name= | total_members=2 | T_members=2 | messages_total=0 | messages_by_nonT=0 | is_orphan=YES
+zz-proof-call-1788550859194-8585cc45 | content_type=dm | name= | total_members=2 | T_members=2 | messages_total=0 | messages_by_nonT=0 | is_orphan=YES
+zz-proof-call-1788550919050-11335b63 | content_type=dm | name= | total_members=2 | T_members=2 | messages_total=0 | messages_by_nonT=0 | is_orphan=YES
+zz-proof-call-1788550978582-d1c1c4e6 | content_type=dm | name= | total_members=2 | T_members=2 | messages_total=0 | messages_by_nonT=0 | is_orphan=YES
+zz-proof-channel-1788551657975-42c6cb9e | content_type=dm | name= | total_members=2 | T_members=2 | messages_total=0 | messages_by_nonT=0 | is_orphan=YES
+zz-proof-channel-1788553906342-046a8b80 | content_type=dm | name= | total_members=2 | T_members=2 | messages_total=0 | messages_by_nonT=0 | is_orphan=YES
+zz-proof-channel-1788553943433-2542dc16 | content_type=dm | name= | total_members=2 | T_members=2 | messages_total=0 | messages_by_nonT=0 | is_orphan=YES
+zz-proof-channel-1788553986124-ce85d9f2 | content_type=dm | name= | total_members=2 | T_members=2 | messages_total=0 | messages_by_nonT=0 | is_orphan=YES
+zz-proof-channel-1788554014394-3ed2aae6 | content_type=dm | name= | total_members=2 | T_members=2 | messages_total=0 | messages_by_nonT=0 | is_orphan=YES
+zz-proof-channel-1788554088788-98e2339f | content_type=dm | name= | total_members=2 | T_members=2 | messages_total=0 | messages_by_nonT=0 | is_orphan=YES
+zz-proof-http-1788553906342-046a8b80 | content_type=dm | name= | total_members=2 | T_members=2 | messages_total=0 | messages_by_nonT=0 | is_orphan=YES
+zz-proof-http-1788553943433-2542dc16 | content_type=dm | name= | total_members=2 | T_members=2 | messages_total=0 | messages_by_nonT=0 | is_orphan=YES
+zz-proof-http-1788553986124-ce85d9f2 | content_type=dm | name= | total_members=2 | T_members=2 | messages_total=0 | messages_by_nonT=0 | is_orphan=YES
+zz-proof-http-1788554014394-3ed2aae6 | content_type=dm | name= | total_members=2 | T_members=2 | messages_total=0 | messages_by_nonT=0 | is_orphan=YES
+zz-proof-http-1788554088788-98e2339f | content_type=dm | name= | total_members=2 | T_members=2 | messages_total=0 | messages_by_nonT=0 | is_orphan=YES
+=== private_feeds rows for T (profile_id, channel_id) ===
+profile-13d2ea312faf -> private-feed:profile-13d2ea312faf
+profile-269c110cd75d -> private-feed:profile-269c110cd75d
+profile-27321953fef1 -> private-feed:profile-27321953fef1
+profile-2edac9d32451 -> private-feed:profile-2edac9d32451
+profile-31ab39273b9a -> private-feed:profile-31ab39273b9a
+profile-32c52a3a65cb -> private-feed:profile-32c52a3a65cb
+profile-45f7c24907fb -> private-feed:profile-45f7c24907fb
+profile-4b68218d43ad -> private-feed:profile-4b68218d43ad
+profile-5599c1396365 -> private-feed:profile-5599c1396365
+profile-576a9e8a9c65 -> private-feed:profile-576a9e8a9c65
+profile-7f9e2093feed -> private-feed:profile-7f9e2093feed
+profile-8d81cab2dd22 -> private-feed:profile-8d81cab2dd22
+profile-958c16daaecc -> private-feed:profile-958c16daaecc
+profile-9d29557fbec2 -> private-feed:profile-9d29557fbec2
+profile-a50e1eb294fe -> private-feed:profile-a50e1eb294fe
+profile-aac421a2c037 -> private-feed:profile-aac421a2c037
+profile-ac9e55146780 -> private-feed:profile-ac9e55146780
+profile-b853718f23bf -> private-feed:profile-b853718f23bf
+profile-c1752aad1b2b -> private-feed:profile-c1752aad1b2b
+profile-d264ef33b4ed -> private-feed:profile-d264ef33b4ed
+profile-df145a20a0ac -> private-feed:profile-df145a20a0ac
+profile-f9fa261c6c32 -> private-feed:profile-f9fa261c6c32
+profile-fd349faa72a9 -> private-feed:profile-fd349faa72a9
+=== notifications event_type breakdown for T recipients ===
+call: 10
+project.created: 23
+=== notifications entity_id cross-check: any pointing at non-proof entities? ===
+notification-18d2611e23460348-f | recipient=profile-13d2ea312faf | event=project.created | entity_type=project | entity_id=
+notification-18d2611e2fc88429-14 | recipient=profile-269c110cd75d | event=project.created | entity_type=project | entity_id=
+notification-18d2384db84f7f8d-0 | recipient=profile-27321953fef1 | event=call | entity_type=channel | entity_id=zz-proof-http-1788553906342-046a8b80
+notification-18d2384e8fc2a736-1 | recipient=profile-27321953fef1 | event=call | entity_type=channel | entity_id=zz-proof-channel-1788553906342-046a8b80
+notification-18d2611e3152ca75-15 | recipient=profile-27321953fef1 | event=project.created | entity_type=project | entity_id=
+notification-18d2611e355fdcc7-18 | recipient=profile-2edac9d32451 | event=project.created | entity_type=project | entity_id=
+notification-18d238783308c4b6-8 | recipient=profile-31ab39273b9a | event=call | entity_type=channel | entity_id=zz-proof-http-1788554088788-98e2339f
+notification-18d23878fbe37ff3-9 | recipient=profile-31ab39273b9a | event=call | entity_type=channel | entity_id=zz-proof-channel-1788554088788-98e2339f
+notification-18d2611e3f0d060b-1e | recipient=profile-31ab39273b9a | event=project.created | entity_type=project | entity_id=
+notification-18d2611e1dcc989e-b | recipient=profile-32c52a3a65cb | event=project.created | entity_type=project | entity_id=
+notification-18d2611e1aefcf90-9 | recipient=profile-45f7c24907fb | event=project.created | entity_type=project | entity_id=
+notification-18d2611e2b3b38ad-12 | recipient=profile-4b68218d43ad | event=project.created | entity_type=project | entity_id=
+notification-18d23866e227261c-6 | recipient=profile-5599c1396365 | event=call | entity_type=channel | entity_id=zz-proof-http-1788554014394-3ed2aae6
+notification-18d23867a3b2af75-7 | recipient=profile-5599c1396365 | event=call | entity_type=channel | entity_id=zz-proof-channel-1788554014394-3ed2aae6
+notification-18d2611e391c08ae-1b | recipient=profile-5599c1396365 | event=project.created | entity_type=project | entity_id=
+notification-18d2611e3da5c8f9-1d | recipient=profile-576a9e8a9c65 | event=project.created | entity_type=project | entity_id=
+notification-18d2611e1f3029b8-c | recipient=profile-7f9e2093feed | event=project.created | entity_type=project | entity_id=
+notification-18d2611e32b0a450-16 | recipient=profile-8d81cab2dd22 | event=project.created | entity_type=project | entity_id=
+notification-18d2611e207fc35b-d | recipient=profile-958c16daaecc | event=project.created | entity_type=project | entity_id=
+notification-18d2386045c1e052-4 | recipient=profile-9d29557fbec2 | event=call | entity_type=channel | entity_id=zz-proof-http-1788553986124-ce85d9f2
+notification-18d23861296f9066-5 | recipient=profile-9d29557fbec2 | event=call | entity_type=channel | entity_id=zz-proof-channel-1788553986124-ce85d9f2
+notification-18d2611e369939d8-19 | recipient=profile-9d29557fbec2 | event=project.created | entity_type=project | entity_id=
+notification-18d2611e19c60b86-8 | recipient=profile-a50e1eb294fe | event=project.created | entity_type=project | entity_id=
+notification-18d2611e1c4a0fc6-a | recipient=profile-aac421a2c037 | event=project.created | entity_type=project | entity_id=
+notification-18d2611e249db739-10 | recipient=profile-ac9e55146780 | event=project.created | entity_type=project | entity_id=
+notification-18d2611e3a667e86-1c | recipient=profile-b853718f23bf | event=project.created | entity_type=project | entity_id=
+notification-18d238565fd6811f-2 | recipient=profile-c1752aad1b2b | event=call | entity_type=channel | entity_id=zz-proof-http-1788553943433-2542dc16
+notification-18d238572dc1e2c6-3 | recipient=profile-c1752aad1b2b | event=call | entity_type=channel | entity_id=zz-proof-channel-1788553943433-2542dc16
+notification-18d2611e3406f857-17 | recipient=profile-c1752aad1b2b | event=project.created | entity_type=project | entity_id=
+notification-18d2611e28003870-11 | recipient=profile-d264ef33b4ed | event=project.created | entity_type=project | entity_id=
+notification-18d2611e21d8c55d-e | recipient=profile-df145a20a0ac | event=project.created | entity_type=project | entity_id=
+notification-18d2611e2c995181-13 | recipient=profile-f9fa261c6c32 | event=project.created | entity_type=project | entity_id=
+notification-18d2611e37ee27b5-1a | recipient=profile-fd349faa72a9 | event=project.created | entity_type=project | entity_id=
+=== message_attachments in T channels (any) ===
+0
+=== channel_notification_preferences/channel_subscriptions/channel_typing for these channels (any nonT?) - sanity, already 0 globally for T but check table exists with data for these channels ===
+0

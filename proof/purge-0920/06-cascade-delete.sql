@@ -1,0 +1,34 @@
+.mode list
+.headers off
+CREATE TEMP TABLE T AS SELECT id FROM profiles WHERE username LIKE 'zz-proof-%';
+CREATE TEMP TABLE OC AS SELECT DISTINCT channel_id AS id FROM channel_members WHERE profile_id IN (SELECT id FROM T);
+BEGIN IMMEDIATE;
+DELETE FROM read_state WHERE profile_id IN (SELECT id FROM T);
+DELETE FROM meeting_participants WHERE profile_id IN (SELECT id FROM T);
+DELETE FROM meetings WHERE organizer_id IN (SELECT id FROM T);
+DELETE FROM notifications WHERE recipient_id IN (SELECT id FROM T);
+DELETE FROM message_attachments WHERE message_id IN (SELECT id FROM messages WHERE channel_id IN (SELECT id FROM OC));
+DELETE FROM messages WHERE channel_id IN (SELECT id FROM OC);
+DELETE FROM channel_members WHERE channel_id IN (SELECT id FROM OC);
+DELETE FROM private_feeds WHERE profile_id IN (SELECT id FROM T);
+DELETE FROM channels WHERE id IN (SELECT id FROM OC);
+DELETE FROM users WHERE profile_id IN (SELECT id FROM T);
+DELETE FROM profiles WHERE id IN (SELECT id FROM T);
+COMMIT;
+SELECT '=== post-delete row counts (all must be 0) ===';
+SELECT 'read_state.profile_id: ' || count(*) FROM read_state WHERE profile_id IN (SELECT id FROM T);
+SELECT 'meeting_participants.profile_id: ' || count(*) FROM meeting_participants WHERE profile_id IN (SELECT id FROM T);
+SELECT 'meetings.organizer_id: ' || count(*) FROM meetings WHERE organizer_id IN (SELECT id FROM T);
+SELECT 'notifications.recipient_id: ' || count(*) FROM notifications WHERE recipient_id IN (SELECT id FROM T);
+SELECT 'messages.channel_id(OC): ' || count(*) FROM messages WHERE channel_id IN (SELECT id FROM OC);
+SELECT 'channel_members.channel_id(OC): ' || count(*) FROM channel_members WHERE channel_id IN (SELECT id FROM OC);
+SELECT 'private_feeds.profile_id: ' || count(*) FROM private_feeds WHERE profile_id IN (SELECT id FROM T);
+SELECT 'channels(OC): ' || count(*) FROM channels WHERE id IN (SELECT id FROM OC);
+SELECT 'users.profile_id: ' || count(*) FROM users WHERE profile_id IN (SELECT id FROM T);
+SELECT 'profiles(T): ' || count(*) FROM profiles WHERE id IN (SELECT id FROM T);
+SELECT '=== profiles zz-proof-% remaining ===';
+SELECT count(*) FROM profiles WHERE username LIKE 'zz-proof-%';
+SELECT '=== PRAGMA foreign_key_check (must be empty) ===';
+PRAGMA foreign_key_check;
+SELECT '=== PRAGMA integrity_check ===';
+PRAGMA integrity_check;

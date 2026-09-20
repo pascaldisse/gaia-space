@@ -1,0 +1,78 @@
+=== post-delete row counts (all must be 0) ===
+read_state.profile_id: 0
+meeting_participants.profile_id: 0
+meetings.organizer_id: 0
+notifications.recipient_id: 0
+messages.channel_id(OC): 0
+channel_members.channel_id(OC): 0
+private_feeds.profile_id: 0
+channels(OC): 0
+users.profile_id: 0
+profiles(T): 0
+=== profiles zz-proof-% remaining ===
+0
+=== PRAGMA foreign_key_check (must be empty) ===
+project_members|20|profiles|0
+private_feeds|9|channels|0
+private_feeds|9|profiles|1
+private_feeds|10|channels|0
+private_feeds|10|profiles|1
+private_feeds|11|channels|0
+private_feeds|11|profiles|1
+private_feeds|12|channels|0
+private_feeds|12|profiles|1
+private_feeds|13|channels|0
+private_feeds|13|profiles|1
+private_feeds|14|channels|0
+private_feeds|14|profiles|1
+private_feeds|15|channels|0
+private_feeds|15|profiles|1
+private_feeds|16|channels|0
+private_feeds|16|profiles|1
+private_feeds|17|channels|0
+private_feeds|17|profiles|1
+private_feeds|19|channels|0
+private_feeds|19|profiles|1
+private_feeds|20|channels|0
+private_feeds|20|profiles|1
+private_feeds|21|channels|0
+private_feeds|21|profiles|1
+private_feeds|22|channels|0
+private_feeds|22|profiles|1
+private_feeds|23|channels|0
+private_feeds|23|profiles|1
+private_feeds|24|channels|0
+private_feeds|24|profiles|1
+private_feeds|25|channels|0
+private_feeds|25|profiles|1
+private_feeds|26|channels|0
+private_feeds|26|profiles|1
+private_feeds|27|channels|0
+private_feeds|27|profiles|1
+private_feeds|28|channels|0
+private_feeds|28|profiles|1
+private_feeds|29|channels|0
+private_feeds|29|profiles|1
+private_feeds|30|channels|0
+private_feeds|30|profiles|1
+private_feeds|31|channels|0
+private_feeds|31|profiles|1
+private_feeds|32|channels|0
+private_feeds|32|profiles|1
+private_feeds|33|channels|0
+private_feeds|33|profiles|1
+private_feeds|34|channels|0
+private_feeds|34|profiles|1
+private_feeds|35|channels|0
+private_feeds|35|profiles|1
+private_feeds|36|channels|0
+private_feeds|36|profiles|1
+private_feeds|37|channels|0
+private_feeds|37|profiles|1
+private_feeds|38|channels|0
+private_feeds|38|profiles|1
+issue_statuses|20|projects|0
+issue_statuses|21|projects|0
+issue_statuses|22|projects|0
+=== PRAGMA integrity_check ===
+ok
