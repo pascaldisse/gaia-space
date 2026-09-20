@@ -49,7 +49,14 @@ const mountTasks = async () => {
   dispose = render(
     () => (
       <SpaceShell
+        /* The rail draws only modes this build actually offers (§availableRail), so the
+           fixture hands over the same set App does — not just the task views. */
         views={[
+          { name: "Home", icon: "home" },
+          { name: "Chat", icon: "chat" },
+          { name: "Projects", icon: "layers" },
+          { name: "Documents", icon: "book-nav" },
+          { name: "Development", icon: "target" },
           { name: "To-Do", icon: "check" },
           { name: "Team Tasks", icon: "users" },
           { name: "Task Ledger", icon: "columns" },

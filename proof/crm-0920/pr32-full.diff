@@ -1,0 +1,799 @@
+diff --git a/src/App.tsx b/src/App.tsx
+index fe9313d..7bd86f1 100644
+--- a/src/App.tsx
++++ b/src/App.tsx
+@@ -1,159 +1,159 @@
+ import { createEffect, createSignal, onCleanup, onMount, For, Match, Show, Switch, type Component, type JSX } from "solid-js";
+ import { Dynamic } from "solid-js/web";
+ import "./App.css";
+ import "./spaceTheme.css";
+ // Generated light restatement of the literals the token remap cannot reach.
+ // Imported here so hand-written light surfaces (ChatSpaceLight, HomeCalendar)
+ // still win on equal specificity. See tools/lightOverrides.mjs.
+ import "./spaceLightOverrides.css";
+ // Typography / control shape / spacing restatement (stage 5a). Imported AFTER
+ // the generated colour layer: where both touch a control it must win.
+ import "./spaceLightType.css";
+ // Cross-app shared token source (see file header) — the pb-* Bloodborne
+ // vocabulary, imported before palettes.css so `.palette-paleblood` can read it.
+ import "./palettes/paleblood.tokens.css";
+ // Palettes LAST: colour-only re-points of the base tokens the three sheets above
+ // build on (src/theme.ts). Selector `.palette-x .theme-space-light` outranks them.
+ import "./palettes.css";
+ import { initPalette } from "./theme";
+ import Dashboard from "./views/Dashboard";
+ import Home from "./views/Home";
+ import Development from "./views/Development";
+ import Todo from "./views/Todo";
+ import LedgerTodo from "./views/LedgerTodo";
+ import { taskRoute, ledgerRoute } from "./taskRoutes";
+ import Absences from "./views/Absences";
+ import Projects from "./views/Projects";
+ import Repos from "./views/Repos";
+ import Reviews from "./views/Reviews";
+ import DevEnvironments from "./views/DevEnvironments";
+ import Chat from "./views/Chat";
+ import Inbox from "./views/Inbox";
+ import Documents from "./views/Documents";
+ import Blogs from "./views/Blogs";
+ import Passwords from "./views/Passwords";
+ import Calendar from "./views/Calendar";
+ import Meetings from "./views/Meetings";
+ import ProjectTasks from "./views/ProjectTasks";
+ import TeamTasks from "./views/TeamTasks";
+ import Steering from "./views/Steering";
+ import ProjectHome from "./views/ProjectHome";
+ import ProjectSettings from "./views/ProjectSettings";
+ import ProjectWorkspace from "./views/ProjectWorkspace";
+ import Packages from "./views/Packages";
+ import Pipelines from "./views/Pipelines";
+ import Members from "./views/Members";
+ import Locations from "./views/Locations";
+ import Admin from "./views/Admin";
+ import Applications from "./views/Applications";
+ import Users from "./views/Users";
+ import Settings from "./views/Settings";
+ import Leads from "./views/Leads";
+ import Finance from "./views/Finance";
+ import CRM from "./views/CRM";
+ import { financeApi } from "./api/finance";
+ import Goto from "./components/Goto";
+ import Login from "./components/Login";
+ import AccountFooter from "./components/AccountFooter";
+ import ServerConnect from "./components/ServerConnect";
+ import SpaceShell from "./components/SpaceShell";
+ import ChannelWorkspace from "./views/ChannelWorkspace";
+ import { Icon, type IconName } from "./components/Icon";
+ import { authChecked, checkAuth, currentUser, isWeb } from "./session";
+ import { isMobileSetup } from "./mobile";
+ import { activeView, createHashAdapter, createPathAdapter, initRouter, linkEntity, linkProps, registerViews, route, setAvailableViews, setRoutePending } from "./router";
+ import { defaultView, financeVisible, groupOfView, navLayout, setFinanceAllowed, viewLabel, visibleGroups, type NavGroup } from "./nav";
+ 
+ type View = { name:string; icon:IconName; component:Component; slug?:string; aliases?:string[] };
+ type AppProps = { online?: boolean };
+ // Chat-first destinations. They are ordinary registered views: reachable from every nav
+ // layout, deep-linkable, and normalized by the same router policy as the rest.
+ const homeView:View={name:"Home",icon:"home",component:Home};
+ const developmentView:View={name:"Development",icon:"target",component:Development};
+ 
+ const personalViews:View[]=[homeView,{name:"Dashboard",icon:"home",component:Dashboard},{...taskRoute,icon:"check",component:Todo},{...ledgerRoute,icon:"check",component:LedgerTodo},{name:"Absences",icon:"clock-nav",component:Absences}];
+-/* Views that exist ONLY in the desktop build: their commands need a local machine
+-   (a git working copy, a runner), so the web shell filters them out (§visibleWorkspaceViews).
+-   CRM is deliberately NOT one of them any more — since its document lives in space.db
+-   (§crmSync) it is a normal server-backed view, and leaving it here made the rail draw a
+-   CRM button on the web that routed to /dashboard. */
++/* Local-only views need something that exists only on THIS machine: a checkout, a
++   local daemon, a runner. CRM needs none of that — it is a browser-side workspace like
++   every other one, so it is NOT listed here. Listing it here hid it from the web build
++   while the rail still offered the button: clicking CRM landed on Home (§known in
++   router.ts drops an unavailable view). */
+ const localOnlyViews:View[]=[{name:"Repos",icon:"repo",component:Repos},{name:"Code Reviews",icon:"review",component:Reviews},{name:"Pipelines",icon:"pipeline",component:Pipelines}];
+ const workspaceViews:View[]=[{name:"Projects",icon:"layers",component:Projects},...localOnlyViews,{name:"CRM",icon:"columns",component:CRM},{name:"Chat",icon:"chat",component:Chat},{name:"Inbox",icon:"inbox",component:Inbox},{name:"Documents",icon:"book-nav",component:Documents},{name:"Blogs",icon:"book",component:Blogs},{name:"Passwords",icon:"key",component:Passwords},{name:"Calendar",icon:"calendar-nav",component:Calendar},{name:"Meetings",icon:"calendar-nav",component:Meetings},{name:"Dev Environments",icon:"repo",component:DevEnvironments},{name:"Packages",icon:"package",component:Packages},{name:"Members",icon:"org",component:Members},{name:"Locations",icon:"org",component:Locations},{name:"Admin",icon:"settings",component:Admin},{name:"Applications",icon:"grid",component:Applications}];
+ const usersView:View={name:"Users",icon:"users",component:Users};
+ const settingsView:View={name:"Settings",icon:"settings",component:Settings};
+ const leadsView:View={name:"Leads",icon:"inbox",component:Leads};
+ /* Finance is OFFERED only to the people the server admits (nav.ts: financeVisible),
+    and PROTECTED by finance.rs regardless of what this registry says. */
+ const financeView:View={name:"Finance",icon:"target",component:Finance};
+ const projectTasksView:View={name:"Project Tasks",icon:"check",component:ProjectTasks};
+ // Cross-project, project-id-free: routed by its own slug (`team-tasks`), unlike the
+ // project-scoped views below which live under /projects/<id>/…
+ const teamTasksView:View={name:"Team Tasks",icon:"check",component:TeamTasks};
+ const projectOverviewView:View={name:"Project Overview",icon:"home",component:ProjectHome};
+ const projectSteeringView:View={name:"Project Steering",icon:"target",component:Steering};
+ const projectSettingsView:View={name:"Project Settings",icon:"settings",component:ProjectSettings};
+ /* THE PROJECT WORKSPACE. Its body is drawn by the frame itself (it owns the five
+    tabs), so the registry entry only has to exist: `current()` must resolve the view
+    name, and the router must know the slug. Rendering nothing here is the honest
+    statement that this view has no content OUTSIDE its frame. */
+ const projectWorkspaceView:View={name:"Project Workspace",icon:"layers",component:()=>null};
+ /* ONE FRAME FOR EVERY PROJECT ADDRESS. Any route carrying a project renders inside
+    ProjectWorkspace: its own five tabs, and Steering / Settings / a single task as
+    guests under the SAME tab row. That is what removes the double system — there is
+    no longer a `ProjectContext` drawing a second, six-entry row above all of them. */
+ const projectFramed=()=>!!route().projectId;
+ const projectFrame=(body:()=>JSX.Element)=><Show when={projectFramed()} fallback={body()}><ProjectWorkspace>{body()}</ProjectWorkspace></Show>;
+ 
+ export default function App({ online = true }: AppProps) {
+   const web = () => isWeb(online);
+   /* The stored colour scheme goes onto <html> before the first view renders. */
+   initPalette();
+   const active=()=>activeView()||defaultView();
+   const [gotoOpen,setGotoOpen]=createSignal(false);
+ const [fullTextOpen,setFullTextOpen]=createSignal(false);
+   const [accountOpen,setAccountOpen]=createSignal(false);
+   const [menuOpen,setMenuOpen]=createSignal(false);
+   const visibleWorkspaceViews=()=>{
+     let list=workspaceViews;
+     if(web()) list=list.filter(v=>!localOnlyViews.includes(v));
+     if(web()&&currentUser()?.role==="GlobalAdmin") list=[...list,usersView,leadsView];
+     if(financeVisible()) list=[...list,financeView];
+     return list;
+   };
+   const views=()=>[...personalViews,...visibleWorkspaceViews(),developmentView,teamTasksView,projectTasksView,projectOverviewView,projectSteeringView,projectSettingsView,projectWorkspaceView,settingsView];
+   const current=()=>views().find(view=>view.name===active())??personalViews[0];
+   onMount(()=>{
+     // Calendar is the shared schedule; Meetings is its dedicated booking and RSVP surface.
+     // The server decides who is a finance owner; the page only relays the answer.
+     void financeApi.access().then(access=>setFinanceAllowed(access.allowed)).catch(()=>setFinanceAllowed(false));
+     registerViews([...personalViews,...workspaceViews,usersView,leadsView,financeView,developmentView,teamTasksView,projectTasksView,projectOverviewView,projectSteeringView,projectSettingsView,projectWorkspaceView,settingsView]);
+     setRoutePending(web()&&!authChecked());
+     initRouter(web()?createPathAdapter(import.meta.env.BASE_URL):createHashAdapter());
+     void checkAuth(online);
+     const shortcut=(event:KeyboardEvent)=>{if((event.ctrlKey||event.metaKey)&&event.shiftKey&&event.key.toLowerCase()==="f"){event.preventDefault();setFullTextOpen(open=>!open)} else if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==="k"){event.preventDefault();setGotoOpen(open=>!open)}if(event.key==="Escape")setMenuOpen(false)};
+     const closeAccount=(event:MouseEvent)=>{if(!(event.target as HTMLElement).closest(".topbar-right"))setAccountOpen(false)};
+     window.addEventListener("keydown",shortcut); document.addEventListener("mousedown",closeAccount);
+     onCleanup(()=>{window.removeEventListener("keydown",shortcut);document.removeEventListener("mousedown",closeAccount)});
+   });
+   createEffect(()=>{
+     setRoutePending(web()&&!authChecked());
+     setAvailableViews([...personalViews,...visibleWorkspaceViews(),developmentView,teamTasksView,projectTasksView,projectOverviewView,projectSteeringView,projectSettingsView,projectWorkspaceView,settingsView].map(v=>v.name));
+   });
+   createEffect(()=>{ active(); setMenuOpen(false); });
+   const nav=(view:View)=><a class="topnav-item" title={viewLabel(view.name)} aria-label={viewLabel(view.name)} classList={{active:active()===view.name}} {...linkProps({view:view.name})}><span class="nav-icon" aria-hidden="true"><Icon name={view.icon} size={18} /></span><span class="topnav-label">{viewLabel(view.name)}</span></a>;
+   const groups=()=>visibleGroups(views().map(view=>view.name));
+   const activeGroup=()=>groupOfView(groups(),active());
+   const groupNav=(group:NavGroup)=><a class="topnav-item" title={group.label} aria-label={group.label} classList={{active:activeGroup()?.id===group.id}} {...linkProps({view:group.views[0]})}><span class="nav-icon" aria-hidden="true"><Icon name={group.icon} size={18} /></span><span class="topnav-label">{group.label}</span></a>;
+   const subNav=(name:string)=><a class="subnav-item" classList={{active:active()===name}} {...linkProps({view:name})}>{viewLabel(name)}</a>;
+   return <Switch>
+     <Match when={isMobileSetup()}><ServerConnect/></Match>
+     <Match when={web()&&!authChecked()}><div class="space-shell-loading"/></Match>
+     <Match when={web()&&!currentUser()}><Login/></Match>
+     <Match when={navLayout()==="chat-first"}>
+       <SpaceShell views={views().map(v=>({name:v.name,icon:v.icon}))} active={active()} onOpenSearch={()=>setGotoOpen(true)}>
+         {/* A channel URL with a tab is the channel WORKSPACE: the same Chat view, wrapped
+             in its header/tabs/rail. Without a tab (and in every other layout) the plain
+             Chat view keeps rendering, unchanged. */}
+         {/* A project address wins over a channel one: `/projects/<id>/chats/<cid>` is a
+             channel SELECTED INSIDE the project, so the project frame draws it. A bare
+             `/channel/<id>/<tab>` is still the channel workspace — which no longer draws
+diff --git a/src/components/SpaceShell.tsx b/src/components/SpaceShell.tsx
+index 70801a7..9546b6c 100644
+--- a/src/components/SpaceShell.tsx
++++ b/src/components/SpaceShell.tsx
+@@ -437,160 +437,168 @@ const [mobileSidebarOpen, setMobileSidebarOpen] = createSignal(false);
+   // A mode with no objects of its own gets no column at all. Home is that mode:
+   // it is one page, so anything listed beside it could only be another mode's
+   // landing — the rail printed twice. Chats keeps its column even when the entry
+   // list is short, because the channels below it ARE its objects.
+   // Which modes show the conversation list. Home does, and that is the point of a
+   // communication-first product: the channels are the objects you steer by, so they
+   // stay in view even on the start page. Home still lists no DESTINATIONS — those
+   // were the rail printed twice.
+   const showsChannels = createMemo(() => mode() === "chats" || mode() === "home");
+   // Knowledge lists libraries, all of them data, so it keeps its column too — before
+   // this it was the one mode where the second bar disappeared mid-navigation.
+   const hasSidebar = createMemo(() => MODE_LINKS[mode()].length > 0 || showsChannels() || mode() === "library");
+ 
+   /** A profile's display name, for labelling a direct message with the OTHER person. */
+   const displayNameOf = (id: string) => (profiles() ?? []).find((person) => person.id === id)?.display_name;
+ 
+   /** The two sections the sidebar draws, split by kind and head count — never by whether
+    *  a row happens to carry a name. Chat names a DM after both people, so the old
+    *  name-based split filed every DM under the channels. */
+   const split = createMemo(() => partitionChannels((channels() ?? []).filter((channel) => !channel.archived)));
+ 
+   /** What a direct message is called HERE: the other person, with me removed. */
+   const labelOfDirect = (channel: ChannelSummary) => dmLabel(channel, actingProfileId(), { nameOf: displayNameOf });
+ 
+   /** Real channels grouped by owning project; project-less channels land in a final section. */
+   const groups = createMemo(() => {
+     const term = filter().trim().toLowerCase();
+     const named = split()
+       .channels.filter((channel) => !!channel.name)
+       .filter((channel) => !term || (channel.name ?? "").toLowerCase().includes(term));
+     const byProject = new Map<string, ChannelSummary[]>();
+     const loose: ChannelSummary[] = [];
+     for (const channel of named) {
+       if (channel.project_id) {
+         const list = byProject.get(channel.project_id) ?? [];
+         list.push(channel);
+         byProject.set(channel.project_id, list);
+       } else loose.push(channel);
+     }
+     const nameOf = (id: string) => projects()?.find((project) => project.id === id)?.name ?? id;
+     const sections = [...byProject.entries()]
+       .map(([id, list]) => ({ id, label: nameOf(id), channels: list }))
+       .sort((a, b) => a.label.localeCompare(b.label));
+     /* "Channels" when it is the only heading, "Other channels" when project sections
+        stand above it — the word says what the section is relative to what is shown. */
+     if (loose.length) sections.push({ id: "", label: sections.length ? "Other channels" : "Channels", channels: loose });
+     return sections;
+   });
+ 
+   /** Direct messages: 1:1 conversations. They live in the Chats mode only, and the
+    *  search matches what the row SHOWS — the other person's name. Sorted by most
+    *  recent activity first (the same `last_message_at` the "newest channel" landing
+    *  already trusts); a pair with no messages yet has no activity to sort by, so those
+    *  fall back to their label, alphabetically, instead of a stable-sort coin flip. */
+   const directs = createMemo(() => {
+     const term = filter().trim().toLowerCase();
+     return split().dms
+       .filter((channel) => !term || labelOfDirect(channel).toLowerCase().includes(term))
+       .sort((a, b) => (b.last_message_at ?? -Infinity) - (a.last_message_at ?? -Infinity)
+         || labelOfDirect(a).localeCompare(labelOfDirect(b)));
+   });
+ 
+   /** Projects, for the Tasks mode's "by project" section. */
+   const projectList = () =>
+     [...(projects() ?? [])]
+       .filter((project) => matches(project.name ?? ""))
+       .sort((a, b) => (a.name ?? "").localeCompare(b.name ?? ""));
+ 
+   /** "More" is everything else, still built from the LIVE registry — minus whatever a
+    *  rail mode already owns, so nothing is offered twice and nothing is lost.
+    *
+    *  AND minus what the person hid. `Settings -> Visible destinations` writes
+    *  `hiddenGroups`, which until now only the older grouped/flat layouts read: in the
+    *  shipped chat-first shell all eight checkboxes did nothing at all. A preference
+    *  that cannot be observed is worse than a missing one. As Settings promises, a
+    *  hidden destination stays reachable by URL and from Go to — only this list drops it. */
+   const hiddenViewNames = () => {
+     const hidden = new Set(hiddenGroups());
+     return new Set(NAV_GROUPS.filter((group) => hidden.has(group.id)).flatMap((group) => group.views));
+   };
++  /** A rail button that cannot arrive is worse than a missing one: the router drops an
++   *  unavailable view and the click lands on Home, silently. So the rail is filtered by
++   *  what this build ACTUALLY offers (`props.views`) — the same list the router was
++   *  given — instead of being a hard-coded constant. */
++  const availableRail = (entries: (typeof RAIL)[number][]) => {
++    const offered = new Set(props.views.map((view) => view.name));
++    return entries.filter((entry) => offered.has(entry.landing));
++  };
+   const moreViews = () =>
+     props.views.filter(
+       (view) =>
+         railModeOfView(view.name) === "more" &&
+         !hiddenViewNames().has(view.name) &&
+         matches(viewLabel(view.name)),
+     );
+ 
+   /** Where a rail mode lands. Chats opens the newest conversation, not a naked sidebar;
+    *  with no channels at all it falls back to Chat's own (honest) empty surface. */
+   const newestChannel = () =>
+     [...(channels() ?? [])].filter((c) => !c.archived).sort((a, b) => (b.last_message_at ?? 0) - (a.last_message_at ?? 0))[0];
+   const landingRoute = (entry: (typeof RAIL)[number]): Route => {
+     if (entry.mode === "chats") {
+       // Already in a conversation: Chats keeps it (it is the mode's current object).
+       // Otherwise open the newest one — a mode must land on something real.
+       const id = activeChannelId() ?? newestChannel()?.id;
+       if (id) return { view: "Chat", entityType: "channel", entityId: id, tab: "messages" };
+     }
+     return { view: entry.landing };
+   };
+ 
+   /** The search field belongs to the sidebar's identity, so it keeps working in every
+    *  mode: it filters whatever that mode lists. */
+   const matches = (label: string) => {
+     const term = filter().trim().toLowerCase();
+     return !term || label.toLowerCase().includes(term);
+   };
+   const sideEntries = () =>
+     MODE_LINKS[mode()].filter((entry) => isViewAvailable(entry.view) && matches(entry.label));
+ 
+   /** The active Activity filter, read from the ROUTE (unknown -> All). */
+   const activityFilter = (): ActivityFilter => asActivityFilter(route().tab);
+   /** A filter entry is active when the route's filter is its own; every other entry is
+    *  active when its view is the open one. Exactly one entry lights either way. */
+   const entryActive = (entry: SideEntry) =>
+     entry.filter ? route().view === "Inbox" && activityFilter() === entry.filter : entry.tab ? props.active === entry.view && route().tab === entry.tab : props.active === entry.view;
+   /** A filter's own count, from the same source as the badge. A count of 0 is drawn
+    *  without tone (`metricTone`'s rule) rather than hidden — the filter is still real. */
+   const entryCount = (entry: SideEntry) =>
+     entry.filter ? attentionFilterCount(entry.filter) : badgeOf(entry.badge);
+ 
+   /** Real channels grouped by project, plus the loose/"Other channels" tail — the block
+    *  `RAIL_GROUP_ORDER`'s `"channels"` entry stands for. */
+   const channelGroupsSection = () => (
+     <For each={groups()}>
+       {(group) => (
+         <div class="section">
+           <div
+             class="section-head"
+             classList={{ "drop-into": dropTarget() === `project:${group.id}` }}
+             onDragOver={(event) => {
+               // Only a real project takes a conversation; "Other channels" is the
+               // absence of one, so it is not a destination.
+               if (!group.id || !carries(event, "application/x-gaia-channel")) return;
+               event.preventDefault();
+               setDropTarget(`project:${group.id}`);
+             }}
+             onDragLeave={() => setDropTarget((current) => (current === `project:${group.id}` ? null : current))}
+             onDrop={(event) => {
+               const channelId = event.dataTransfer?.getData("application/x-gaia-channel");
+               setDropTarget(null);
+               if (!channelId || !group.id) return;
+               event.preventDefault();
+               void attachChannelToProject(channelId, group.id);
+             }}
+           >
+             <span>{group.label}</span>
+             {/* The `+` is where "new conversation" lives now (it left Chat's sidebar). */}
+             <button class="section-add" aria-label={`New channel in ${group.label}`} title="New channel" onClick={() => setNewChannelFor(group.id)}>+</button>
+           </div>
+           <For each={group.channels}>
+             {(channel) => (
+               <a
+                 class="channel"
+                 classList={{
+                   active: activeChannelId() === channel.id,
+                   unread: channel.unread_count > 0,
+                   "drop-into": dropTarget() === `channel:${channel.id}`,
+                 }}
+@@ -657,209 +665,209 @@ const [mobileSidebarOpen, setMobileSidebarOpen] = createSignal(false);
+   const railItem = (entry: (typeof RAIL)[number]) => (
+     <a
+       class="rail-item"
+       title={entry.label}
+       aria-label={entry.label}
+       aria-current={mode() === entry.mode ? "true" : undefined}
+       classList={{ active: mode() === entry.mode }}
+       {...navLink(() => landingRoute(entry))}
+     >
+       <span class="rail-icon" aria-hidden="true"><Icon name={entry.icon} size={18} /></span>
+       <span class="rail-label">{entry.label}</span>
+       <Show when={badgeOf(entry.badge) > 0}><span class="rail-badge">{badgeOf(entry.badge)}</span></Show>
+     </a>
+   );
+ 
+   const sideLink = (entry: SideEntry) => (
+     <a
+       class="side-link"
+       data-filter={entry.filter}
+       aria-current={entryActive(entry) ? "page" : undefined}
+       classList={{ active: entryActive(entry) }}
+       {...navLink(() => (entry.filter && entry.filter !== "all"
+         ? { view: entry.view, tab: entry.filter }
+         : entry.tab ? { view: entry.view, tab: entry.tab } : { view: entry.view }))}
+     >
+       <span class="side-icon" aria-hidden="true"><Icon name={entry.icon} size={15} /></span>
+       {entry.strong ? <strong>{entry.label}</strong> : entry.label}
+       <Show when={entry.filter || entryCount(entry) > 0}>
+         <span class="count" classList={{ zero: entryCount(entry) === 0 }}>{entryCount(entry)}</span>
+       </Show>
+     </a>
+   );
+ 
+   return (
+     <div class="space-chat-shell theme-space-light" data-nav-placement={navPlacement()} data-mobile-nav-placement={mobileNavPlacement()} classList={{ "no-sidebar": !hasSidebar(), "sidebar-collapsed": sidebarCollapsed(), "mobile-sidebar-open": mobileSidebarOpen() }}>
+       <Show when={incomingCall()}>{meeting => {
+         const caller = () => profiles()?.find(person => person.id === meeting().organizer_id)?.display_name || meeting().organizer_id || "Someone";
+         const channel = () => (channels() ?? []).find(item => item.id === meeting().channel_id)?.name || meeting().title;
+         const elapsed = () => Math.max(0, ringNow() - (meeting().video_started_at ?? meeting().starts_at));
+         return <section class="incoming-call-ring" role="alert" aria-label="Incoming call">
+           <div><strong>{caller()}</strong><span> is calling in #{channel()} · {elapsed()}s</span></div>
+           <div class="incoming-call-actions"><button type="button" class="decline" onClick={() => void declineIncomingCall()}>Decline</button><button type="button" class="accept" onClick={() => void acceptIncomingCall()}>Accept</button></div>
+         </section>;
+       }}</Show>
+       <Show when={channelMenu()}>
+         {(menu) => <ContextMenu x={menu().x} y={menu().y} items={menu().items} onClose={() => setChannelMenu(null)} />}
+       </Show>
+       <PromptDialog
+         open={!!renamingChannel()}
+         title="Rename conversation"
+         label="Channel name"
+         value={channelName()}
+         setValue={setChannelName}
+         confirmLabel="Save name"
+         busy={renamingBusy()}
+         onConfirm={() => void saveChannelName()}
+         onCancel={() => setRenamingChannel(null)}
+       />
+ 
+       <ConfirmDialog
+         open={!!pendingChannel()}
+         title="Delete conversation?"
+         body={
+           <>
+             <strong>#{pendingChannel()?.name ?? "this channel"}</strong> is deleted for everyone, with every
+             message, file and note in it. This cannot be undone.
+           </>
+         }
+         confirmLabel="Delete conversation"
+         busy={deletingChannel()}
+         onConfirm={() => void deleteChannel()}
+         onCancel={() => setPendingChannel(null)}
+       />
+       <Show when={dropNote()}>
+         <p class="space-shell-note" role="status">{dropNote()}</p>
+       </Show>
+       <Show when={channelError()}>
+         <p class="space-shell-error" role="alert">{channelError()}</p>
+       </Show>
+       <aside class="rail mobile-rail" aria-label="Mobile navigation">
+-        <For each={mobileRail()}>{entry => <a class="rail-item" aria-label={entry.label} classList={{ active: mode() === entry.mode }} onPointerDown={() => entry.mode === "chats" && setMobileSidebarOpen(true)} {...navLink(() => landingRoute(entry))}><span class="rail-icon"><Icon name={entry.icon} size={18} /></span><span class="rail-label">{entry.label}</span></a>}</For>
++        <For each={availableRail(mobileRail())}>{entry => <a class="rail-item" aria-label={entry.label} classList={{ active: mode() === entry.mode }} onPointerDown={() => entry.mode === "chats" && setMobileSidebarOpen(true)} {...navLink(() => landingRoute(entry))}><span class="rail-icon"><Icon name={entry.icon} size={18} /></span><span class="rail-label">{entry.label}</span></a>}</For>
+         <button class="rail-item" aria-label="More" classList={{ active: moreOpen() || mode() === "more" }} onClick={() => setMoreOpen(open => !open)}><span class="rail-icon"><Icon name="menu" size={18} /></span><span class="rail-label">More</span></button>
+       </aside>
+       <aside class="rail desktop-rail" aria-label="Main navigation">
+         <div class="mark" aria-hidden="true">G</div>
+-        <For each={desktopRail()}>{railItem}</For>
++        <For each={availableRail(desktopRail())}>{railItem}</For>
+         <button
+           class="rail-item"
+           title="More"
+           aria-label="More"
+           aria-expanded={moreOpen()}
+           aria-current={mode() === "more" ? "true" : undefined}
+           classList={{ active: moreOpen() || mode() === "more" }}
+           onClick={() => setMoreOpen((open) => !open)}
+         >
+           <span class="rail-icon" aria-hidden="true"><Icon name="menu" size={18} /></span>
+           <span class="rail-label">More</span>
+         </button>
+         <button class="rail-item sidebar-toggle" aria-label="Toggle sidebar" title="Toggle sidebar" aria-pressed={sidebarCollapsed()} onClick={() => setSidebarCollapsed((collapsed) => !collapsed)}>
+           <span class="rail-icon" aria-hidden="true">◀</span><span class="rail-label">Sidebar</span>
+         </button>
+         <div class="rail-spacer" />
+         {/* A PLUS MUST CREATE. This button said "Create new", drew a plus, and opened
+             the search — the one thing a plus never means. It now opens the same
+             composer the sidebar's section `+` and the global `New message` open,
+             organisation-scoped. Search keeps its own two addresses (the command bar
+             and the sidebar's magnifier), both of which say "search". */}
+         <button class="round-action" aria-label="New message" title="New message" onClick={() => setRecipientPickerOpen(true)}>
+           <Icon name="plus" size={20} />
+         </button>
+         <a class="profile" title={meLabel()} aria-label={meLabel()} {...linkProps({ view: "Settings" })}>
+           {initials(meLabel())}
+         </a>
+       </aside>
+ 
+       <Show when={moreOpen()}>
+         <div class="more-backdrop" onClick={() => setMoreOpen(false)} />
+         {/* The panel closes on the container's click, not on each item: an item's own
+             onClick attribute would SHADOW the spread navigation handler. */}
+         <nav class="more-panel" aria-label="All views" onClick={() => setMoreOpen(false)}>
+           {/* WHAT THE NARROW RAIL DROPS, MORE PICKS UP. The mobile rail carries five
+               destinations, so some modes (Library, Development) are not drawn there —
+               and the list below holds only views mapped to "more", which would leave
+               them unreachable on a phone. This section is rendered always and hidden
+               by CSS on desktop, where those modes have their own rail button. */}
+           <Show when={railDroppedOnMobile().length}>
+             <div class="more-mobile-only">
+               <h2>Destinations</h2>
+-              <For each={railDroppedOnMobile()}>
++              <For each={availableRail(railDroppedOnMobile())}>
+                 {(entry) => (
+                   <a
+                     class="more-item"
+                     classList={{ active: mode() === entry.mode }}
+                     {...navLink(() => landingRoute(entry))}
+                   >
+                     <span class="side-icon" aria-hidden="true"><Icon name={entry.icon} size={16} /></span>
+                     {entry.label}
+                   </a>
+                 )}
+               </For>
+             </div>
+           </Show>
+           <h2>All views</h2>
+           <For each={moreViews()}>
+             {(view) => (
+               <a
+                 class="more-item"
+                 classList={{ active: props.active === view.name }}
+                 {...navLink(() => ({ view: view.name }))}
+               >
+                 <span class="side-icon" aria-hidden="true"><Icon name={view.icon} size={16} /></span>
+                 {viewLabel(view.name)}
+               </a>
+             )}
+           </For>
+         </nav>
+       </Show>
+ 
+       <Show when={hasSidebar()}>
+       <aside class="space-sidebar" aria-label={`${MODE_TITLE[mode()]} navigation`}>
+         <button class="mobile-sidebar-back" type="button" onClick={() => setMobileSidebarOpen(false)}>Back to chat</button>
+         <div class="workspace-name">
+           <strong>{workspaceName()}</strong>
+           <div class="tiny-actions">
+             <button class="tiny-btn" aria-label="Search" title="Search" onClick={props.onOpenSearch}>
+               <Icon name="search" size={14} />
+             </button>
+             <button class="tiny-btn" aria-label="New channel" title="New channel" onClick={() => setNewChannelFor("")}>
+               <Icon name="edit" size={14} />
+             </button>
+           </div>
+         </div>
+         <input
+           class="side-search"
+           type="search"
+           placeholder={showsChannels() ? "Search conversations" : `Search ${MODE_TITLE[mode()].toLowerCase()}`}
+           aria-label={showsChannels() ? "Search conversations" : `Search ${MODE_TITLE[mode()].toLowerCase()}`}
+           value={filter()}
+           onInput={(event) => setFilter(event.currentTarget.value)}
+         />
+         {/* The sidebar's CONTENT follows the rail mode; its identity (plum, width, type,
+             search field above) does not. Keyed on the mode so the swapped list is a new
+             subtree and focus never lands on a node that no longer exists. */}
+         <div class="side-mode" data-mode={mode()}>
+         <For each={sideEntries()}>{sideLink}</For>
+ 
+         {/* The projects are the PROJECTS mode's objects, the way channels are Chats'.
+             Tasks no longer repeats them: "Project Tasks" now lives in the projects
+             mode, so listing it under Tasks would have switched mode on click — the
+             one thing a sidebar entry must never do. */}
+         <Show when={mode() === "projects"}>
+           <div class="section">
+             <div class="section-head">
+               <span>Projects</span>
+               <button
+                 type="button"
+                 class="section-add"
+                 title="New project"
+                 aria-label="New project"
+                 onClick={() => navigate({ view: "Projects" })}
+               >+</button>
+             </div>
+             <For each={projectList()}>
+               {(project) => (
+                 <a
+                   class="side-link"
+                   classList={{ active: route().projectId === project.id }}
+                   {...navLink(() => ({ view: "Project Overview", projectId: project.id }))}
+                 >
+diff --git a/src/components/spaceShell.tasksRail.test.tsx b/src/components/spaceShell.tasksRail.test.tsx
+index d1fe3a0..c79efaf 100644
+--- a/src/components/spaceShell.tasksRail.test.tsx
++++ b/src/components/spaceShell.tasksRail.test.tsx
+@@ -1,123 +1,130 @@
+ import { expect, test, describe, afterEach, mock } from "bun:test";
+ import { invoke } from "../api/invoke";
+ mock.module("@tauri-apps/api/core", () => ({ invoke }));
+ import { render } from "solid-js/web";
+ import SpaceShell from "./SpaceShell";
+ import { setProfileId, reloadProjects, reloadProfiles } from "../session";
+ import { navigate, registerViews, setAvailableViews } from "../router";
+ import { setShowDevelopment } from "../nav";
+ import { readFileSync } from "node:fs";
+ 
+ // THE TASK AREA MUST BE NAMED BY A MENU, not only by a URL.
+ //
+ // The generated Task Ledger arrived mapped to "more" and holding the slug `todo`,
+ // while To-Do and Team Tasks were mapped to "home" — a mode whose sidebar is
+ // deliberately EMPTY. `moreViews()` lists only what is mapped to "more". The result:
+ // the ledger was the only task surface any menu offered, and the three working
+ // surfaces were reachable by typed URL alone. This test pins the way back in.
+ 
+ const realFetch = globalThis.fetch;
+ let dispose: (() => void) | undefined;
+ afterEach(() => {
+   dispose?.(); dispose = undefined;
+   document.body.innerHTML = "";
+   globalThis.fetch = realFetch;
+   setProfileId("");
+   setShowDevelopment(true);
+   window.history.replaceState({}, "", "/");
+ });
+ 
+ const settle = () => new Promise((done) => setTimeout(done, 60));
+ 
+ const mountTasks = async () => {
+   setProfileId("me");
+   globalThis.fetch = (async () =>
+     new Response(JSON.stringify({ ok: true, value: [] }), { status: 200, headers: { "content-type": "application/json" } })) as any;
+   await reloadProjects().catch(() => undefined);
+   await reloadProfiles().catch(() => undefined);
+ 
+   const host = document.createElement("div");
+   document.body.appendChild(host);
+   registerViews([
+     { name: "To-Do", aliases: ["todo", "tasks"] },
+     "Team Tasks",
+     { name: "Task Ledger", slug: "task-ledger" },
+     "Chat", "Projects",
+   ]);
+   setAvailableViews(null);
+   window.history.replaceState({}, "", "/to-do");
+   dispose = render(
+     () => (
+       <SpaceShell
++        /* The rail draws only modes this build actually offers (§availableRail), so the
++           fixture hands over the same set App does — not just the task views. */
+         views={[
++          { name: "Home", icon: "home" },
++          { name: "Chat", icon: "chat" },
++          { name: "Projects", icon: "layers" },
++          { name: "Documents", icon: "book-nav" },
++          { name: "Development", icon: "target" },
+           { name: "To-Do", icon: "check" },
+           { name: "Team Tasks", icon: "users" },
+           { name: "Task Ledger", icon: "columns" },
+         ]}
+         active="To-Do"
+         onOpenSearch={() => {}}
+       >
+         <div />
+       </SpaceShell>
+     ),
+     host,
+   );
+   navigate({ view: "To-Do" });
+   await settle();
+   return host;
+ };
+ 
+ describe("nothing the narrow rail drops becomes unreachable", () => {
+   test("More lists every destination the mobile rail has no room for", async () => {
+     const host = await mountTasks();
+     (host.querySelector('.mobile-rail [aria-label="More"]') as HTMLElement).click();
+     await settle();
+     const panel = document.querySelector(".more-panel") as HTMLElement;
+     expect(panel).not.toBeNull();
+     const dropped = panel.querySelector(".more-mobile-only") as HTMLElement;
+     expect(dropped).not.toBeNull();
+     const labels = [...dropped.querySelectorAll(".more-item")].map((n) => n.textContent?.trim());
+     // Library and Development are the two RAIL modes the five-slot mobile rail omits.
+     expect(labels).toEqual(expect.arrayContaining(["Library", "Development"]));
+     const css = readFileSync(new URL("./SpaceShell.css", import.meta.url), "utf8");
+     expect(css).toContain(".more-mobile-only { display: none; }");
+     expect(css).toContain("@media (max-width: 720px) { .space-chat-shell .more-mobile-only { display: contents; } }");
+ 
+     dispose?.(); host.remove();
+     setShowDevelopment(false);
+     const hiddenHost = await mountTasks();
+     (hiddenHost.querySelector('.mobile-rail [aria-label="More"]') as HTMLElement).click();
+     await settle();
+     const hiddenDropped = document.querySelector(".more-panel .more-mobile-only") as HTMLElement;
+     const hiddenLabels = [...hiddenDropped.querySelectorAll(".more-item")].map((n) => n.textContent?.trim());
+     expect(hiddenLabels).toContain("Library");
+     expect(hiddenLabels).not.toContain("Development");
+   });
+ });
+ 
+ describe("the task area is reachable from the rail", () => {
+   test("Tasks is a rail destination and its sidebar names all three task lists", async () => {
+     const host = await mountTasks();
+ 
+     // 1. The rail carries a Tasks destination.
+     const railLabels = [...host.querySelectorAll(".rail-item .rail-label")].map((n) => n.textContent);
+     expect(railLabels).toContain("Tasks");
+ 
+     // 2. Its sidebar lists the three task surfaces — Team tasks NOT hidden behind
+     //    "More", not reachable only by URL.
+     const sidebar = host.querySelector(".space-sidebar") as HTMLElement;
+     expect(sidebar).not.toBeNull();
+     const entries = [...sidebar.querySelectorAll("a, button")]
+       .map((n) => n.textContent?.trim())
+       .filter(Boolean) as string[];
+     for (const label of ["My tasks", "Team tasks", "Task ledger"]) {
+       expect(entries.some((entry) => entry.includes(label))).toBe(true);
+     }
+   });
+ 
+   test("standing on My tasks, the rail's Tasks entry is the active one", async () => {
+     const host = await mountTasks();
+     const active = [...host.querySelectorAll(".rail-item.active .rail-label")].map((n) => n.textContent);
+     expect(active).toContain("Tasks");
+   });
+ });
+diff --git a/src/crm.web.test.tsx b/src/crm.web.test.tsx
+new file mode 100644
+index 0000000..76c181b
+--- /dev/null
++++ b/src/crm.web.test.tsx
+@@ -0,0 +1,103 @@
++import { expect, test, describe, afterEach, mock } from "bun:test";
++import { invoke } from "./api/invoke";
++mock.module("@tauri-apps/api/core", () => ({ invoke }));
++import { render } from "solid-js/web";
++import SpaceShell from "./components/SpaceShell";
++import { setProfileId, reloadProjects, reloadProfiles } from "./session";
++import { buildPath, parsePath, registerViews, setAvailableViews, setRoutePending } from "./router";
++
++// THE WEB BUILD HID THE CRM AND KEPT ITS BUTTON.
++//
++// `CRM` was listed among the LOCAL-ONLY views (next to Repos, Code Reviews,
++// Pipelines), and App drops those from `setAvailableViews` in the browser. The router
++// then refuses an unavailable view (§known) and falls back — so `/crm/leads` rendered
++// HOME, complete with its task widgets, while the rail still offered a CRM button.
++// Jannes saw a dashboard where his pipeline should be, 2026-09-19.
++//
++// Two rules are pinned here:
++//   1. CRM is reachable in the web build — its address survives availability.
++//   2. A rail button exists only for a destination this build can actually reach.
++
++const realFetch = globalThis.fetch;
++let dispose: (() => void) | undefined;
++afterEach(() => {
++  dispose?.(); dispose = undefined;
++  document.body.innerHTML = "";
++  globalThis.fetch = realFetch;
++  setProfileId("");
++  setAvailableViews(null);
++  setRoutePending(false);
++  window.history.replaceState({}, "", "/");
++});
++
++const settle = () => new Promise((done) => setTimeout(done, 60));
++
++/** The view names the WEB build offers: every workspace view except the three that
++ *  need this machine (Repos, Code Reviews, Pipelines). CRM belongs to this list. */
++const WEB_VIEWS = ["Home", "Chat", "Projects", "Documents", "Development", "To-Do", "CRM"];
++
++describe("the CRM survives the web build", () => {
++  test("a CRM address stays a CRM address when only web views are available", () => {
++    registerViews([...WEB_VIEWS, "Repos"]);
++    setAvailableViews(WEB_VIEWS);
++
++    const route = parsePath("crm/leads");
++    expect(route.view).toBe("CRM");
++    expect(route.tab).toBe("leads");
++    expect(buildPath({ view: "CRM", tab: "pipeline" })).toBe("crm/pipeline");
++
++    // The contrast that proves the mechanism: a view the web build does NOT offer
++    // still falls back — that behaviour is right, CRM was simply on the wrong list.
++    expect(parsePath("repos").view).not.toBe("Repos");
++  });
++
++  test("the rail offers no button for a destination this build cannot reach", async () => {
++    setProfileId("me");
++    globalThis.fetch = (async () =>
++      new Response(JSON.stringify({ ok: true, value: [] }), { status: 200, headers: { "content-type": "application/json" } })) as any;
++    await reloadProjects().catch(() => undefined);
++    await reloadProfiles().catch(() => undefined);
++
++    registerViews(WEB_VIEWS);
++    setAvailableViews(WEB_VIEWS);
++    const host = document.createElement("div");
++    document.body.appendChild(host);
++    window.history.replaceState({}, "", "/crm/pipeline");
++    dispose = render(
++      () => (
++        <SpaceShell
++          views={WEB_VIEWS.map((name) => ({ name, icon: "columns" as const }))}
++          active="CRM"
++          onOpenSearch={() => {}}
++        >
++          <div />
++        </SpaceShell>
++      ),
++      host,
++    );
++    await settle();
++
++    const labels = [...host.querySelectorAll(".desktop-rail .rail-item .rail-label")].map((n) => n.textContent?.trim());
++    expect(labels).toContain("CRM");
++
++    // Same shell, a build WITHOUT the CRM: the button is gone rather than landing on Home.
++    dispose(); dispose = undefined; host.remove();
++    const without = WEB_VIEWS.filter((name) => name !== "CRM");
++    registerViews(without);
++    setAvailableViews(without);
++    const bare = document.createElement("div");
++    document.body.appendChild(bare);
++    dispose = render(
++      () => (
++        <SpaceShell views={without.map((name) => ({ name, icon: "columns" as const }))} active="Home" onOpenSearch={() => {}}>
++          <div />
++        </SpaceShell>
++      ),
++      bare,
++    );
++    await settle();
++    const bareLabels = [...bare.querySelectorAll(".desktop-rail .rail-item .rail-label")].map((n) => n.textContent?.trim());
++    expect(bareLabels).not.toContain("CRM");
++    expect(bareLabels).toContain("Home");
++  });
++});
