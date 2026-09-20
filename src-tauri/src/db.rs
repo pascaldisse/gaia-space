@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 145;
+pub const SCHEMA_VERSION: i64 = 146;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -899,6 +899,18 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     // client record verbatim (`src/crmStore.ts` owns its shape — see `crm.rs`).
     // Table-guarded on `profiles` like every other additive rung that references it.
     if version < 145 && table_exists(&tx, "profiles")? {
+        tx.execute_batch(SCHEMA_V145_CRM)?;
+    }
+    // V146: a database that already reached V145 under an EARLIER build of this same
+    // rung (the whole-document `crm_documents`/`crm_document_revisions` design, briefly
+    // live in production with zero rows written to it) is stuck at version 145 forever
+    // and would never see `SCHEMA_V145_CRM` run again — version gates are by number, not
+    // by content, so `crm_records`/`crm_settings` would silently never exist on that box.
+    // `CREATE TABLE IF NOT EXISTS` makes this rung a safe no-op for every OTHER database
+    // (a fresh install, or one that already got the tables from V145 itself). The old,
+    // empty `crm_documents`/`crm_document_revisions` tables are left in place — unused,
+    // harmless, and a below-cost cleanup for later rather than a reason to block this one.
+    if version < 146 && table_exists(&tx, "profiles")? {
         tx.execute_batch(SCHEMA_V145_CRM)?;
     }
     // V141: durable hosted Git repository metadata; bare objects live under data_dir/git/.
@@ -3845,5 +3857,51 @@ mod v145_contract_tests {
             )
             .unwrap();
         assert_eq!(name, "Acme", "the row is addressable and the payload round-trips");
+    }
+
+    /// The EXACT production shape at the time of this deploy: a database that already
+    /// ran an earlier build's V145 (the old whole-document `crm_documents` design, never
+    /// actually written to) and is therefore pinned at user_version=145 — a plain
+    /// `version < 145` guard would never fire again and `crm_records`/`crm_settings`
+    /// would silently never exist. V146 must create them anyway.
+    #[test]
+    fn a_database_already_pinned_at_v145_under_the_old_whole_document_design_still_gets_the_new_tables() {
+        let temp = TempDb::new("gaia-space-v145-legacy-pinned");
+        let conn = open_at(&temp).unwrap();
+        migrate(&conn).unwrap();
+        seed(&conn).unwrap();
+        // Simulate the old rung's tables (empty in real production) and roll the
+        // database back to the version it was ACTUALLY left at: 145, not 144.
+        conn.execute_batch(
+            "CREATE TABLE crm_documents (id TEXT PRIMARY KEY, data TEXT NOT NULL, revision INTEGER NOT NULL, updated_at INTEGER NOT NULL, updated_by TEXT); \
+             CREATE TABLE crm_document_revisions (document_id TEXT NOT NULL, revision INTEGER NOT NULL, data TEXT NOT NULL, saved_at INTEGER NOT NULL, saved_by TEXT, PRIMARY KEY(document_id,revision)); \
+             DROP TABLE IF EXISTS crm_records; DROP TABLE IF EXISTS crm_settings;",
+        )
+        .unwrap();
+        conn.pragma_update(None, "user_version", 145).unwrap();
+        migrate(&conn).expect("v146");
+        assert_eq!(
+            conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
+                .unwrap(),
+            SCHEMA_VERSION
+        );
+        let tables: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN ('crm_records','crm_settings')",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(tables, 2, "a box stuck at v145 under the old design still gets the new tables");
+        // The old, empty tables are left alone, not dropped.
+        let old_tables: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN ('crm_documents','crm_document_revisions')",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(old_tables, 2, "the old tables are left in place, unused");
+        migrate(&conn).expect("idempotent");
     }
 }
