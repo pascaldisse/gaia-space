@@ -1,0 +1,3 @@
+base_url=https://paloptic.com/space pattern="^zz-proof-" min_age_minutes=0 dry_run=true verify=true
+total_users=8 matched=0 eligible=0 deferred=0
+VERIFY OK: no proof-pattern accounts remain.

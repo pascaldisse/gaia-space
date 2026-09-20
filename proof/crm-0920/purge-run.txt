@@ -1,0 +1,7 @@
+base_url=https://paloptic.com/space pattern="^zz-proof-" min_age_minutes=0 dry_run=false verify=false
+total_users=10 matched=2 eligible=2 deferred=0
+ELIGIBLE  zz-proof-crm-a	zz-proof-crm-a	c3e3c1d7d2e2890d95eecdb4a3938d52ec41fc418be724699b2f010674125542
+ELIGIBLE  zz-proof-crm-b	zz-proof-crm-b	380dc7742d0315399a2a78e754279506b0fe3df0fee2748476695df627d85407
+DELETED  zz-proof-crm-a	c3e3c1d7d2e2890d95eecdb4a3938d52ec41fc418be724699b2f010674125542
+DELETED  zz-proof-crm-b	380dc7742d0315399a2a78e754279506b0fe3df0fee2748476695df627d85407
+deleted_ok=2 deleted_fail=0

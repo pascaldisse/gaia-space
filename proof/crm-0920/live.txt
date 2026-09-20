@@ -1,0 +1,64 @@
+STAGE 5 — LIVE production proof, shared CRM, paloptic.com, 2026-09-20
+
+Deployed: master 03b7983, CI run 35520082478 success, box schema v146, bundle index-D-mEvWml.js.
+All calls over https://paloptic.com/space/api/* (root-relative under /space), never localhost.
+
+1) ADMIN LOGIN + TWO GlobalMember ACCOUNTS CREATED
+   POST /space/api/auth/login {username:admin, password:<SPACE_ADMIN_PASSWORD from /etc/gaia-space.env>}
+   -> {"user":{"display_name":"Administrator","id":"admin","profile_id":"profile-admin","role":"GlobalAdmin","username":"admin"}}
+   POST /space/api/users (admin cookie) x2:
+     zz-proof-crm-a -> {"id":"c3e3c1d7d2e2890d95eecdb4a3938d52ec41fc418be724699b2f010674125542"}
+     zz-proof-crm-b -> {"id":"380dc7742d0315399a2a78e754279506b0fe3df0fee2748476695df627d85407"}
+   Both role=member -> stored as global_role=GlobalMember (see create-a.json/create-b.json, a-login.json/b-login.json).
+   profile_id(A) = profile-c3e3c1d7d2e2   profile_id(B) = profile-380dc7742d03
+
+2) A CREATES via POST /space/api/cmd/crm_put_records (cookie: A's space_session):
+   {"organizations":[{"id":"zz-proof-org-1","name":"Zz Proof Org A","owner":"ZzProofA"}],
+    "deals":[{"id":"zz-proof-deal-1","organizationId":"zz-proof-org-1","title":"Zz Proof Deal","owner":"ZzProofA","value":"12.500"}]}
+   -> {"ok":true,"value":{"revision":1789919343}}          (A_create.json)
+
+   B LISTS via POST /space/api/cmd/crm_snapshot (cookie: B's space_session), body {}:
+   -> {"ok":true,"value":{"activities":[],
+        "deals":[{"id":"zz-proof-deal-1","organizationId":"zz-proof-org-1","owner":"ZzProofA","title":"Zz Proof Deal","value":"12.500"}],
+        "labels":[],
+        "organizations":[{"id":"zz-proof-org-1","name":"Zz Proof Org A","owner":"ZzProofA"}],
+        "revision":1789919343,"stages":[]}}
+   -> byte-identical fields to what A wrote for both records.    (B_sees_A.json)
+
+   B EDITS via POST /space/api/cmd/crm_put_records (cookie: B's session), naming ONLY the deal
+   (no organizations key at all — per-record write, not whole-CRM clobber):
+   {"deals":[{"id":"zz-proof-deal-1","organizationId":"zz-proof-org-1","title":"Zz Proof Deal EDITED by B","owner":"ZzProofA","value":"20.000"}]}
+   -> {"ok":true,"value":{"revision":1789919349}}          (B_edit.json)
+
+   A SEES B's edit via POST /space/api/cmd/crm_snapshot (cookie: A's session), body {}:
+   -> {"ok":true,"value":{"activities":[],
+        "deals":[{"id":"zz-proof-deal-1","organizationId":"zz-proof-org-1","owner":"ZzProofA","title":"Zz Proof Deal EDITED by B","value":"20.000"}],
+        "labels":[],
+        "organizations":[{"id":"zz-proof-org-1","name":"Zz Proof Org A","owner":"ZzProofA"}],
+        "revision":1789919349,"stages":[]}}                (A_sees_edit.json)
+   Title/value changed exactly as B wrote them; the org record ("Zz Proof Org A", owner
+   "ZzProofA") is BYTE-IDENTICAL to what A wrote — B's write never touched it.
+
+   PER-ROW updated_by, sqlite3 -readonly on the PRODUCTION box /var/lib/gaia-space/space.db
+   (root@151.115.73.182, live prod DB, no copy):
+     SELECT id,updated_by,updated_at FROM crm_records WHERE id IN ('zz-proof-org-1','zz-proof-deal-1');
+     zz-proof-deal-1 | profile-380dc7742d03 | 1789919349   <- B's profile_id, matches B's edit revision
+     zz-proof-org-1  | profile-c3e3c1d7d2e2 | 1789919343   <- A's profile_id, matches A's create revision, untouched by B
+
+3) BROWSER PROOF (tools/screenshot.ts, bun run shot):
+   bun run shot -- --url https://paloptic.com/space/crm/ --login zz-proof-crm-a:ProofCrmA-2026-09-20! \
+     --out proof/crm-0920/live-crm-a.png --wait 2500
+   SAW: CRM Pipeline view (left nav CRM active, header "CRM / Organisationen, Deals und
+   Aktivitäten im Vertrieb"), Kanban column "Non-Qualified" contains card titled
+   "Zz Proof Deal EDITED by B" / org "Zz Proof Org A" / owner "ZzProofA" / "20.000 € · 10%",
+   pipeline totals "20.000 € Gesamtwert · 2.000 € gewichteter Pipelinewert · 1 offene Deals".
+   This IS the live CRM view showing B's edit, NOT a Home fallback screen.
+   Saved: proof/crm-0920/live-crm-a.png
+
+4) PURGE (stage 4, see purge.txt for full command output + verify)
+
+VERDICT: PASS. Two independently-authenticated GlobalMember accounts on the LIVE
+production box (paloptic.com, master 03b7983, schema v146) share the CRM correctly:
+A's create is visible byte-identical to B, B's per-record edit (deal only) is visible
+to A while the org stays untouched, updated_by is stamped per row on the real prod DB,
+and the browser UI genuinely renders the shared state (screenshot as A shows B's edit).
