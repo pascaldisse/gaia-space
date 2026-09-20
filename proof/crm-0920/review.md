@@ -49,15 +49,23 @@
 
 - `docs/specs/crm-server-store.md` names strict file ownership per lane (backend Rust files vs frontend TS files) —
   irrelevant post-merge, historical planning doc only, no action needed.
-- SCHEMA_VERSION already at 145 pre-PR33 (bumped by an earlier merged commit, d4c1f25, which first landed a
-  `crm_documents`/`crm_document_revisions` whole-document design under the SAME V145 slot). PR33 REPLACES that V145
-  migration body with the new `crm_records`/`crm_settings` row-based schema — same version number, different DDL. This
-  is safe for a database that has never run V145 (fresh migrate goes straight to the new shape), but means a
-  database that already ran the OLD V145 (old crm_documents tables) and is re-migrated will NOT get `crm_records`/
-  `crm_settings` (migrate() only runs a rung when `version < N`). Confirmed via `deploy/rollout.sh` + Stage 3 local
-  proof: production is at schema 144 (per task brief), i.e. has NEVER run V145, so migrating 144→145 lands directly on
-  the NEW crm_records/crm_settings shape — no old crm_documents artifact to worry about on this deploy. Flagged for
-  awareness, not a merge blocker for this specific deploy.
+- **CORRECTION (found during Stage 4 pre-deploy check, now FIXED — see below):** the note originally here assumed
+  production was at schema 144 per the task brief. It is NOT: `ssh box 'sqlite3 ... PRAGMA user_version'` reads
+  **145**, with the OLD `crm_documents`/`crm_document_revisions` tables already present (0 rows in either — the
+  whole-document design was deployed once, briefly, never actually written to). Since `migrate()` gates every rung on
+  `version < N`, the V145 rung (now containing the NEW `crm_records`/`crm_settings` DDL) would **never fire again** on
+  this box — deploying as-is would leave `crm_snapshot`/`crm_put_records`/`crm_purge_records` throwing a SQL error on
+  every call (`no such table: crm_records`) as soon as a real user touched the CRM. This WAS a merge blocker.
+  **Fix applied** (commit `a1d7c96`, before deploy): `SCHEMA_VERSION` 145→146; new V146 rung re-runs
+  `CREATE TABLE IF NOT EXISTS crm_records/crm_settings` unconditionally-safe for every DB shape (fresh install, a box
+  that got the tables from V145 itself, or — this box — one pinned at 145 under the old design). Old, empty
+  `crm_documents`/`crm_document_revisions` are left in place (unused, harmless; a separate cleanup ticket, not this
+  one). Verified three ways: (1) new unit test simulating exactly this box's shape
+  (`a_database_already_pinned_at_v145_under_the_old_whole_document_design_still_gets_the_new_tables`), (2) the repo's
+  own `tests/migrate_real_copy.rs` (`MIGRATE_CHECK_DB=...`) run against a **fresh scp'd copy of the actual live
+  `space.db`** — confirmed 145→146, both new tables created, `PRAGMA integrity_check` ok, old tables untouched, (3)
+  `deploy/rollout.sh`'s `census()` is generic (iterates `sqlite_master`, prints a `new tables:` diff line) and needed
+  NO changes to cope with the two new tables.
 - The old `v145_contract_tests` migration-ladder test (asserting `crm_documents`/`crm_document_revisions` exist after
   144→145 upgrade) was deleted and NOT replaced with an equivalent ladder test for the new `crm_records`/`crm_settings`
   shape — migration-from-144 is only proven indirectly (crm.rs unit tests run `db::migrate` on a fresh in-memory DB,
