@@ -1,0 +1,1 @@
+{"ok":true,"value":{"activities":[],"deals":[{"deletedAt":null,"id":"deal-proof-1","organizationId":"org-proof-1","owner":"ProofA","title":"Proof Deal EDITED by B","value":"20.000"}],"labels":[],"organizations":[{"deletedAt":null,"id":"org-proof-1","labels":[],"name":"Proof Org A","owner":"ProofA"}],"revision":1789918128,"stages":[]}}

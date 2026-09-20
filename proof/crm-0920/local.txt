@@ -1,0 +1,60 @@
+STAGE 3 — local proof, shared CRM (feat/crm-server-store), 2026-09-20
+
+DB copy: reports/incident-2026-09-04/space.db → proof/crm-0920/db/space.db (16642048 bytes)
+Before migration: PRAGMA user_version = 142 (real production-shaped copy, not empty)
+Server: SPACE_DB=proof/crm-0920/db/space.db SPACE_PORT=8193 SPACE_ADMIN_PASSWORD=x
+  ./target/debug/space-server (built from this worktree's merged code), pid 20311
+  started via: lsof -nP -iTCP:8193 -sTCP:LISTEN -> confirmed pid 20311 owns the port
+
+MIGRATION (real DB copy, in place on server startup):
+  PRAGMA user_version BEFORE: 142
+  PRAGMA user_version AFTER:  145
+  PRAGMA integrity_check:     ok  (checked again after both writes below: still ok)
+  tables added: crm_records, crm_settings (both present, confirmed via sqlite_master)
+
+TWO GlobalMember PROFILES (not admins — proves "every authenticated member", not an
+admin-only path): profile-proof-a/user-proof-a ("proof-a") and profile-proof-b/user-proof-b
+("proof-b"), both users.global_role='GlobalMember', inserted directly into the DB copy
+(profiles + users + a session row each — sessions.token is the only auth material
+space-server checks, per src-tauri/src/bin/space-server.rs:1214 space_session= cookie
+parsing), never touching the production box or real accounts.
+
+A CREATES via /api/cmd/crm_put_records (cookie: space_session=proofA-tok):
+  organizations: [{id:org-proof-1, name:"Proof Org A", owner:"ProofA"}]
+  deals:         [{id:deal-proof-1, organizationId:org-proof-1, title:"Proof Deal", owner:"ProofA", value:"12.500"}]
+  -> {"ok":true,"value":{"revision":1789918119}}
+
+B LISTS via /api/cmd/crm_snapshot (cookie: space_session=proofB-tok) — sees it, exactly:
+  {"ok":true,"value":{"activities":[],"deals":[{"deletedAt":null,"id":"deal-proof-1",
+   "organizationId":"org-proof-1","owner":"ProofA","title":"Proof Deal","value":"12.500"}],
+   "labels":[],"organizations":[{"deletedAt":null,"id":"org-proof-1","labels":[],
+   "name":"Proof Org A","owner":"ProofA"}],"revision":1789918119,"stages":[]}}
+  (raw response saved: B_sees_A.json)
+
+B EDITS via /api/cmd/crm_put_records, naming ONLY the deal (no organizations key at all—
+proving per-record writes, not whole-CRM last-write-wins):
+  deals: [{id:deal-proof-1, organizationId:org-proof-1, title:"Proof Deal EDITED by B",
+           owner:"ProofA", value:"20.000"}]
+  -> {"ok":true,"value":{"revision":1789918128}}
+
+A SEES B's new payload via /api/cmd/crm_snapshot (cookie: space_session=proofA-tok):
+  {"ok":true,"value":{"activities":[],"deals":[{"deletedAt":null,"id":"deal-proof-1",
+   "organizationId":"org-proof-1","owner":"ProofA","title":"Proof Deal EDITED by B",
+   "value":"20.000"}],"labels":[],"organizations":[{"deletedAt":null,"id":"org-proof-1",
+   "labels":[],"name":"Proof Org A","owner":"ProofA"}],"revision":1789918128,"stages":[]}}
+  (raw response saved: A_sees_edit.json)
+  Title/value changed exactly as B wrote them; the org record ("Proof Org A", owner
+  "ProofA") is BYTE-IDENTICAL to what A wrote — B's write never touched it.
+
+PER-ROW ATTRIBUTION, direct DB check after both writes:
+  crm_records.updated_by WHERE id='org-proof-1'  -> profile-proof-a  (A's write, untouched by B)
+  crm_records.updated_by WHERE id='deal-proof-1' -> profile-proof-b  (B's edit)
+  Confirms per-row updated_by stamping and that B's write did not re-stamp the org row.
+
+CLEANUP: server stopped by pid from lsof (not pkill -f); the two proof sessions/users/
+profiles and the two proof CRM rows deleted from the DB COPY afterward (this is a copy,
+never the production box — cleanup done anyway for hygiene). See end-of-stage cleanup log.
+
+VERDICT: PASS. Migration 142→145 on a real data copy is clean and idempotent-safe,
+per-row upsert confirmed live over HTTP with two distinct GlobalMember sessions, no
+admin gate, no whole-CRM clobber, updated_by correctly per-row.
