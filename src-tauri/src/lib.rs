@@ -568,8 +568,6 @@ pub fn run() {
             channel_notes::create_channel_note,
             channel_notes::update_channel_note,
             channel_notes::delete_channel_note,
-            crm::get_crm_document,
-            crm::save_crm_document,
             finance::finance_access_check,
             finance::list_finance_access,
             finance::grant_finance_access,
