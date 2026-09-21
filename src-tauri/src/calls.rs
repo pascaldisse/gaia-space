@@ -842,7 +842,83 @@ fn end_meeting_call_with_connection(
     if meeting.organizer_id.as_deref() != Some(participant_id.as_str()) {
         return Err("Only the meeting organizer can end the call".into());
     }
-    meetings::end_call_on(connection, &meeting_id, &participant_id)
+    let ended = meetings::end_call_on(connection, &meeting_id, &participant_id)?;
+    if ended {
+        // Ending is a decision about the CALL, not about the organizer's browser. Writing
+        // the row alone left every other participant talking inside a live SFU room that
+        // no meeting pointed at any more (measured on prod 2026-09-21: the other party
+        // stayed `participant active` for another minute). The room itself has to go.
+        if let Err(reason) = delete_livekit_room(&LivekitConfig::default(), &meeting_id) {
+            // The DB transition already happened and is authoritative; report loudly
+            // rather than fail the command, and never claim a silent success.
+            eprintln!("end_meeting_call: LiveKit room still up for {meeting_id}: {reason}");
+        }
+    }
+    Ok(ended)
+}
+
+/// Room-admin token for a server-side RoomService call. No join, no publish, no
+/// subscribe: the backend is not a participant, it is an administrator of one room.
+fn room_admin_token(config: &LivekitConfig, room: String) -> Result<String> {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|e| e.to_string())?
+        .as_secs() as usize;
+    let claims = LivekitClaims {
+        iss: config.api_key(),
+        sub: "gaia-space-room-admin".into(),
+        name: "GAIA Space".into(),
+        exp: now + TOKEN_LIFETIME_SECONDS as usize,
+        nbf: now,
+        video: VideoGrant {
+            room,
+            room_join: false,
+            room_admin: true,
+            can_update_own_metadata: false,
+            can_publish: false,
+            can_publish_sources: vec![],
+            can_subscribe: false,
+            room_record: false,
+        },
+        attributes: std::collections::BTreeMap::new(),
+    };
+    encode(
+        &Header::new(Algorithm::HS256),
+        &claims,
+        &EncodingKey::from_secret(config.api_secret().as_bytes()),
+    )
+    .map_err(|e| e.to_string())
+}
+
+pub(crate) fn room_service_endpoint(config: &LivekitConfig, method: &str) -> String {
+    format!(
+        "{}/twirp/livekit.RoomService/{method}",
+        config.egress_url().trim_end_matches('/')
+    )
+}
+
+/// Disconnect everyone from a meeting's room. A room that does not exist is not an
+/// error: LiveKit answers 200 for DeleteRoom on an empty name, and "nobody is in it"
+/// is exactly the state we are asking for.
+pub(crate) fn delete_livekit_room(config: &LivekitConfig, meeting_id: &str) -> Result<()> {
+    let room = room_for_meeting(meeting_id);
+    let token = room_admin_token(config, room.clone())?;
+    let client = reqwest::blocking::Client::builder()
+        .timeout(config.egress_timeout())
+        .build()
+        .map_err(|e| e.to_string())?;
+    let response = client
+        .post(room_service_endpoint(config, "DeleteRoom"))
+        .bearer_auth(token)
+        .json(&serde_json::json!({ "room": room }))
+        .send()
+        .map_err(|e| format!("LiveKit RoomService request failed: {e}"))?;
+    let status = response.status();
+    if status.is_success() {
+        return Ok(());
+    }
+    let payload = response.text().unwrap_or_default();
+    Err(format!("LiveKit RoomService returned {status}: {payload}"))
 }
 
 /// LiveKit room-composite Egress handle as Gaia records it. The Egress worker writes
@@ -1988,6 +2064,40 @@ mod tests {
             ..Default::default()
         }
         .allow_unregistered_rooms());
+    }
+
+    #[test]
+    fn ending_a_call_targets_the_meetings_own_room_on_the_room_service() {
+        let config = LivekitConfig {
+            host: Some("127.0.0.1".into()),
+            port: Some(7880),
+            api_key: Some("devkey".into()),
+            api_secret: Some("devsecret-devsecret-devsecret".into()),
+            ..LivekitConfig::default()
+        };
+        assert_eq!(
+            room_service_endpoint(&config, "DeleteRoom"),
+            "http://127.0.0.1:7880/twirp/livekit.RoomService/DeleteRoom"
+        );
+        // The backend administers one room; it never joins, publishes or subscribes.
+        let token = room_admin_token(&config, room_for_meeting("meeting-1")).expect("token");
+        let claims = jsonwebtoken::decode::<LivekitClaims>(
+            &token,
+            &jsonwebtoken::DecodingKey::from_secret(config.api_secret().as_bytes()),
+            &{
+                let mut validation = jsonwebtoken::Validation::new(Algorithm::HS256);
+                validation.validate_aud = false;
+                validation
+            },
+        )
+        .expect("decodable")
+        .claims;
+        assert_eq!(claims.video.room, "meeting-meeting-1");
+        assert!(claims.video.room_admin);
+        assert!(!claims.video.room_join);
+        assert!(!claims.video.can_publish);
+        assert!(!claims.video.can_subscribe);
+        assert!(!claims.video.room_record);
     }
 
     #[test]

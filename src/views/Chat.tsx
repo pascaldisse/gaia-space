@@ -144,6 +144,10 @@ export default function Chat(props: { embedded?: boolean } = {}) {
   const startCall = async (audioOnly: boolean) => {
     const channel = activeChannel(); const organizer = actingProfileId();
     if (!channel || !organizer) return;
+    // Decide on SERVER truth, not on the list this tab happened to load: a call the
+    // organizer already ended still looks live in a stale cache, and joining it fails
+    // with "Cannot join a ended video room" instead of starting a new call.
+    await refetchMeetings();
     const existing = resolveChannelCall(meetings(), channel.id);
     if (existing) { openExistingCall(existing, audioOnly); return; }
     const meeting = buildChannelCallMeeting(channel, organizer);
@@ -1348,7 +1352,7 @@ const deleteActiveChannel = async () => {
           </Show>
         </header>
         <Show when={liveMeeting()}>{meeting => <div class="chat-live-call" role="status">{channelCallLabel(meeting())} <span aria-hidden="true">·</span> <button type="button" class="ghost small" onClick={() => openExistingCall(meeting())}>Join</button></div>}</Show>
-        <Show when={openCall()}>{call => <div class="chat-call-panel"><CallPanel meeting={call().meeting} audioOnly={call().audioOnly} autoJoin={call().autoJoin} identity={isWeb() ? currentUser()?.profile_id ?? "" : actingProfileId() ?? ""} displayName={isWeb() ? currentUser()?.display_name ?? "" : profileName(actingProfileId())}/></div>}</Show>
+        <Show when={openCall()}>{call => <div class="chat-call-panel"><CallPanel meeting={call().meeting} audioOnly={call().audioOnly} autoJoin={call().autoJoin} onClose={() => setOpenCall(undefined)} identity={isWeb() ? currentUser()?.profile_id ?? "" : actingProfileId() ?? ""} displayName={isWeb() ? currentUser()?.display_name ?? "" : profileName(actingProfileId())}/></div>}</Show>
         <Show when={channelMenu()}>{menu => <ContextMenu x={menu().x} y={menu().y} onClose={() => setChannelMenu(undefined)} items={[
           { label: "Pinned messages", onSelect: () => setShowPinned((value) => !value) },
 { label: "Mentions", onSelect: () => setShowMentions((value) => !value) },

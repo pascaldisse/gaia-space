@@ -76,7 +76,7 @@ function DevicePicker(props: { label: string; kind: DeviceKind; devices: MediaDe
   </select></label>;
 }
 
-export default function CallPanel(props: { meeting: Meeting; identity: string; displayName: string; audioOnly?: boolean; autoJoin?: boolean }) {
+export default function CallPanel(props: { meeting: Meeting; identity: string; displayName: string; audioOnly?: boolean; autoJoin?: boolean; onClose?: () => void }) {
   const [room, setRoom] = createSignal<Room>();
   const [state, setState] = createSignal("disconnected");
   const [participants, setParticipants] = createSignal<Participant[]>([]);
@@ -167,6 +167,15 @@ export default function CallPanel(props: { meeting: Meeting; identity: string; d
       next.on(RoomEvent.ParticipantConnected, sync); next.on(RoomEvent.ParticipantDisconnected, sync);
       next.on(RoomEvent.TrackSubscribed, sync); next.on(RoomEvent.TrackUnsubscribed, sync);
       next.on(RoomEvent.LocalTrackPublished, sync); next.on(RoomEvent.LocalTrackUnpublished, sync);
+      // The organizer ending the call deletes the SFU room, so everyone else is
+      // disconnected BY THE SERVER. Without this the panel just fell silently back to
+      // idle and looked like a dropped connection (prod, 2026-09-21).
+      next.on(RoomEvent.Disconnected, () => {
+        if (room() !== next || leaving) return;
+        setRoom(undefined); setParticipants([]); setJoin(undefined); setState("disconnected");
+        setMicrophoneOn(false); setCameraOn(false); setScreenSharing(false);
+        setNotice("This call has ended.");
+      });
       next.on(RoomEvent.DataReceived, (payload, _participant) => {
         try {
           const message = JSON.parse(chatDecoder.decode(payload)) as ChatMessage;
@@ -192,13 +201,21 @@ export default function CallPanel(props: { meeting: Meeting; identity: string; d
       setError(`Could not join this call: ${String(reason)}`);
     }
   };
-  let autoJoinRequested = false;
+  // Keyed by MEETING, not by "has this panel ever auto-joined": one panel instance is
+  // reused for the next call in the same channel (a second Call/Video press mints a new
+  // meeting), and the old flag left that call joined by nobody.
+  let autoJoinedMeetingId: string | undefined;
   createEffect(() => {
-    if (props.autoJoin && !autoJoinRequested) { autoJoinRequested = true; void connect(); }
+    const id = props.meeting.id;
+    if (!props.autoJoin || autoJoinedMeetingId === id) return;
+    autoJoinedMeetingId = id;
+    void (async () => { if (room()) await leave(); await connect(); })();
   });
+  let leaving = false;
   const leave = async () => {
     const current = room();
-    if (current) await current.disconnect();
+    leaving = true;
+    try { if (current) await current.disconnect(); } finally { leaving = false; }
     setRoom(undefined); setParticipants([]); setJoin(undefined); setState("disconnected");
     setMicrophoneOn(false); setCameraOn(false); setScreenSharing(false); setWaitingForAdmission(false); setRecordings([]); setChatMessages([]); setChatDraft(""); setTranscriptSegments([]); setDevices(emptyDevices); setNotice("");
   };
@@ -286,6 +303,7 @@ export default function CallPanel(props: { meeting: Meeting; identity: string; d
       <Show when={room()} fallback={<button class="primary" disabled={state() === "connecting" || waitingForAdmission()} onClick={() => void requestJoin()}>{state() === "connecting" ? "Joining…" : waitingForAdmission() ? "Waiting for admission…" : "Join call"}</button>}>
         <button type="button" class="ghost small call-theatre-toggle" aria-pressed={theatre()} onClick={() => setTheatre(value => !value)}>{theatre() ? "Collapse" : "Expand"}</button>
       </Show>
+      <Show when={props.onClose && !room()}><button type="button" class="ghost small call-close" aria-label="Close call panel" onClick={() => props.onClose?.()}>Close</button></Show>
     </header>
     <Show when={error()}><p class="meeting-error" role="alert">{error()}</p></Show>
     <Show when={notice()}><p class="call-notice" role="status">{notice()}</p></Show>

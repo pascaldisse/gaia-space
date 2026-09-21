@@ -5691,9 +5691,20 @@ async fn cmd(
             Ok(value) => value,
             Err(error) => return err(StatusCode::BAD_REQUEST, &error).into_response(),
         };
-        return match calls::end_web_meeting_call(meeting_id, user.profile_id.clone()) {
-            Ok(value) => Json(json!({"ok":true,"value":value})).into_response(),
-            Err(error) => err(StatusCode::BAD_REQUEST, &error).into_response(),
+        // Ending a call now also talks to LiveKit over a BLOCKING http client; running
+        // that on an async worker drops a nested runtime and panics the whole server
+        // (caught by scripts/web_call_end_e2e.sh before it ever shipped).
+        let profile_id = user.profile_id.clone();
+        let outcome = tokio::task::spawn_blocking(move || {
+            calls::end_web_meeting_call(meeting_id, profile_id)
+        })
+        .await;
+        return match outcome {
+            Ok(Ok(value)) => Json(json!({"ok":true,"value":value})).into_response(),
+            Ok(Err(error)) => err(StatusCode::BAD_REQUEST, &error).into_response(),
+            Err(error) => {
+                err(StatusCode::INTERNAL_SERVER_ERROR, &error.to_string()).into_response()
+            }
         };
     }
     // Call evidence reads: the body names the meeting, the session names the reader.

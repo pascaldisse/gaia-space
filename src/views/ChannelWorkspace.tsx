@@ -147,6 +147,10 @@ const startCall = async (audioOnly: boolean) => {
  setMemberError("");
  if (!organizer) { setMemberError("Sign-in still loading"); return; }
  if (!current) { setMemberError("Conversation still loading"); return; }
+ // Decide on SERVER truth, not on the list this tab happened to load: a call the
+ // organizer already ended still looks live in a stale cache, and joining it fails
+ // with "Cannot join a ended video room" instead of starting a new call.
+ await refetchMeetings();
  const existing = resolveChannelCall(meetings(), current.id);
  if (existing) { openExistingCall(existing, audioOnly); return; }
  const meeting = buildChannelCallMeeting(current, organizer);
@@ -442,7 +446,7 @@ const callerCallState = () => {
 
       <div class="cw-body" classList={{ "with-rail": !!channelProjectId() || teamOpen() }}>
         <section class="cw-panel cw-chat">
-          <Show when={openCall()}>{(call) => <div class="cw-call-panel"><CallPanel meeting={call().meeting} audioOnly={call().audioOnly} autoJoin={call().autoJoin} identity={isWeb() ? currentUser()?.profile_id ?? "" : actingProfileId() ?? ""} displayName={isWeb() ? currentUser()?.display_name ?? "" : nameOf(actingProfileId())}/></div>}</Show>
+          <Show when={openCall()}>{(call) => <div class="cw-call-panel"><CallPanel meeting={call().meeting} audioOnly={call().audioOnly} autoJoin={call().autoJoin} onClose={() => setOpenCall(undefined)} identity={isWeb() ? currentUser()?.profile_id ?? "" : actingProfileId() ?? ""} displayName={isWeb() ? currentUser()?.display_name ?? "" : nameOf(actingProfileId())}/></div>}</Show>
           {/* THE ONLY BODY THIS SURFACE HAS NOW: the messages. The five guest views
               that used to be mounted here are mounted by views/ProjectWorkspace.tsx
               instead, under the project's single tab row — one home each, not two.
