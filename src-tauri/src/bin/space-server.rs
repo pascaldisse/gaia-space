@@ -2884,7 +2884,12 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         "archive_document" | "publish_document" => CommandPolicy::DocumentOwnerWrite,
         "delete_document" => CommandPolicy::DocumentOwnerDelete,
         "archive_meeting" | "attach_meeting_channel" | "delete_meeting" => CommandPolicy::MeetingWrite,
-        "join_meeting_call" | "end_meeting_call" => CommandPolicy::MeetingRead,
+        "join_meeting_call"
+        | "end_meeting_call"
+        | "list_meeting_transcript_segments"
+        | "list_meeting_recordings" => CommandPolicy::MeetingRead,
+        // Reports what this backend can do about recording; needs a session, no meeting.
+        "recording_actor_status" => CommandPolicy::Session,
         "archive_issue" | "archive_role" | "archive_sprint" | "archive_team" => {
             CommandPolicy::Session
         }
@@ -3430,6 +3435,8 @@ fn meeting_id(body: &Value, name: &str) -> Option<String> {
             | "list_meeting_participants"
             | "join_meeting_call"
             | "end_meeting_call"
+            | "list_meeting_transcript_segments"
+            | "list_meeting_recordings"
     ) {
         arg(body, "meeting_id").ok()
     } else {
@@ -5689,6 +5696,34 @@ async fn cmd(
             Err(error) => err(StatusCode::BAD_REQUEST, &error).into_response(),
         };
     }
+    // Call evidence reads: the body names the meeting, the session names the reader.
+    if name == "list_meeting_transcript_segments" {
+        let meeting_id: String = match arg(&body, "meeting_id") {
+            Ok(value) => value,
+            Err(error) => return err(StatusCode::BAD_REQUEST, &error).into_response(),
+        };
+        return match calls::list_web_meeting_transcript_segments(
+            meeting_id,
+            user.profile_id.clone(),
+        ) {
+            Ok(value) => Json(json!({"ok":true,"value":value})).into_response(),
+            Err(error) => err(StatusCode::BAD_REQUEST, &error).into_response(),
+        };
+    }
+    if name == "list_meeting_recordings" {
+        let meeting_id: String = match arg(&body, "meeting_id") {
+            Ok(value) => value,
+            Err(error) => return err(StatusCode::BAD_REQUEST, &error).into_response(),
+        };
+        return match calls::list_web_meeting_recordings(meeting_id, user.profile_id.clone()) {
+            Ok(value) => Json(json!({"ok":true,"value":value})).into_response(),
+            Err(error) => err(StatusCode::BAD_REQUEST, &error).into_response(),
+        };
+    }
+    if name == "recording_actor_status" {
+        let status = calls::web_recording_actor_status(&user.profile_id);
+        return Json(json!({"ok":true,"value":status})).into_response();
+    }
     dispatch!(name.as_str(), body, {
     "create_hosted_repo" => git_hosting::create_hosted_repo(project_id: String, name: String, description: Option<String>, default_branch: String),
     "delete_hosted_repo" => git_hosting::delete_hosted_repo(id: String),
@@ -6546,6 +6581,33 @@ mod tests {
                 "{name}"
             );
         }
+    }
+
+    /// Regression: the call-evidence family had NO policy entry, so the web bridge
+    /// answered 403 `command denied` and every call on the server displayed
+    /// "captions unavailable" (prod, 2026-09-21). Policy AND id extraction must both hold.
+    #[test]
+    fn call_evidence_commands_have_meeting_scoped_policies_and_ids() {
+        for name in ["list_meeting_transcript_segments", "list_meeting_recordings"] {
+            assert!(
+                matches!(command_policy(name), Some(CommandPolicy::MeetingRead)),
+                "{name}"
+            );
+            assert_eq!(
+                meeting_id(&json!({"meetingId": "meeting-1"}), name),
+                Some("meeting-1".into()),
+                "{name}"
+            );
+        }
+        assert!(matches!(
+            command_policy("recording_actor_status"),
+            Some(CommandPolicy::Session)
+        ));
+        // Web mode must refuse recording WITH a reason, never claim an actor it cannot use:
+        // the Egress path is desktop-only, so an "available" answer would offer a 403 button.
+        let status = calls::web_recording_actor_status("profile-1");
+        assert!(!status.available);
+        assert!(status.reason.is_some());
     }
 
     #[test]

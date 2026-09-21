@@ -956,6 +956,20 @@ pub fn list_meeting_transcript_segments(meeting_id: String) -> Result<Vec<CallTr
     transcript_segments_for_meeting(&connection, &meeting_id)
 }
 
+/// HTTP/server counterpart of [`list_meeting_transcript_segments`]: the authenticated
+/// session supplies the reading profile, which native code takes from `actor::resolve`.
+/// Without this the web bridge had no policy entry for the command at all, so every
+/// call on the server answered 403 `command denied` and the call panel showed
+/// "captions unavailable" for the whole session (measured on prod 2026-09-21).
+pub fn list_web_meeting_transcript_segments(
+    meeting_id: String,
+    participant_id: String,
+) -> Result<Vec<CallTranscriptSegment>> {
+    let connection = db::conn()?;
+    meetings::get_meeting_scoped(meeting_id.clone(), participant_id)?.ok_or("Meeting not found")?;
+    transcript_segments_for_meeting(&connection, &meeting_id)
+}
+
 /// A participant can contribute only a self-attributed manual caption. External
 /// provider ingestion stays outside IPC and uses `append_transcript_segment` directly.
 #[cfg_attr(feature = "desktop", tauri::command)]
@@ -1217,6 +1231,29 @@ pub fn list_meeting_recordings(meeting_id: String) -> Result<Vec<CallRecording>>
     let connection = db::conn()?;
     let (actor_id, _) = actor::resolve(&connection)?;
     list_meeting_recordings_as(&connection, &meeting_id, &actor_id)
+}
+
+/// HTTP/server counterpart of [`list_meeting_recordings`]; same meeting scope, but the
+/// reading profile comes from the session instead of native actor state.
+pub fn list_web_meeting_recordings(
+    meeting_id: String,
+    participant_id: String,
+) -> Result<Vec<CallRecording>> {
+    let connection = db::conn()?;
+    list_meeting_recordings_as(&connection, &meeting_id, &participant_id)
+}
+
+/// Truthful web answer to "can this installation record?". The session names the acting
+/// profile, but the Egress path (`start/stop_meeting_recording`, `LIVEKIT_EGRESS_URL`) is
+/// desktop-only, so the honest answer is a refusal WITH a reason — the panel then hides the
+/// control instead of offering a button that 403s.
+pub fn web_recording_actor_status(_participant_id: &str) -> actor::ActorStatus {
+    actor::ActorStatus {
+        available: false,
+        profile_id: None,
+        source: None,
+        reason: Some("Call recording is not available in web mode.".into()),
+    }
 }
 
 /// Actor-taking core; not a command, so the acting profile can never arrive over IPC.
