@@ -487,6 +487,19 @@
 .space-chat-shell > .rail { grid-area: rail; }.space-chat-shell > .space-sidebar { grid-area: sidebar; }.space-chat-shell > .space-main { grid-area: main; }
 .space-chat-shell > .mobile-rail,
 .space-chat-shell .mobile-sidebar-back { display: none; }
+/* .no-sidebar drops the sidebar track entirely — the 3-name areas template above
+   still declares a 'sidebar' area/track even when its column collapses to 0, so a
+   named-area layout stays 3 tracks wide and shoves main into the vacant 3rd track.
+   Re-declare a 2-area template per placement so main and rail are the only tracks.
+   Gated to ≥721px: below that the phone tab-bar media query (further down) already
+   forces a single-area layout regardless of sidebar state, and its selector list
+   would otherwise lose to this higher-specificity (.no-sidebar + attr) block. */
+@media (min-width: 721px) {
+.space-chat-shell.no-sidebar { grid-template-areas: "rail main"; }
+.space-chat-shell.no-sidebar[data-nav-placement="right"] { grid-template-columns: minmax(0, 1fr) var(--nav-rail-size); grid-template-areas: "main rail"; }
+.space-chat-shell.no-sidebar[data-nav-placement="top"] { grid-template-columns: minmax(0, 1fr); grid-template-rows: var(--nav-rail-size) minmax(0, 1fr); grid-template-areas: "rail" "main"; }
+.space-chat-shell.no-sidebar[data-nav-placement="bottom"] { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) var(--nav-rail-size); grid-template-areas: "main" "rail"; }
+}
 @media (max-width:720px){
 .space-chat-shell,.space-chat-shell[data-nav-placement]{width:100dvw;max-width:100dvw;grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr) auto;grid-template-areas:"main" "rail"}
 .space-chat-shell[data-mobile-nav-placement="top"]{grid-template-rows:auto minmax(0,1fr);grid-template-areas:"rail" "main"}

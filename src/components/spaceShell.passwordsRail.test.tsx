@@ -81,5 +81,8 @@ describe("Passwords is reachable from the rail, not only from inside Library", (
     const active = [...host.querySelectorAll(".rail-item.active .rail-label")].map((n) => n.textContent);
     expect(active).toContain("Passwords");
     expect(host.querySelector(".space-chat-shell")?.classList.contains("no-sidebar")).toBe(true);
+    // No sidebar column at all — a stray .space-sidebar element would re-create the
+    // vacant grid track that shoves main content to the right (SpaceShell.css:486).
+    expect(host.querySelector(".space-sidebar")).toBeNull();
   });
 });
