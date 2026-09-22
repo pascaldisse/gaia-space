@@ -896,6 +896,14 @@ const [mobileSidebarOpen, setMobileSidebarOpen] = createSignal(false);
             <span class="side-icon" aria-hidden="true"><Icon name="book-nav" size={15} /></span>
             Library
           </a>
+          <a
+            class="side-link"
+            classList={{ active: route().view === "Passwords" }}
+            {...navLink(() => ({ view: "Passwords" }))}
+          >
+            <span class="side-icon" aria-hidden="true"><Icon name="key" size={15} /></span>
+            Passwords
+          </a>
           <div class="section">
             <div class="section-head"><span>Other organization libraries</span></div>
             <For each={orgLibraries()}>
