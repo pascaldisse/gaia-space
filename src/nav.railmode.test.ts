@@ -30,6 +30,7 @@ describe("rail mode derived from the view", () => {
     expect(railModeOfView("Calendar")).toBe("home");
     expect(railModeOfView("Documents")).toBe("library");
     expect(railModeOfView("Development")).toBe("development");
+    expect(railModeOfView("Passwords")).toBe("passwords");
   });
 
   it("puts every view in EXACTLY ONE mode", () => {

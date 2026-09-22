@@ -46,6 +46,7 @@ const RAIL: { mode: Exclude<RailMode, "more">; label: string; landing: string; i
   { mode: "tasks", label: "Tasks", landing: "To-Do", icon: "check" },
   { mode: "projects", label: "Projects", landing: "Projects", icon: "layers" },
   { mode: "library", label: "Library", landing: "Documents", icon: "book-nav" },
+  { mode: "passwords", label: "Passwords", landing: "Passwords", icon: "key" },
   { mode: "development", label: "Development", landing: "Development", icon: "target" },
   { mode: "crm", label: "CRM", landing: "CRM", icon: "columns" },
 ];
@@ -99,6 +100,8 @@ const MODE_LINKS: Record<RailMode, SideEntry[]> = {
   // container, the organization's books, each project's library), so none of them can be
   // written here: the mode's column is built below, from what exists.
   library: [],
+  // One page, owns no objects — like Home, Passwords has no sidebar of its own.
+  passwords: [],
   development: [
     { label: "Overview", view: "Development", icon: "target", strong: true },
     { label: "Pull requests", view: "Code Reviews", icon: "review" },
@@ -135,7 +138,7 @@ const MODE_LINKS: Record<RailMode, SideEntry[]> = {
 };
 
 const MODE_TITLE: Record<RailMode, string> = {
-  home: "Home", chats: "Chats", tasks: "Tasks", projects: "Projects", library: "Library", development: "Development", crm: "CRM", more: "More",
+  home: "Home", chats: "Chats", tasks: "Tasks", projects: "Projects", library: "Library", passwords: "Passwords", development: "Development", crm: "CRM", more: "More",
 };
 
 /** Section order for the Chats/Home conversation list (Pascal, 2026-09-04: "direct
@@ -896,14 +899,7 @@ const [mobileSidebarOpen, setMobileSidebarOpen] = createSignal(false);
             <span class="side-icon" aria-hidden="true"><Icon name="book-nav" size={15} /></span>
             Library
           </a>
-          <a
-            class="side-link"
-            classList={{ active: route().view === "Passwords" }}
-            {...navLink(() => ({ view: "Passwords" }))}
-          >
-            <span class="side-icon" aria-hidden="true"><Icon name="key" size={15} /></span>
-            Passwords
-          </a>
+          {/* Passwords has its own rail door now (RAIL, MODE_OF_VIEW) — no side-link here. */}
           <div class="section">
             <div class="section-head"><span>Other organization libraries</span></div>
             <For each={orgLibraries()}>

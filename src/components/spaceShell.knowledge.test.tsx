@@ -77,10 +77,10 @@ describe("knowledge sidebar", () => {
     expect(heads).toEqual(["Other organization libraries", "Project libraries"]);
 
     const links = [...sidebar!.querySelectorAll(".side-link")].map((a) => a.textContent?.trim());
-    // Personal docs are the fixed anchor, then Passwords, the books, then the projects.
-    expect(links).toEqual(["Library", "Passwords", "Handbook", "Orbital"]);
+    // Personal docs are the fixed anchor, then the books, then the projects. Passwords
+    // has its own rail door now (RAIL, MODE_OF_VIEW) and no longer rides this sidebar.
+    expect(links).toEqual(["Library", "Handbook", "Orbital"]);
     expect(sidebar!.querySelector<HTMLAnchorElement>(".side-link.strong")?.getAttribute("href")).toBe("/documents/kb/organization-library");
-    expect([...sidebar!.querySelectorAll<HTMLAnchorElement>(".side-link")].find((a) => a.textContent?.trim() === "Passwords")?.getAttribute("href")).toBe("/passwords");
   });
 });
 
