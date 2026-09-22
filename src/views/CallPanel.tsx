@@ -296,6 +296,45 @@ export default function CallPanel(props: { meeting: Meeting; identity: string; d
   const [drawerTab, setDrawerTab] = createSignal<"chat" | "captions">();
   const toggleDrawer = (tab: "chat" | "captions") => setDrawerTab(current => current === tab ? undefined : tab);
   const [menuOpen, setMenuOpen] = createSignal(false);
+  // ── VIEWING THE CALL ──────────────────────────────────────────────────────
+  // Three separate wishes, three separate controls; none of them is "bigger box":
+  //   Expand  — the stage grows inside the page (already in the topbar)
+  //   Fullscreen — the stage owns the screen (browser Fullscreen API)
+  //   Pop out — the speaker follows you to another tab/app (Picture-in-Picture)
+  // Each is rendered only where the browser actually supports it: a control that
+  // cannot work must not be drawn (a disabled button is still a promise).
+  const [stage, setStage] = createSignal<HTMLElement>();
+  const [fullscreen, setFullscreen] = createSignal(false);
+  const [poppedOut, setPoppedOut] = createSignal(false);
+  const [selfHidden, setSelfHidden] = createSignal(false);
+  const fullscreenSupported = typeof document !== "undefined" && !!document.fullscreenEnabled;
+  const pipSupported = typeof document !== "undefined" && !!(document as Document).pictureInPictureEnabled;
+  const readFullscreen = () => setFullscreen(!!document.fullscreenElement && document.fullscreenElement === stage());
+  if (fullscreenSupported) {
+    document.addEventListener("fullscreenchange", readFullscreen);
+    onCleanup(() => document.removeEventListener("fullscreenchange", readFullscreen));
+  }
+  const toggleFullscreen = async () => {
+    const element = stage();
+    if (!element) return;
+    try {
+      if (document.fullscreenElement === element) await document.exitFullscreen();
+      else await element.requestFullscreen();
+    } catch (reason) { setError(`Could not switch fullscreen: ${String(reason)}`); }
+    readFullscreen();
+  };
+  // The tile the popout follows is the remote speaker's video, never your own preview.
+  const remoteVideo = () => stage()?.querySelector<HTMLVideoElement>(".call-tiles video") ?? undefined;
+  const togglePopout = async () => {
+    try {
+      if (document.pictureInPictureElement) { await document.exitPictureInPicture(); setPoppedOut(false); return; }
+      const video = remoteVideo();
+      if (!video) { setNotice("Nothing to pop out yet: no remote video in this call."); return; }
+      await video.requestPictureInPicture();
+      setPoppedOut(true);
+      video.addEventListener("leavepictureinpicture", () => setPoppedOut(false), { once: true });
+    } catch (reason) { setError(`Could not pop out the video: ${String(reason)}`); }
+  };
   onCleanup(() => { void room()?.disconnect(); });
   return <section class="call-panel" aria-label="Live call">
     <header class="call-topbar">
@@ -311,12 +350,12 @@ export default function CallPanel(props: { meeting: Meeting; identity: string; d
     <Show when={activeRecording()}>{active => <p class="call-recording" role="status">Recording {active().status} · captured by LiveKit Egress</p>}</Show>
     <Show when={!join()}><Show when={props.meeting.video_room_id}>{room => <p class="call-room">Room: {room()} · {props.meeting.video_status}</p>}</Show></Show>
     <Show when={lifecycleFact()}>{fact => <p class="call-room">{fact()}</p>}</Show>
-    <div class="call-stage" classList={{ theatre: theatre() }} data-call-stage aria-live="polite">
+    <div class="call-stage" classList={{ theatre: theatre(), fullscreen: fullscreen() }} data-call-stage ref={setStage} aria-live="polite">
       <div class={`call-tiles ${gridClass()}${props.audioOnly ? " audio-only" : ""}`}>
         <For each={remoteParticipants()}>{participant => props.audioOnly ? <AudioParticipant participant={participant} /> : <VideoTile participant={participant} />}</For>
       </div>
       <Show when={connected() && remoteParticipants().length === 0}><p class="call-waiting">Waiting for others…</p></Show>
-      <Show when={selfParticipant()} keyed>{self => <div class="call-pip" aria-label="Your preview">{props.audioOnly ? <AudioParticipant participant={self} /> : <VideoTile participant={self} />}</div>}</Show>
+      <Show when={selfParticipant() && !selfHidden()}><Show when={selfParticipant()} keyed>{self => <div class="call-pip" aria-label="Your preview">{props.audioOnly ? <AudioParticipant participant={self} /> : <VideoTile participant={self} />}</div>}</Show></Show>
       <Show when={room()}>
         <Show when={drawerTab()} keyed>{tab => <aside class="call-drawer" aria-label={tab === "chat" ? "In-call chat" : "Live captions"}>
           <div class="call-drawer-head">
@@ -336,6 +375,7 @@ export default function CallPanel(props: { meeting: Meeting; identity: string; d
         </aside>}</Show>
         <Show when={menuOpen()}><div class="call-menu" role="menu" aria-label="More call options">
           <button type="button" class="ghost small" onClick={() => void copyRoomId()}>Copy room id</button>
+          <button type="button" class="ghost small" aria-pressed={selfHidden()} onClick={() => setSelfHidden(value => !value)}>{selfHidden() ? "Show self view" : "Hide self view"}</button>
           <DevicePicker label="Microphone" kind="audioinput" devices={devices().audioinput} disabled={!connected()} onChange={id => void switchDevice("audioinput", id)} /><Show when={!props.audioOnly}><DevicePicker label="Camera" kind="videoinput" devices={devices().videoinput} disabled={!connected()} onChange={id => void switchDevice("videoinput", id)} /></Show><DevicePicker label="Speaker" kind="audiooutput" devices={devices().audiooutput} disabled={!connected()} onChange={id => void switchDevice("audiooutput", id)} />
         </div></Show>
         <div class="call-control-bar" role="toolbar" aria-label="Call controls">
@@ -347,6 +387,8 @@ export default function CallPanel(props: { meeting: Meeting; identity: string; d
           <button type="button" class="call-btn call-btn-captions" classList={{ active: drawerTab() === "captions" }} aria-pressed={drawerTab() === "captions"} aria-label="Toggle live captions" onClick={() => toggleDrawer("captions")}>Captions</button>
           <button type="button" class="call-btn call-btn-chat" classList={{ active: drawerTab() === "chat" }} aria-pressed={drawerTab() === "chat"} aria-label="Toggle in-call chat" onClick={() => toggleDrawer("chat")}>Chat</button>
           <Show when={recordingAvailable()}><button type="button" class="call-btn call-btn-record" classList={{ active: recordingInProgress(), recording: true }} aria-pressed={recordingInProgress()} disabled={!!activeRecording() && !recordingInProgress()} onClick={() => void toggleRecording()}>{recordingInProgress() ? "Stop recording" : activeRecording() ? `Recording ${activeRecording()!.status}…` : "Start recording"}</button></Show>
+          <Show when={fullscreenSupported}><button type="button" class="call-btn call-btn-fullscreen" classList={{ active: fullscreen() }} aria-pressed={fullscreen()} aria-label={fullscreen() ? "Exit fullscreen" : "Enter fullscreen"} onClick={() => void toggleFullscreen()}>{fullscreen() ? "Exit fullscreen" : "Fullscreen"}</button></Show>
+          <Show when={pipSupported && !props.audioOnly}><button type="button" class="call-btn call-btn-popout" classList={{ active: poppedOut() }} aria-pressed={poppedOut()} aria-label={poppedOut() ? "Put the video back" : "Pop the video out"} onClick={() => void togglePopout()}>{poppedOut() ? "Put back" : "Pop out"}</button></Show>
           <button type="button" class="call-btn call-btn-menu" aria-pressed={menuOpen()} aria-expanded={menuOpen()} aria-label="More options: devices, room id" onClick={() => setMenuOpen(value => !value)}>⋯</button>
           <button type="button" class="call-btn call-btn-leave danger" aria-label="Leave call" onClick={() => void leave()}>Leave call</button>
           <Show when={organizer()}><button type="button" class="call-btn call-btn-end danger outline" aria-label="End call" onClick={() => void endCall()}>End call</button></Show>
