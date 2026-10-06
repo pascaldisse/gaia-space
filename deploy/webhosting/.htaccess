@@ -1,0 +1,8 @@
+# gaia-space on webhosting: API → CGI front (one space-server process per request), SPA fallback.
+RewriteEngine On
+RewriteRule ^$ /space/ [R=302,L]
+RewriteRule ^space$ /space/ [R=308,L]
+RewriteRule ^space/(api|git|caldav|oauth)/ space/_cgi.php [L,QSA]
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^space/ space/index.html [L]

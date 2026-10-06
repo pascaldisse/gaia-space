@@ -6492,10 +6492,80 @@ fn app_router() -> Router {
         .with_state(App::new())
 }
 
+/* CGI mode — one request per process, for shared webhosting (no daemons).
+   Front = public/api.php → exec this binary w/ CGI env + body on stdin.
+   State = SQLite only; tickers run one bounded tick per request (throttled). */
+fn cgi_run_ticks() {
+    let stamp = env::var("SPACE_DB").map(|p| format!("{p}.tick")).unwrap_or_default();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let last: i64 = std::fs::read_to_string(&stamp)
+        .ok()
+        .and_then(|s| s.trim().parse().ok())
+        .unwrap_or(0);
+    if now - last < DEFAULT_CHAT_SCHEDULE_TICK_SECS as i64 {
+        return;
+    }
+    let _ = std::fs::write(&stamp, now.to_string());
+    let _ = chat::deliver_due_scheduled_messages(None, Some(chat::SCHEDULED_TICK_LIMIT_DEFAULT));
+    let _ = applications::process_webhook_queue(DEFAULT_WEBHOOK_TICK_BATCH);
+    let _ = pipelines::due_scheduled_runs(now);
+}
+
+async fn cgi_main() {
+    use axum::body::Body;
+    use tower::ServiceExt;
+    let method = env::var("REQUEST_METHOD").unwrap_or_else(|_| "GET".into());
+    let path = env::var("SPACE_PATH").unwrap_or_else(|_| "/".into());
+    let query = env::var("QUERY_STRING").unwrap_or_default();
+    let uri = if query.is_empty() { path } else { format!("{path}?{query}") };
+    let mut body = Vec::new();
+    let _ = std::io::stdin().read_to_end(&mut body);
+    let mut req = axum::http::Request::builder().method(method.as_str()).uri(uri);
+    for (k, v) in env::vars() {
+        if let Some(name) = k.strip_prefix("HTTP_") {
+            req = req.header(name.replace('_', "-").to_ascii_lowercase(), v);
+        }
+    }
+    if let Ok(v) = env::var("CONTENT_TYPE") {
+        if !v.is_empty() { req = req.header("content-type", v); }
+    }
+    req = req.header("content-length", body.len().to_string());
+    let peer: SocketAddr = env::var("REMOTE_ADDR")
+        .ok()
+        .and_then(|a| a.parse::<IpAddr>().ok())
+        .map(|ip| SocketAddr::new(ip, 0))
+        .unwrap_or_else(|| "127.0.0.1:0".parse().unwrap());
+    let mut req = req.body(Body::from(body)).expect("cgi request");
+    req.extensions_mut().insert(ConnectInfo(peer));
+    let resp = app_router().oneshot(req).await.expect("router");
+    let (parts, body) = resp.into_parts();
+    let bytes = axum::body::to_bytes(body, usize::MAX).await.unwrap_or_default();
+    let mut out = format!("Status: {}\r\n", parts.status.as_u16());
+    for (k, v) in parts.headers.iter() {
+        out.push_str(&format!("{}: {}\r\n", k, v.to_str().unwrap_or("")));
+    }
+    out.push_str("\r\n");
+    use std::io::Write;
+    let mut so = std::io::stdout().lock();
+    let _ = so.write_all(out.as_bytes());
+    let _ = so.write_all(&bytes);
+    let _ = so.flush();
+    drop(so);
+    cgi_run_ticks();
+}
+
 #[tokio::main]
 async fn main() {
     let p = env::var("SPACE_DB").unwrap_or_else(|_| "/var/lib/gaia-space/space.db".into());
     db::set_db_path(PathBuf::from(p));
+    if env::var("GATEWAY_INTERFACE").is_ok() {
+        bootstrap();
+        cgi_main().await;
+        return;
+    }
     bootstrap();
     spawn_webhook_ticker();
     spawn_pipeline_schedule_ticker();
