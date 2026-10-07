@@ -39,7 +39,7 @@ fn make_id() -> String {
     format!("git-{}-{:016x}", std::process::id(), rand::random::<u64>())
 }
 
-fn create_at(
+pub(crate) fn create_at(
     conn: &Connection,
     data_dir: &Path,
     project_id: &str,

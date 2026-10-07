@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 146;
+pub const SCHEMA_VERSION: i64 = 147;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -917,6 +917,11 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if version < 141 && table_exists(&tx, "projects")? {
         tx.execute_batch(SCHEMA_V141)?;
     }
+    // V147: Git LFS (GitLab port — see git_lfs.rs). Runs after V141 so a fresh database has
+    // hosted_repositories to reference; objects are stored once, reached per repo via links.
+    if version < 147 && table_exists(&tx, "hosted_repositories")? {
+        tx.execute_batch(SCHEMA_V147_LFS)?;
+    }
     // V140: completion is distinct from archival. Existing projects are open by default;
     // no row is moved or rewritten during this additive migration.
     if version < 140 && table_exists(&tx, "projects")? {
@@ -1363,6 +1368,28 @@ ALTER TABLE issue_board_positions RENAME TO issue_board_positions_legacy;
 ALTER TABLE issue_tags RENAME TO issue_tags_legacy;
 "#;
 /// V141: durable hosted Git repository metadata.
+/// V147: Git LFS objects (content-addressed, once), per-repo links, file locks.
+pub(crate) const SCHEMA_V147_LFS: &str = r#"
+CREATE TABLE IF NOT EXISTS lfs_objects (
+ oid TEXT PRIMARY KEY CHECK(length(oid)=64),
+ size INTEGER NOT NULL CHECK(size>=0),
+ created_at INTEGER NOT NULL DEFAULT (unixepoch())
+);
+CREATE TABLE IF NOT EXISTS lfs_objects_repos (
+ repo_id TEXT NOT NULL REFERENCES hosted_repositories(id) ON DELETE CASCADE,
+ oid TEXT NOT NULL REFERENCES lfs_objects(oid),
+ created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+ PRIMARY KEY(repo_id, oid)
+);
+CREATE TABLE IF NOT EXISTS lfs_file_locks (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ repo_id TEXT NOT NULL REFERENCES hosted_repositories(id) ON DELETE CASCADE,
+ path TEXT NOT NULL,
+ user_id TEXT NOT NULL,
+ created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+ UNIQUE(repo_id, path)
+);
+"#;
 pub(crate) const SCHEMA_V141: &str = r#"
 CREATE TABLE IF NOT EXISTS hosted_repositories (
  id TEXT PRIMARY KEY,

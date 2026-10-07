@@ -31,6 +31,195 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::process::Command;
 
 /* git smart HTTP */
+/* Git LFS — GitLab port: LfsApiController (batch), LfsStorageController (objects),
+   LfsLocksApiController (locks). Core logic + GitLab refs in gaia_space_lib::git_lfs. */
+const LFS_CONTENT_TYPE: &str = "application/vnd.git-lfs+json";
+/// `<repo>.git/info/lfs/...` (API) or `<repo>.git/space-lfs/...` (storage; GitLab `gitlab-lfs`).
+fn lfs_split(path: &str) -> Option<(&str, &str)> {
+    let (repo, rest) = path.split_once(".git/")?;
+    (rest.starts_with("info/lfs/") || rest == "info/lfs" || rest.starts_with("space-lfs/"))
+        .then_some((repo, rest))
+}
+fn lfs_json(status: u16, value: Value) -> axum::response::Response {
+    (
+        StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
+        [(header::CONTENT_TYPE, LFS_CONTENT_TYPE)],
+        value.to_string(),
+    )
+        .into_response()
+}
+fn lfs_message(status: u16, message: &str) -> axum::response::Response {
+    lfs_json(status, json!({ "message": message }))
+}
+/// Absolute repo URL as the client reached it (CGI front supplies proto + mount prefix).
+fn lfs_repo_url(headers: &HeaderMap, project: &str, repo: &str) -> String {
+    let h = |name: &str| headers.get(name).and_then(|v| v.to_str().ok());
+    format!(
+        "{}://{}{}/git/{project}/{repo}.git",
+        h("x-forwarded-proto").unwrap_or("http"),
+        h("host").unwrap_or("localhost"),
+        h("x-forwarded-prefix").unwrap_or("").trim_end_matches('/'),
+    )
+}
+async fn git_lfs_put(
+    headers: HeaderMap,
+    Path((project, path)): Path<(String, String)>,
+    body: Bytes,
+) -> axum::response::Response {
+    match lfs_split(&path) {
+        Some((repo, rest)) => git_lfs("PUT", &headers, &HashMap::new(), &project, repo, rest, body).await,
+        None => err(StatusCode::NOT_FOUND, "unknown git route").into_response(),
+    }
+}
+#[allow(clippy::too_many_arguments)]
+async fn git_lfs(
+    method: &str,
+    headers: &HeaderMap,
+    query: &HashMap<String, String>,
+    project: &str,
+    repo: &str,
+    rest: &str,
+    body: Bytes,
+) -> axum::response::Response {
+    use gaia_space_lib::git_lfs as lfs;
+    if !git_http_name(project) || !git_http_name(repo) {
+        return lfs_message(404, "Not found.");
+    }
+    let parts: Vec<&str> = rest.trim_end_matches('/').split('/').collect();
+    let batch: Option<Value> = (parts == ["info", "lfs", "objects", "batch"])
+        .then(|| serde_json::from_slice(&body).unwrap_or(Value::Null));
+    // LfsRequest#download_request? / upload_request?
+    let write = match (method, parts.as_slice()) {
+        ("POST", ["info", "lfs", "objects", "batch"]) => {
+            batch.as_ref().and_then(|b| b["operation"].as_str()) == Some("upload")
+        }
+        ("GET", ["info", "lfs", "locks"]) | ("GET", ["space-lfs", "objects", _]) => false,
+        ("POST", ["info", "lfs", "objects"]) | ("GET", ["info", "lfs", "objects", _]) => {
+            return lfs_message(501, "Server supports batch API only, please update your Git LFS client to version 1.0.1 and up.");
+        }
+        ("POST", ["info", "lfs", "locks", ..]) | ("PUT", ["space-lfs", "objects", _, _]) => true,
+        _ => return lfs_message(404, "Not found."),
+    };
+    let public = match hosted_project_public(project) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    // lfs_check_access!: anonymous reaches public downloads only.
+    let user = if write || !public || headers.contains_key(header::AUTHORIZATION) {
+        match registry_auth(headers) {
+            Ok(user) => Some(user),
+            Err(response) => return response,
+        }
+    } else {
+        None
+    };
+    let (conn, data) = match (db::conn(), db::data_dir()) {
+        (Ok(c), Ok(d)) => (c, d),
+        (Err(e), _) | (_, Err(e)) => return lfs_message(500, &e),
+    };
+    let repo_id = match lfs::repo_id(&conn, project, repo) {
+        Ok(Some(id)) => id,
+        Ok(None) => return lfs_message(404, "Not found."),
+        Err(e) => return lfs_message(500, &e),
+    };
+    let auth = headers.get(header::AUTHORIZATION).and_then(|v| v.to_str().ok());
+    let base = lfs_repo_url(headers, project, repo);
+    let uid = user.as_ref().map(|u| u.id.clone()).unwrap_or_default();
+    let locked = |r: Result<(u16, Value), String>| match r {
+        Ok((status, value)) => lfs_json(status, value),
+        Err(e) => lfs_message(500, &e),
+    };
+    match (method, parts.as_slice()) {
+        ("POST", ["info", "lfs", "objects", "batch"]) => {
+            let batch = batch.unwrap_or(Value::Null);
+            if batch["hash_algo"].as_str().is_some_and(|a| a != "sha256") {
+                return lfs_message(409, "Unsupported hash algorithm");
+            }
+            let Some(objects) = batch["objects"].as_array().filter(|o| !o.is_empty()) else {
+                return lfs_message(404, "Not found.");
+            };
+            let mut out = Vec::with_capacity(objects.len());
+            for object in objects {
+                let oid = object["oid"].as_str().unwrap_or("");
+                let size = object["size"].as_i64().unwrap_or(-1);
+                let mut entry = json!({ "oid": oid, "size": size });
+                if !lfs::valid_oid(oid) || size < 0 {
+                    entry["error"] = json!({"code": 422, "message": "Invalid object"});
+                    out.push(entry);
+                    continue;
+                }
+                let have = match lfs::linked_size(&conn, &data, &repo_id, oid) {
+                    Ok(have) => have,
+                    Err(e) => return lfs_message(500, &e),
+                };
+                let mut header = serde_json::Map::new();
+                if let Some(a) = auth {
+                    header.insert("Authorization".into(), json!(a));
+                }
+                if write {
+                    // upload_objects!: present → no action; else upload (no cross-repo
+                    // linking by oid alone — GitLab only auto-links fork sources).
+                    if have.is_none() {
+                        header.insert("Content-Type".into(), json!("application/octet-stream"));
+                        entry["actions"] = json!({"upload": {"href": format!("{base}/space-lfs/objects/{oid}/{size}"), "header": header}});
+                    }
+                } else if have.is_some() {
+                    entry["actions"] = json!({"download": {"href": format!("{base}/space-lfs/objects/{oid}"), "header": header}});
+                    if public {
+                        entry["authenticated"] = json!(true);
+                    }
+                } else {
+                    entry["error"] = json!({"code": 404, "message": "Object does not exist on the server or you don't have permissions to access it"});
+                }
+                out.push(entry);
+            }
+            lfs_json(200, json!({"transfer": "basic", "objects": out, "hash_algo": "sha256"}))
+        }
+        ("GET", ["space-lfs", "objects", oid]) => match lfs::linked_size(&conn, &data, &repo_id, oid) {
+            Ok(Some(_)) => match lfs::object_path(&data, oid).and_then(|p| std::fs::read(p).map_err(|e| e.to_string())) {
+                Ok(bytes) => ([(header::CONTENT_TYPE, "application/octet-stream")], bytes).into_response(),
+                Err(e) => lfs_message(500, &e),
+            },
+            Ok(None) => lfs_message(404, "Not found."),
+            Err(e) => lfs_message(500, &e),
+        },
+        ("PUT", ["space-lfs", "objects", oid, size]) => {
+            let Ok(size) = size.parse::<i64>() else {
+                return lfs_message(404, "Not found.");
+            };
+            match lfs::finalize_upload(&conn, &data, &repo_id, oid, size, &body) {
+                Ok(()) => lfs_json(200, json!({})),
+                Err(e) if e == "SHA256 or size mismatch" || e == "invalid LFS oid" => {
+                    (StatusCode::BAD_REQUEST, e).into_response()
+                }
+                Err(e) => lfs_message(500, &e),
+            }
+        }
+        ("GET", ["info", "lfs", "locks"]) => match lfs::list_locks(
+            &conn,
+            &repo_id,
+            query.get("id").map(String::as_str),
+            query.get("path").map(String::as_str),
+        ) {
+            Ok(locks) => lfs_json(200, json!({ "locks": locks })),
+            Err(e) => lfs_message(500, &e),
+        },
+        ("POST", ["info", "lfs", "locks", "verify"]) => match lfs::verify_locks(&conn, &repo_id, &uid) {
+            Ok(value) => lfs_json(200, value),
+            Err(e) => lfs_message(500, &e),
+        },
+        ("POST", ["info", "lfs", "locks"]) => {
+            let req: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
+            locked(lfs::create_lock(&conn, &repo_id, &uid, req["path"].as_str().unwrap_or("")))
+        }
+        ("POST", ["info", "lfs", "locks", id, "unlock"]) => {
+            let req: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
+            let admin = user.as_ref().is_some_and(|u| u.role == "admin" || u.account_admin);
+            locked(lfs::unlock(&conn, &repo_id, &uid, admin, id, req["force"].as_bool() == Some(true)))
+        }
+        _ => lfs_message(404, "Not found."),
+    }
+}
 
 fn git_http_name(value: &str) -> bool {
     gaia_space_lib::git_hosting::valid_name(value)
@@ -181,6 +370,9 @@ async fn git_info_refs(
     Path((project, path)): Path<(String, String)>,
     Query(query): Query<HashMap<String, String>>,
 ) -> axum::response::Response {
+    if let Some((repo, rest)) = lfs_split(&path) {
+        return git_lfs("GET", &headers, &query, &project, repo, rest, Bytes::new()).await;
+    }
     let Some(repo) = path.strip_suffix(".git/info/refs") else {
         return err(StatusCode::NOT_FOUND, "unknown git route").into_response();
     };
@@ -220,6 +412,9 @@ async fn git_rpc(
     Path((project, path)): Path<(String, String)>,
     body: Bytes,
 ) -> axum::response::Response {
+    if let Some((repo, rest)) = lfs_split(&path) {
+        return git_lfs("POST", &headers, &HashMap::new(), &project, repo, rest, body).await;
+    }
     let Some((repo_git, service)) = path.rsplit_once('/') else {
         return err(StatusCode::NOT_FOUND, "unknown git route").into_response();
     };
@@ -6482,7 +6677,7 @@ fn app_router() -> Router {
                 .post(registry_oci_post)
                 .get(registry_oci_get),
         )
-        .route("/git/{project}/{*path}", get(git_info_refs).post(git_rpc))
+        .route("/git/{project}/{*path}", get(git_info_refs).post(git_rpc).put(git_lfs_put))
         .route("/oauth/authorize", post(oauth_authorize))
         .route("/oauth/token", post(oauth_token))
         .route("/api/cmd/{command}", post(cmd))
@@ -6545,6 +6740,7 @@ async fn cgi_main() {
     use tower::ServiceExt;
     let method = env::var("REQUEST_METHOD").unwrap_or_else(|_| "GET".into());
     let path = env::var("SPACE_PATH").unwrap_or_else(|_| "/".into());
+    let path_for_prefix = path.clone();
     let query = env::var("QUERY_STRING").unwrap_or_default();
     let uri = if query.is_empty() { path } else { format!("{path}?{query}") };
     let mut body = Vec::new();
@@ -6559,7 +6755,7 @@ async fn cgi_main() {
     }
     let mut req = axum::http::Request::builder().method(method.as_str()).uri(uri);
     for (k, v) in env::vars() {
-        if k == "HTTP_TRANSFER_ENCODING" {
+        if matches!(k.as_str(), "HTTP_TRANSFER_ENCODING" | "HTTP_X_FORWARDED_PREFIX") {
             continue;
         }
         if let Some(name) = k.strip_prefix("HTTP_") {
@@ -6568,6 +6764,18 @@ async fn cgi_main() {
     }
     if let Ok(v) = env::var("CONTENT_TYPE") {
         if !v.is_empty() { req = req.header("content-type", v); }
+    }
+    // Absolute URLs (LFS hrefs): the CGI env knows the scheme and where space is mounted.
+    let https = env::var("HTTPS").is_ok_and(|v| v.eq_ignore_ascii_case("on"))
+        || env::var("REQUEST_SCHEME").is_ok_and(|v| v == "https")
+        || env::var("SERVER_PORT").is_ok_and(|v| v == "443");
+    if env::var("HTTP_X_FORWARDED_PROTO").is_err() {
+        req = req.header("x-forwarded-proto", if https { "https" } else { "http" });
+    }
+    let request_path = env::var("REQUEST_URI").unwrap_or_default();
+    let request_path = request_path.split('?').next().unwrap_or("");
+    if let Some(prefix) = request_path.strip_suffix(path_for_prefix.as_str()) {
+        req = req.header("x-forwarded-prefix", prefix);
     }
     req = req.header("content-length", body.len().to_string());
     let peer: SocketAddr = env::var("REMOTE_ADDR")

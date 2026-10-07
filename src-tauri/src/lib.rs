@@ -48,6 +48,7 @@ pub mod finance;
 pub mod git;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod git_hosting;
+pub mod git_lfs;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod ics;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
