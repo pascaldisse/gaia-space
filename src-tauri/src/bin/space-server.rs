@@ -6557,15 +6557,37 @@ async fn cgi_main() {
     cgi_run_ticks();
 }
 
-#[tokio::main]
-async fn main() {
+fn main() {
     let p = env::var("SPACE_DB").unwrap_or_else(|_| "/var/lib/gaia-space/space.db".into());
     db::set_db_path(PathBuf::from(p));
     if env::var("GATEWAY_INTERFACE").is_ok() {
-        bootstrap();
-        cgi_main().await;
+        // Shared hosting caps threads per container: one request = one thread (+1 blocking).
+        // Bootstrap (migrate + seed writes) once per binary, not per request.
+        let stamp = env::var("SPACE_DB").map(|p| format!("{p}.boot")).unwrap_or_default();
+        let id = env::current_exe()
+            .and_then(std::fs::metadata)
+            .map(|m| format!("{}:{:?}", m.len(), m.modified().ok()))
+            .unwrap_or_default();
+        if std::fs::read_to_string(&stamp).ok().as_deref() != Some(id.as_str()) {
+            bootstrap();
+            let _ = std::fs::write(&stamp, &id);
+        }
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .max_blocking_threads(1)
+            .build()
+            .expect("cgi runtime")
+            .block_on(cgi_main());
         return;
     }
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("runtime")
+        .block_on(serve_main());
+}
+
+async fn serve_main() {
     bootstrap();
     spawn_webhook_ticker();
     spawn_pipeline_schedule_ticker();
