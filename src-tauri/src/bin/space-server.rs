@@ -6514,6 +6514,32 @@ fn cgi_run_ticks() {
     let _ = pipelines::due_scheduled_runs(now);
 }
 
+/// Decode an HTTP/1.1 chunked body (`<hex>[;ext]\r\n<data>\r\n … 0\r\n[trailers]\r\n`).
+fn cgi_dechunk(mut raw: &[u8]) -> Option<Vec<u8>> {
+    let mut out = Vec::with_capacity(raw.len());
+    loop {
+        let eol = raw.windows(2).position(|w| w == b"\r\n")?;
+        let line = std::str::from_utf8(&raw[..eol]).ok()?;
+        let size = usize::from_str_radix(line.split(';').next()?.trim(), 16).ok()?;
+        raw = &raw[eol + 2..];
+        if size == 0 {
+            // Trailer lines, then the empty line, then nothing: the body must end exactly.
+            loop {
+                let eol = raw.windows(2).position(|w| w == b"\r\n")?;
+                raw = &raw[eol + 2..];
+                if eol == 0 {
+                    return raw.is_empty().then_some(out);
+                }
+            }
+        }
+        if raw.len() < size + 2 || &raw[size..size + 2] != b"\r\n" {
+            return None;
+        }
+        out.extend_from_slice(&raw[..size]);
+        raw = &raw[size + 2..];
+    }
+}
+
 async fn cgi_main() {
     use axum::body::Body;
     use tower::ServiceExt;
@@ -6523,8 +6549,19 @@ async fn cgi_main() {
     let uri = if query.is_empty() { path } else { format!("{path}?{query}") };
     let mut body = Vec::new();
     let _ = std::io::stdin().read_to_end(&mut body);
+    // Webhosting front proxy (measured 10-07): an HTTP/2 client's chunked upload (git push >
+    // http.postBuffer) reaches CGI STILL FRAMED — with or without HTTP_TRANSFER_ENCODING,
+    // sometimes with CONTENT_LENGTH = framed length; HTTP/1.1 arrives de-chunked yet keeps the
+    // header. Headers prove nothing → de-chunk iff the WHOLE body parses exactly as chunked
+    // framing (JSON, pkt-line, pack and form bodies never do).
+    if let Some(b) = cgi_dechunk(&body) {
+        body = b;
+    }
     let mut req = axum::http::Request::builder().method(method.as_str()).uri(uri);
     for (k, v) in env::vars() {
+        if k == "HTTP_TRANSFER_ENCODING" {
+            continue;
+        }
         if let Some(name) = k.strip_prefix("HTTP_") {
             req = req.header(name.replace('_', "-").to_ascii_lowercase(), v);
         }
@@ -12444,5 +12481,34 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::UNAUTHORIZED);
+    }
+}
+
+#[cfg(test)]
+mod cgi_dechunk_tests {
+    use super::cgi_dechunk;
+    #[test]
+    fn decodes_chunks_extensions_and_trailers() {
+        assert_eq!(cgi_dechunk(b"4\r\nWiki\r\n5;x=y\r\npedia\r\n0\r\nT: 1\r\n\r\n").unwrap(), b"Wikipedia");
+        assert_eq!(cgi_dechunk(b"0\r\n\r\n").unwrap(), b"");
+        let data: Vec<u8> = (0..70000u32).map(|i| (i % 251) as u8).collect();
+        let mut framed = format!("{:x}\r\n", 65536).into_bytes();
+        framed.extend_from_slice(&data[..65536]);
+        framed.extend_from_slice(format!("\r\n{:X}\r\n", data.len() - 65536).as_bytes());
+        framed.extend_from_slice(&data[65536..]);
+        framed.extend_from_slice(b"\r\n0\r\n\r\n");
+        assert_eq!(cgi_dechunk(&framed).unwrap(), data);
+    }
+    #[test]
+    fn rejects_truncated_or_garbage() {
+        assert!(cgi_dechunk(b"5\r\nabc").is_none());
+        assert!(cgi_dechunk(b"zz\r\nabc\r\n0\r\n\r\n").is_none());
+        assert!(cgi_dechunk(b"3\r\nabcX\r\n0\r\n\r\n").is_none());
+        assert!(cgi_dechunk(b"3\r\nabc\r\n0\r\n\r\nextra").is_none());
+        assert!(cgi_dechunk(b"3\r\nabc\r\n0\r\n").is_none());
+        // Real non-chunked bodies stay untouched.
+        assert!(cgi_dechunk(br#"{"username":"a","password":"b"}"#).is_none());
+        assert!(cgi_dechunk(b"0032want 1e5fc4f\n00000009done\n").is_none());
+        assert!(cgi_dechunk(b"").is_none());
     }
 }
