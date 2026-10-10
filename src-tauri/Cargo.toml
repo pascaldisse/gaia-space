@@ -51,6 +51,8 @@ chrono = "0.4"
 jsonwebtoken = "9"
 axum = "0.8"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "process", "io-util"] }
+tokio-util = { version = "0.7", features = ["io"] }
+futures-util = "0.3"
 flate2 = "1"
 argon2 = "0.5"
 rand = "0.8"

@@ -326,6 +326,45 @@ async fn git_service(
     Ok(output)
 }
 
+/// upload-pack's reply IS the pack (empire-earth: 1.2 GB). Buffering it grows a Vec past
+/// 1 GiB → one 2 GiB realloc → abort under the webspace's 2 GiB `ulimit -v` (10-09 stderr:
+/// `memory allocation of 2147483648 bytes failed`) → stream git's stdout to the client.
+/// A git failure mid-stream truncates the pack; the client reports it, as with any git server.
+fn git_upload_pack_stream(repo: &std::path::Path, input: Vec<u8>) -> axum::response::Response {
+    let spawned = Command::new("git")
+        .arg("upload-pack")
+        .arg("--stateless-rpc")
+        .arg(repo)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn();
+    let mut child = match spawned {
+        Ok(child) => child,
+        Err(e) => {
+            return err(StatusCode::INTERNAL_SERVER_ERROR, &format!("start git upload-pack: {e}"))
+                .into_response()
+        }
+    };
+    let (Some(mut stdin), Some(stdout)) = (child.stdin.take(), child.stdout.take()) else {
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "git pipes unavailable").into_response();
+    };
+    tokio::spawn(async move {
+        let _ = stdin.write_all(&input).await;
+    });
+    tokio::spawn(async move {
+        match child.wait().await {
+            Ok(status) if !status.success() => eprintln!("git upload-pack failed: {status}"),
+            Err(e) => eprintln!("git upload-pack wait: {e}"),
+            _ => {}
+        }
+    });
+    (
+        [(header::CONTENT_TYPE, HeaderValue::from_static("application/x-git-upload-pack-result"))],
+        axum::body::Body::from_stream(tokio_util::io::ReaderStream::with_capacity(stdout, 1 << 16)),
+    )
+        .into_response()
+}
+
 fn git_request_body(
     headers: &HeaderMap,
     body: Bytes,
@@ -349,7 +388,8 @@ fn git_request_body(
             })?;
         Ok(output)
     } else {
-        Ok(body.to_vec())
+        // Move, not copy: a push body can be ~1 GiB of a 2 GiB address-space budget.
+        Ok(Vec::from(body))
     }
 }
 
@@ -442,6 +482,9 @@ async fn git_rpc(
         Ok(body) => body,
         Err(response) => return *response,
     };
+    if service == "git-upload-pack" {
+        return git_upload_pack_stream(&path, input);
+    }
     let before = if service == "git-receive-pack" {
         git_ref_tips(&path)
     } else {
@@ -2207,7 +2250,12 @@ async fn login(
         .into_response();
     }
     let t = token();
-    let _=c.execute("INSERT INTO sessions(token,user_id,created_at,expires_at) VALUES(?1,?2,unixepoch(),unixepoch()+2592000)",params![t,id]);
+    // A cookie for a session row that was never written = "login ok" then 401 on the next
+    // request (10-10: stale lock on space.db made every write fail silently here).
+    if let Err(e)=c.execute("INSERT INTO sessions(token,user_id,created_at,expires_at) VALUES(?1,?2,unixepoch(),unixepoch()+2592000)",params![t,id]) {
+        eprintln!("login: session insert failed for {username:?}: {e}");
+        return err(StatusCode::SERVICE_UNAVAILABLE,&format!("login could not be saved: {e}")).into_response();
+    }
     let mut resp = Json(
         json!({"user":User{id,username,display_name,profile_id,account_admin:role=="GlobalAdmin",role}}),
     )
@@ -6710,29 +6758,60 @@ fn cgi_run_ticks() {
 }
 
 /// Decode an HTTP/1.1 chunked body (`<hex>[;ext]\r\n<data>\r\n … 0\r\n[trailers]\r\n`).
-fn cgi_dechunk(mut raw: &[u8]) -> Option<Vec<u8>> {
-    let mut out = Vec::with_capacity(raw.len());
+#[cfg(test)]
+fn cgi_dechunk(raw: &[u8]) -> Option<Vec<u8>> {
+    let mut v = raw.to_vec();
+    cgi_dechunk_in_place(&mut v).then_some(v)
+}
+
+/// In place: a git push body is up to the 1 GiB proxy cap and the webspace allows 2 GiB of
+/// address space per process → a decoded COPY beside the framed original does not fit.
+/// Valid iff the WHOLE buffer parses as chunked framing; otherwise `buf` is untouched.
+fn cgi_dechunk_in_place(buf: &mut Vec<u8>) -> bool {
+    // Pass 1: validate + record data spans (offset, len). No bytes move unless all parse.
+    let mut spans = Vec::new();
+    let mut at = 0usize;
+    let crlf = |from: usize, b: &[u8]| b[from..].windows(2).position(|w| w == b"\r\n").map(|p| from + p);
     loop {
-        let eol = raw.windows(2).position(|w| w == b"\r\n")?;
-        let line = std::str::from_utf8(&raw[..eol]).ok()?;
-        let size = usize::from_str_radix(line.split(';').next()?.trim(), 16).ok()?;
-        raw = &raw[eol + 2..];
+        let Some(eol) = crlf(at, buf) else { return false };
+        let Some(size) = std::str::from_utf8(&buf[at..eol])
+            .ok()
+            .and_then(|l| l.split(';').next())
+            .and_then(|h| usize::from_str_radix(h.trim(), 16).ok())
+        else {
+            return false;
+        };
+        at = eol + 2;
         if size == 0 {
             // Trailer lines, then the empty line, then nothing: the body must end exactly.
             loop {
-                let eol = raw.windows(2).position(|w| w == b"\r\n")?;
-                raw = &raw[eol + 2..];
-                if eol == 0 {
-                    return raw.is_empty().then_some(out);
+                let Some(eol) = crlf(at, buf) else { return false };
+                let empty = eol == at;
+                at = eol + 2;
+                if empty {
+                    if at != buf.len() {
+                        return false;
+                    }
+                    break;
                 }
             }
+            break;
         }
-        if raw.len() < size + 2 || &raw[size..size + 2] != b"\r\n" {
-            return None;
+        if buf.len() - at < size + 2 || &buf[at + size..at + size + 2] != b"\r\n" {
+            return false;
         }
-        out.extend_from_slice(&raw[..size]);
-        raw = &raw[size + 2..];
+        spans.push((at, size));
+        at += size + 2;
     }
+    // Pass 2: compact. Every write offset trails its read offset (framing precedes data).
+    let mut w = 0;
+    for (r, n) in spans {
+        buf.copy_within(r..r + n, w);
+        w += n;
+    }
+    buf.truncate(w);
+    buf.shrink_to_fit();
+    true
 }
 
 async fn cgi_main() {
@@ -6743,16 +6822,17 @@ async fn cgi_main() {
     let path_for_prefix = path.clone();
     let query = env::var("QUERY_STRING").unwrap_or_default();
     let uri = if query.is_empty() { path } else { format!("{path}?{query}") };
-    let mut body = Vec::new();
+    // Pre-size from CONTENT_LENGTH: growing by doubling turns a >1 GiB push into one 2 GiB
+    // allocation = abort under the webspace's 2 GiB `ulimit -v` (stderr 10-09).
+    let hint = env::var("CONTENT_LENGTH").ok().and_then(|v| v.trim().parse::<usize>().ok()).unwrap_or(0);
+    let mut body = Vec::with_capacity(hint.min(1 << 30) + 1);
     let _ = std::io::stdin().read_to_end(&mut body);
     // Webhosting front proxy (measured 10-07): an HTTP/2 client's chunked upload (git push >
     // http.postBuffer) reaches CGI STILL FRAMED — with or without HTTP_TRANSFER_ENCODING,
     // sometimes with CONTENT_LENGTH = framed length; HTTP/1.1 arrives de-chunked yet keeps the
     // header. Headers prove nothing → de-chunk iff the WHOLE body parses exactly as chunked
     // framing (JSON, pkt-line, pack and form bodies never do).
-    if let Some(b) = cgi_dechunk(&body) {
-        body = b;
-    }
+    cgi_dechunk_in_place(&mut body);
     let mut req = axum::http::Request::builder().method(method.as_str()).uri(uri);
     for (k, v) in env::vars() {
         if matches!(k.as_str(), "HTTP_TRANSFER_ENCODING" | "HTTP_X_FORWARDED_PREFIX") {
@@ -6787,16 +6867,30 @@ async fn cgi_main() {
     req.extensions_mut().insert(ConnectInfo(peer));
     let resp = app_router().oneshot(req).await.expect("router");
     let (parts, body) = resp.into_parts();
-    let bytes = axum::body::to_bytes(body, usize::MAX).await.unwrap_or_default();
     let mut out = format!("Status: {}\r\n", parts.status.as_u16());
     for (k, v) in parts.headers.iter() {
         out.push_str(&format!("{}: {}\r\n", k, v.to_str().unwrap_or("")));
     }
     out.push_str("\r\n");
+    // Stream frames: a clone's pack (empire-earth 1.2 GB) never fits in memory here.
+    use futures_util::StreamExt;
     use std::io::Write;
-    let mut so = std::io::stdout().lock();
+    let mut so = std::io::BufWriter::with_capacity(1 << 16, std::io::stdout().lock());
     let _ = so.write_all(out.as_bytes());
-    let _ = so.write_all(&bytes);
+    let mut frames = body.into_data_stream();
+    while let Some(frame) = frames.next().await {
+        match frame {
+            Ok(b) => {
+                if so.write_all(&b).is_err() {
+                    break;
+                }
+            }
+            Err(e) => {
+                eprintln!("cgi: response body aborted: {e}");
+                break;
+            }
+        }
+    }
     let _ = so.flush();
     drop(so);
     cgi_run_ticks();

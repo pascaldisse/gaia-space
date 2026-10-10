@@ -1330,6 +1330,7 @@ dependencies = [
  "chrono",
  "dirs",
  "flate2",
+ "futures-util",
  "git2",
  "hex",
  "jsonwebtoken",
@@ -1349,6 +1350,7 @@ dependencies = [
  "tauri-plugin-opener",
  "tempfile",
  "tokio",
+ "tokio-util",
  "tower",
  "tungstenite",
 ]
