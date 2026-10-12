@@ -11,6 +11,7 @@
 //   projects:
 //     - name: Orbital                 # match key (case-insensitive) → create_project if missing
 //       description: text             # optional
+//       key: ORBIT                    # optional explicit project key (alnum, upper-cased); taken → warned + derived instead
 //       group: whatever               # NO server concept (projects have no parent) → warned + ignored
 //       repo: orbital-core            # or {name, description, branch}; → create_hosted_repo (default branch main)
 //       docs: [docs/a.md, {path: b.md, title: B}]   # relative to the manifest; title = first '# ' line | filename
@@ -33,7 +34,7 @@ const NAME_RE = /^[A-Za-z0-9._-]+$/;
 export type TaskSpec = { title: string; notes?: string; category?: string; due_date?: string; links?: { url: string; title?: string }[] };
 export type DocSpec = { path: string; title?: string };
 export type RepoSpec = { name: string; description?: string; branch?: string };
-export type ProjectSpec = { name: string; group?: string; description?: string; repo?: RepoSpec; docs: DocSpec[]; tasks: TaskSpec[] };
+export type ProjectSpec = { name: string; key?: string; group?: string; description?: string; repo?: RepoSpec; docs: DocSpec[]; tasks: TaskSpec[] };
 export type Manifest = { projects: ProjectSpec[] };
 
 export type Options = {
@@ -87,7 +88,8 @@ export function parseManifest(text: string, filename = "manifest.yaml"): Manifes
       });
       return { title: t.title.trim(), notes: t.notes == null ? undefined : String(t.notes), category, due_date: t.due_date == null ? undefined : String(t.due_date), links };
     });
-    return { name, group: p.group, description: p.description, repo, docs, tasks };
+    if (p.key != null && !/^[A-Za-z0-9]{1,8}$/.test(String(p.key))) throw new Error(`${at}.key must be 1-8 alphanumerics`);
+    return { name, key: p.key == null ? undefined : String(p.key).toUpperCase(), group: p.group, description: p.description, repo, docs, tasks };
   });
   return { projects };
 }
@@ -201,7 +203,8 @@ export async function sync(manifest: Manifest, o: Options, f: typeof fetch = fet
     } else {
       pid = uniqueId(`proj-${slug(spec.name) || "x"}`, takenIds);
       takenIds.add(pid);
-      const key = uniqueKey(spec.name, takenKeys);
+      let key = spec.key ?? uniqueKey(spec.name, takenKeys);
+      if (spec.key && takenKeys.has(spec.key)) { const alt = uniqueKey(spec.name, takenKeys); out.warnings.push(`${spec.name}: key ${spec.key} already taken → using ${alt}`); key = alt; }
       takenKeys.add(key);
       await c.cmd("create_project", {
         project: { id: pid, name: spec.name, key, description: spec.description ?? null, deadline: null, archived: false, status: "open", lead_id: null },

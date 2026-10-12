@@ -157,4 +157,12 @@ const s = fakeServer();
 await expect(sync(MANIFEST, opts({ baseUrl: "https://evil.example/space", allowHosts: [] }), s.f)).rejects.toThrow(/refusing host/);
 expect(s.calls.length).toBe(0);
 });
+test("explicit project key honoured; taken key falls back with warning", async () => {
+const m = parseManifest("projects:\n- {name: Alpha, key: ax}\n- {name: Beta, key: AX}\n");
+const s = fakeServer();
+const r = await sync(m, opts({ apply: true }), s.f);
+const keys = s.st.projects.map((p: any) => p.key);
+expect(keys).toEqual(["AX", "BETA"]);
+expect(r.warnings.some((w) => w.includes("already taken"))).toBe(true);
+});
 });
