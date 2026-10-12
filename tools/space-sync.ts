@@ -3,7 +3,8 @@
 // Never deletes. Default is --dry-run (prints exact requests); --apply needs env SPACE_PAT.
 //
 // Usage:
-//   bun run tools/space-sync.ts manifest.yaml [--base-url https://gaia-systems.org/space] [--dry-run | --apply] [--update-docs]
+//   bun run tools/space-sync.ts manifest.yaml [--base-url https://gaia-systems.org/space] [--dry-run | --apply] [--update-docs] [--allow-host H]
+//   (host guard: base URL host must be gaia-systems.org unless --allow-host H)
 //   SPACE_PAT=spat_… bun run tools/space-sync.ts manifest.yaml --apply
 //
 // Manifest (YAML or JSON):
@@ -25,6 +26,7 @@ import { dirname, resolve } from "node:path";
 import { readFileSync } from "node:fs";
 
 export const DEFAULT_BASE_URL = "https://gaia-systems.org/space";
+export const DEFAULT_HOST = "gaia-systems.org";
 export const TODO_CATEGORIES = ["create", "improve", "review", "decide", "admin", "dev"] as const;
 const NAME_RE = /^[A-Za-z0-9._-]+$/;
 
@@ -108,6 +110,13 @@ const uniqueId = (base: string, taken: Set<string>) => {
 const docTitle = (spec: DocSpec, body: string) =>
   (spec.title ?? body.match(/^#\s+(.+?)\s*$/m)?.[1] ?? spec.path.split("/").pop()!.replace(/\.[^.]+$/, "")).trim();
 
+// ───────────────────────── host guard ─────────────────────────
+/** Refuse any base URL whose host is not gaia-systems.org unless explicitly allowed (--allow-host). */
+export function assertHost(baseUrl: string, allow: string[] = []) {
+let host: string;
+try { host = new URL(baseUrl).hostname.toLowerCase(); } catch { throw new Error(`bad base URL ${JSON.stringify(baseUrl)}`); }
+if (host !== DEFAULT_HOST && !allow.some((h) => h.toLowerCase() === host)) throw new Error(`refusing host ${JSON.stringify(host)} (only ${DEFAULT_HOST} unless --allow-host ${host})`);
+}
 // ───────────────────────── transport ─────────────────────────
 
 type Kind = "read" | "write";
@@ -161,6 +170,7 @@ type RDoc = { id: string; container_type: string; container_id: string | null; t
 type RRepo = { name: string };
 
 export async function sync(manifest: Manifest, o: Options, f: typeof fetch = fetch): Promise<Summary> {
+  assertHost(o.baseUrl, o.allowHosts);
   const c = new Client(o, f);
   const out: Summary = { created: [], skipped: [], drift: [], warnings: [] };
   const read = o.readFile ?? ((p: string) => readFileSync(p, "utf8"));
@@ -267,18 +277,19 @@ export async function sync(manifest: Manifest, o: Options, f: typeof fetch = fet
 // ───────────────────────── cli ─────────────────────────
 
 export function parseArgs(argv: string[]) {
-  const a = { file: "", apply: false, dry: false, updateDocs: false, baseUrl: process.env.SPACE_BASE_URL ?? DEFAULT_BASE_URL };
+  const a = { file: "", apply: false, dry: false, updateDocs: false, allowHosts: [] as string[], baseUrl: process.env.SPACE_BASE_URL ?? DEFAULT_BASE_URL };
   for (let i = 0; i < argv.length; i++) {
     const v = argv[i];
     if (v === "--apply") a.apply = true;
     else if (v === "--dry-run") a.dry = true;
     else if (v === "--update-docs") a.updateDocs = true;
     else if (v === "--base-url") a.baseUrl = argv[++i] ?? "";
+    else if (v === "--allow-host") a.allowHosts.push(argv[++i] ?? "");
     else if (v.startsWith("--")) throw new Error(`unknown flag ${v}`);
     else if (!a.file) a.file = v;
     else throw new Error(`unexpected argument ${v}`);
   }
-  if (!a.file) throw new Error("usage: space-sync.ts <manifest.yaml|json> [--dry-run|--apply] [--update-docs] [--base-url URL]");
+  if (!a.file) throw new Error("usage: space-sync.ts <manifest.yaml|json> [--dry-run|--apply] [--update-docs] [--base-url URL] [--allow-host H]");
   if (a.apply && a.dry) throw new Error("--apply and --dry-run are mutually exclusive");
   return a;
 }
@@ -290,7 +301,7 @@ if (import.meta.main) {
     if (a.apply && !pat) throw new Error("--apply requires env SPACE_PAT (spat_…)");
     const file = resolve(a.file);
     const manifest = parseManifest(readFileSync(file, "utf8"), file);
-    const s = await sync(manifest, { apply: a.apply, baseUrl: a.baseUrl, pat, updateDocs: a.updateDocs, baseDir: dirname(file), log: (l) => console.log(l) });
+    const s = await sync(manifest, { apply: a.apply, baseUrl: a.baseUrl, pat, updateDocs: a.updateDocs, allowHosts: a.allowHosts, baseDir: dirname(file), log: (l) => console.log(l) });
     process.exit(s.drift.length && a.apply ? 3 : 0);
   } catch (e) {
     console.error(`space-sync: ${(e as Error).message}`);

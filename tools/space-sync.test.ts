@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { parseArgs, parseManifest, sync, uniqueKey, type Options } from "./space-sync";
+import { assertHost, parseArgs, parseManifest, sync, uniqueKey, type Options } from "./space-sync";
 
 const PAT = "spat_SECRETSECRETSECRET";
 const BASE = "https://space.test/space";
@@ -48,7 +48,7 @@ function fakeServer(seed: { projects?: any[]; docs?: any[]; todos?: any[]; repos
 
 const opts = (over: Partial<Options> = {}): Options & { lines: string[] } => {
   const lines: string[] = [];
-  return { apply: false, baseUrl: BASE, pat: PAT, updateDocs: false, baseDir: "/m", log: (l) => lines.push(l), readFile: (p) => FILES[p] ?? (() => { throw new Error(`no ${p}`); })(), lines, ...over };
+  return { apply: false, baseUrl: BASE, pat: PAT, updateDocs: false, allowHosts: ["space.test"], baseDir: "/m", log: (l) => lines.push(l), readFile: (p) => FILES[p] ?? (() => { throw new Error(`no ${p}`); })(), lines, ...over };
 };
 
 const WRITES = ["create_project", "create_hosted_repo", "create_document", "create_todo", "save_document", "add_todo_link"];
@@ -147,4 +147,14 @@ describe("space-sync", () => {
     expect(await p.exited).toBe(2);
     expect(await new Response(p.stderr).text()).toContain("requires env SPACE_PAT");
   });
+test("host guard: refuses non-gaia-systems.org unless --allow-host", async () => {
+expect(() => assertHost("https://gaia-systems.org/space")).not.toThrow();
+expect(() => assertHost("https://evil.example/space")).toThrow(/refusing host "evil.example"/);
+expect(() => assertHost("https://gaia-systems.org.evil.example/space")).toThrow(/refusing/);
+expect(() => assertHost("http://localhost:8097/space", ["localhost"])).not.toThrow();
+expect(parseArgs(["m.yaml", "--allow-host", "localhost"]).allowHosts).toEqual(["localhost"]);
+const s = fakeServer();
+await expect(sync(MANIFEST, opts({ baseUrl: "https://evil.example/space", allowHosts: [] }), s.f)).rejects.toThrow(/refusing host/);
+expect(s.calls.length).toBe(0);
+});
 });
