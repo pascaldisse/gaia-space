@@ -1,0 +1,11 @@
+# Sample manifest for tools/space-sync.ts (dry-run: bun run tools/space-sync.ts tools/space-sync.sample.yaml)
+projects:
+  - name: Sample Project
+    group: labs            # ignored (no server-side group concept) → warning
+    description: Created by space-sync
+    repo: {name: sample-core, description: core repo, branch: main}
+    docs:
+      - ../README.md
+    tasks:
+      - {title: Wire the thing, notes: "first line\nsecond line", category: dev}
+      - {title: Review the thing, category: review, links: [{url: "https://example.org/spec", title: spec}]}
