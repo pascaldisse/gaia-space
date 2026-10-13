@@ -1,0 +1,13 @@
+import { chromium } from 'playwright';
+const b = await chromium.launch();
+const p = await (await b.newContext({ viewport: { width: 1440, height: 900 } })).newPage();
+const reqs = [];
+p.on('response', r => { if (r.url().includes('/api/')) reqs.push(r.status() + ' ' + r.url()); });
+await p.goto('http://127.0.0.1:8091/space/home', { waitUntil: 'networkidle' });
+await p.waitForTimeout(2500);
+console.log('url', p.url());
+console.log('password inputs:', await p.locator('input[type=password]').count());
+console.log('title/text:', (await p.locator('body').innerText()).slice(0, 400).replace(/\n+/g, ' | '));
+console.log(reqs.slice(0, 8).join('\n'));
+await p.screenshot({ path: 'proof/local-space-autologin.png' });
+await b.close();

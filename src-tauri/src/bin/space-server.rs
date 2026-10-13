@@ -593,6 +593,91 @@ impl LoginRateLimiter {
         self.source_ips.remove(&source_ip);
     }
 }
+/// Local-mac autologin (`SPACE_LOCAL_AUTOLOGIN=<username>`): a request whose TCP peer is loopback
+/// AND whose X-Forwarded-For chain (if any) is entirely loopback is served as that user without a
+/// cookie. Anything else (remote peer, non-loopback forwarded hop) takes the normal login path.
+static AUTOLOGIN_TOKEN: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+fn autologin_user() -> Option<String> {
+    env::var("SPACE_LOCAL_AUTOLOGIN")
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+}
+fn request_is_loopback(headers: &HeaderMap, peer: SocketAddr) -> bool {
+    if !peer.ip().is_loopback() {
+        return false;
+    }
+    headers.get_all("x-forwarded-for").iter().all(|v| {
+        v.to_str().ok().is_some_and(|v| {
+            v.split(',')
+                .all(|hop| hop.trim().parse::<IpAddr>().is_ok_and(|ip| ip.is_loopback()))
+        })
+    })
+}
+/// Creates the autologin account (admin) if missing and mints a fresh long-lived session for it.
+fn ensure_autologin_session(username: &str) -> Result<String, String> {
+    let c = db::conn()?;
+    let existing: Option<String> = c
+        .query_row("SELECT id FROM users WHERE username=?1", [username], |r| r.get(0))
+        .optional()
+        .map_err(|e| e.to_string())?;
+    let uid = match existing {
+        Some(id) => id,
+        None => {
+            let pid = format!("profile-{username}");
+            let uid = format!("user-{username}");
+            c.execute(
+                "INSERT OR IGNORE INTO profiles(id,username,display_name,created_at) VALUES(?1,?2,?3,unixepoch())",
+                params![pid, username, username],
+            )
+            .map_err(|e| e.to_string())?;
+            // Unusable password: reachable only through loopback autologin.
+            c.execute(
+                "INSERT INTO users(id,username,password_hash,display_name,profile_id,role,global_role,created_at) VALUES(?1,?2,?3,?4,?5,'admin','GlobalAdmin',unixepoch())",
+                params![uid, username, hash(&token())?, username, pid],
+            )
+            .map_err(|e| e.to_string())?;
+            uid
+        }
+    };
+    c.execute("DELETE FROM sessions WHERE token LIKE 'autologin-%'", [])
+        .map_err(|e| e.to_string())?;
+    let t = format!("autologin-{}", token());
+    c.execute(
+        "INSERT INTO sessions(token,user_id,created_at,expires_at) VALUES(?1,?2,unixepoch(),unixepoch()+315360000)",
+        params![t, uid],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(t)
+}
+/// Middleware: on a qualifying loopback request, substitute the autologin session for the cookie.
+/// Explicit `Authorization` (script tokens, git/npm basic auth) is left alone.
+fn autologin_cookie(token: Option<&str>, headers: &HeaderMap, peer: SocketAddr) -> Option<HeaderValue> {
+    let t = token?;
+    if headers.contains_key(header::AUTHORIZATION) || !request_is_loopback(headers, peer) {
+        return None;
+    }
+    HeaderValue::from_str(&format!("space_session={t}")).ok()
+}
+async fn autologin_layer(mut req: axum::extract::Request, next: axum::middleware::Next) -> axum::response::Response {
+    // No ConnectInfo (in-process router tests) = not provably loopback = no autologin.
+    let peer = req.extensions().get::<ConnectInfo<SocketAddr>>().map(|c| c.0);
+    if let Some(peer) = peer {
+        if let Some(v) = autologin_cookie(AUTOLOGIN_TOKEN.get().map(String::as_str), req.headers(), peer) {
+            req.headers_mut().insert(header::COOKIE, v);
+        }
+    }
+    next.run(req).await
+}
+/// Session cookie, 30 days. `Secure` unless the proxy says the hop was plain http (local Caddy).
+fn session_cookie(value: &str, max_age: u32, headers: &HeaderMap) -> String {
+    let plain_http = headers
+        .get("x-forwarded-proto")
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v.trim().eq_ignore_ascii_case("http"));
+    let secure = if plain_http { "" } else { " Secure;" };
+    format!("space_session={value}; HttpOnly;{secure} SameSite=Lax; Path=/; Max-Age={max_age}")
+}
 fn login_source_ip(headers: &HeaderMap, peer: SocketAddr) -> IpAddr {
     // Loopback-only service: forwarded source is trusted only from the local reverse proxy.
     if peer.ip().is_loopback() {
@@ -2262,9 +2347,7 @@ async fn login(
     .into_response();
     resp.headers_mut().insert(
         header::SET_COOKIE,
-        match HeaderValue::from_str(&format!(
-            "space_session={t}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=2592000"
-        )) {
+        match HeaderValue::from_str(&session_cookie(&t, 2592000, &headers)) {
             Ok(v) => v,
             Err(_) => return err(StatusCode::INTERNAL_SERVER_ERROR, "cookie").into_response(),
         },
@@ -2409,15 +2492,16 @@ async fn logout(h: HeaderMap) -> impl IntoResponse {
         })
     {
         if let Ok(c) = db::conn() {
-            let _ = c.execute("DELETE FROM sessions WHERE token=?1", [t]);
+            if !t.starts_with("autologin-") {
+                let _ = c.execute("DELETE FROM sessions WHERE token=?1", [t]);
+            }
         }
     }
     let mut r = Json(json!({"ok":true})).into_response();
     r.headers_mut().insert(
         header::SET_COOKIE,
-        HeaderValue::from_static(
-            "space_session=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0",
-        ),
+        HeaderValue::from_str(&session_cookie("", 0, &h))
+            .unwrap_or_else(|_| HeaderValue::from_static("space_session=; Path=/; Max-Age=0")),
     );
     r
 }
@@ -6732,6 +6816,7 @@ fn app_router() -> Router {
         .layer(DefaultBodyLimit::max(document_upload_max_bytes(
             env::var("SPACE_DOCUMENT_UPLOAD_MAX_BYTES").ok().as_deref(),
         )))
+        .layer(axum::middleware::from_fn(autologin_layer))
         .with_state(App::new())
 }
 
@@ -6928,6 +7013,11 @@ fn main() {
 
 async fn serve_main() {
     bootstrap();
+    if let Some(user) = autologin_user() {
+        let t = ensure_autologin_session(&user).expect("SPACE_LOCAL_AUTOLOGIN account");
+        let _ = AUTOLOGIN_TOKEN.set(t);
+        println!("SPACE_LOCAL_AUTOLOGIN active for loopback requests as {user:?}");
+    }
     spawn_webhook_ticker();
     spawn_pipeline_schedule_ticker();
     spawn_chat_schedule_ticker();
@@ -7160,6 +7250,58 @@ mod tests {
         TEST_LOCK.get_or_init(|| Mutex::new(())).lock().unwrap()
     }
 
+    fn hdrs(pairs: &[(&str, &str)]) -> HeaderMap {
+        let mut h = HeaderMap::new();
+        for (k, v) in pairs {
+            h.append(axum::http::HeaderName::from_bytes(k.as_bytes()).unwrap(), HeaderValue::from_str(v).unwrap());
+        }
+        h
+    }
+    #[test]
+    fn autologin_applies_only_to_loopback_requests() {
+        let lo: SocketAddr = "127.0.0.1:5000".parse().unwrap();
+        let lo6: SocketAddr = "[::1]:5000".parse().unwrap();
+        let remote: SocketAddr = "203.0.113.9:5000".parse().unwrap();
+        let want = Some(HeaderValue::from_static("space_session=tok"));
+        assert_eq!(autologin_cookie(Some("tok"), &hdrs(&[]), lo), want);
+        assert_eq!(autologin_cookie(Some("tok"), &hdrs(&[]), lo6), want);
+        // Caddy on loopback forwarding a loopback client
+        assert_eq!(autologin_cookie(Some("tok"), &hdrs(&[("x-forwarded-for", "127.0.0.1")]), lo), want);
+        // Caddy on loopback forwarding a remote client (or a spoofed chain) is NOT local
+        assert_eq!(autologin_cookie(Some("tok"), &hdrs(&[("x-forwarded-for", "198.51.100.4")]), lo), None);
+        assert_eq!(autologin_cookie(Some("tok"), &hdrs(&[("x-forwarded-for", "127.0.0.1, 198.51.100.4")]), lo), None);
+        assert_eq!(autologin_cookie(Some("tok"), &hdrs(&[("x-forwarded-for", "garbage")]), lo), None);
+        // Remote TCP peer never qualifies, even claiming a loopback XFF
+        assert_eq!(autologin_cookie(Some("tok"), &hdrs(&[("x-forwarded-for", "127.0.0.1")]), remote), None);
+        // Disabled (env unset) or explicit script credential
+        assert_eq!(autologin_cookie(None, &hdrs(&[]), lo), None);
+        assert_eq!(autologin_cookie(Some("tok"), &hdrs(&[("authorization", "Bearer x")]), lo), None);
+    }
+    #[test]
+    fn session_cookie_is_30_days_lax_and_secure_only_off_plain_http() {
+        let plain = session_cookie("abc", 2592000, &hdrs(&[("x-forwarded-proto", "http")]));
+        assert_eq!(plain, "space_session=abc; HttpOnly; SameSite=Lax; Path=/; Max-Age=2592000");
+        for h in [hdrs(&[]), hdrs(&[("x-forwarded-proto", "https")])] {
+            assert_eq!(session_cookie("abc", 2592000, &h), "space_session=abc; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=2592000");
+        }
+    }
+    #[test]
+    fn autologin_account_is_created_as_admin_and_session_resolves() {
+        let _serial = test_lock();
+        setup();
+        let t1 = ensure_autologin_session("pascal").unwrap();
+        let u = user_by_session_token(&t1).ok().expect("autologin session resolves");
+        assert_eq!((u.username.as_str(), u.role.as_str(), u.account_admin), ("pascal", "GlobalAdmin", true));
+        // idempotent: same account, old autologin session replaced
+        let t2 = ensure_autologin_session("pascal").unwrap();
+        assert_ne!(t1, t2);
+        assert!(user_by_session_token(&t1).is_err());
+        assert_eq!(user_by_session_token(&t2).ok().unwrap().id, u.id);
+        let n: i64 = db::conn().unwrap().query_row("SELECT count(*) FROM users WHERE username='pascal'", [], |r| r.get(0)).unwrap();
+        assert_eq!(n, 1);
+        // unrelated sessions untouched
+        assert!(user_by_session_token("ta").is_ok());
+    }
     fn cookie(token: &str) -> HeaderMap {
         let mut headers = HeaderMap::new();
         headers.insert(

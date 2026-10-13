@@ -8,6 +8,7 @@
 <key>SPACE_DB</key><string>/Users/pascaldisse/.gaia/space/data/space.db</string>
 <key>SPACE_PORT</key><string>8090</string>
 <key>SPACE_ADMIN_PASSWORD</key><string>REDACTED-see-~/.gaia/secrets/space.env</string>
+<key>SPACE_LOCAL_AUTOLOGIN</key><string>pascal</string>
 <key>HOME</key><string>/Users/pascaldisse</string>
 </dict>
 <key>RunAtLoad</key><true/><key>KeepAlive</key><true/>
