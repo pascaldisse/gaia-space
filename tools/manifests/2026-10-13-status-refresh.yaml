@@ -1,0 +1,28 @@
+# bun run tools/space-sync.ts tools/manifests/2026-10-13-status-refresh.yaml [--apply]  (SPACE_PAT from ~/.gaia/secrets/space-sync.pat)
+projects:
+- name: reskate-mac
+  description: "skate 3 → Mac. br gaia/mac f9b0b83 · SEH fix installed sha 6a9f4ee2 · awaiting Pascal's ONE launch"
+  tasks:
+  - {title: "Pascal: ONE launch of reskate-mac (SEH fix 6a9f4ee2 installed)", category: decide, notes: "br gaia/mac f9b0b83 · SEH fix installed sha 6a9f4ee2 · blocked on Pascal launch → report result"}
+- name: hydra-mac
+  description: "hydra for Mac. notproton-direct runner fafb909 = Steam-free launch (wine loader → compatdata pfx → game launcher exe)"
+  tasks:
+  - {title: "notproton-direct runner shipped (fafb909, Steam-free)", category: dev, notes: "fafb909 · skate 136 → ReSkateLauncher.exe -steam · supersedes native Steam.app rail 27aca24 for Steam-free path"}
+- name: old-ones
+  description: "atlas/graph of Old Ones / UAP research. head 5537540b"
+  tasks:
+  - {title: "AAWSAP books added to atlas (5537540b)", category: dev, notes: "Lacatski/Kelleher/Knapp x2 + 2026-10 DIA letter event · rows 27-29, 30 gt:2-40, 97 lane doc · graph 447n/717e · gate: build --check, 19 tests, manifest ok"}
+- name: conker
+  description: "NEW. ~/projects/conker · Live & Reloaded base (conker-live-and-reloaded-decensor, xboxrecomp) + N64 reference. kickoff lane running"
+  tasks:
+  - {title: "Kickoff lane: L&R base + N64 reference", category: dev, notes: "~/projects/conker/vendor = conker (N64 decomp) · conker-live-and-reloaded-decensor · xboxrecomp · kickoff lane running"}
+- name: gta-sa
+  description: "GTA SA systems design. new ideas 10-13: pre-crime police presence · proportionate response curve · dirty-cash laundering economy · lawyers · kids = yes"
+  docs:
+  - {path: docs/gta-sa-systems-ideas.md, title: "GTA SA — Systems ideas (10-13)"}
+  tasks:
+  - {title: "Pre-crime police presence", category: create}
+  - {title: "Proportionate response curve", category: create}
+  - {title: "Dirty-cash laundering economy", category: create}
+  - {title: "Lawyers system", category: create}
+  - {title: "Kids in world (decision: yes)", category: decide, notes: "source https://www.youtube.com/watch?v=Kf8EK5vVc-Y", links: [{url: "https://www.youtube.com/watch?v=Kf8EK5vVc-Y", title: source video}]}
