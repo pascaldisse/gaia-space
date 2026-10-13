@@ -3,6 +3,9 @@ import { chatApi, type ChannelSummary } from "../api/chat";
 import { personalApi, type Todo } from "../api/personal";
 import { platformApi } from "../api/platform";
 import { pipelinesApi } from "../api/pipelines";
+import { marked } from "marked";
+import { sanitizeRichHtml } from "../richtext";
+import { GraphRow } from "../components/CommitGraph";
 import { currentUser, humanError, profileId, profiles, projects, reloadProfiles, reloadProjects, setProjectId } from "../session";
 import { linkProps, navigate, projectTabs, route, type ProjectTab, type Route } from "../router";
 import { EmbeddedScopeProvider, type EmbeddedScope } from "../components/PageHeader";
@@ -559,25 +562,10 @@ function ProjectChats(props: {
  *  edits, filtered to the kind of work that belongs here (GitHub/external tracker
  *  items are these tasks with a LINK, see TaskMeta's Links row). There is no
  *  separate task/board store any more; "New task" here simply opens the shared
- *  row editor with the category pre-set — and the honest answer about linking a
- *  repository, below.
+ *  row editor with the category pre-set.
  *
- *  WHAT I FOUND ABOUT "LINK A REPOSITORY" (evidence, not a guess):
- *   - `src-tauri/src/git.rs` registers repo_list / repo_add / repo_remove / repo_info /
- *     repo_log / repo_branches / repo_status / repo_diff / repo_stage / repo_commit.
- *     EVERY ONE of them is keyed by a filesystem `path: String`. Not one takes a
- *     project id.
- *   - The registry those commands read and write is `repos.json` on the local disk
- *     (`store_path()` -> `<data dir>/gaia-space/repos.json`, `load_store`/`save_store`),
- *     a per-machine list of `RepoRef { name, path }`. It is not in the database at all,
- *     so there is no row a project id could be attached to and nothing to share
- *     between two people looking at the same project.
- *   - A PACKAGE repository is a different thing and DOES carry a project:
- *     `PackageRepository.project_id` (src/api/pipelines.ts) — that is what is surfaced
- *     below, because it is real.
- *
- *  So a git repository CANNOT be attached to a project today. This renders that as an
- *  honest empty state rather than a dead control, and says exactly what is missing. */
+ *  REPOSITORY: `projects.repo_path` (V148) binds a project to one local git repo; see
+ *  `ProjectRepoPanel` below. Package repositories (`PackageRepository.project_id`) are listed too. */
 function ProjectDev(props: { projectId: string }): JSX.Element {
   const actingProfileId = () => currentUser()?.profile_id ?? profileId();
   const [devTasks, { refetch: reloadDevTasks }] = createResource(
@@ -680,15 +668,97 @@ function ProjectDev(props: { projectId: string }): JSX.Element {
             </For>
           </ul>
         </Show>
-        {/* AN HONEST EMPTY STATE, NOT A DEAD CONTROL. There is no "Link repository"
-            button here because pressing it could not do anything: see the evidence in
-            this component's doc comment. The offer that IS real is the git client. */}
-        <EmptyState
-          title="A git repository cannot be linked to a project yet"
-          hint="Repositories are registered per machine by their filesystem path (repos.json) and carry no project. Binding one would need a stored project↔repository row and a command to write it; until then this tab shows the project's tasks, boards and package repositories, which are real."
-          actions={<GhostPill {...linkProps({ view: "Repos" })}>Open repositories →</GhostPill>}
-        />
+        <ProjectRepoPanel projectId={props.projectId} />
       </section>
     </div>
+  );
+}
+
+/** ── REPOSITORY (bound git repo) ─────────────────────────────────────────────
+ *  `projects.repo_path` (V148) binds a project to ONE local git repository root. Reads are
+ *  project-scoped commands (`project_repo_overview`, `project_repo_readme`): the server
+ *  resolves the path from the project row, so a web session can never ask for an arbitrary
+ *  path. Unbound → a path input (default `~/projects/<slug>`) + Bind; the server validates
+ *  that it is a git repository and the owner-or-admin gate decides who may bind. */
+const slugOf = (name: string) => name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+function ProjectRepoPanel(props: { projectId: string }): JSX.Element {
+  const project = createMemo(() => projects()?.find((item) => item.id === props.projectId));
+  const repoPath = () => project()?.repo_path ?? null;
+  const [overview, { refetch: reloadOverview }] = createResource(
+    () => (repoPath() ? props.projectId : null),
+    (id) => platformApi.projectRepoOverview(id),
+  );
+  const [readme] = createResource(
+    () => (repoPath() ? props.projectId : null),
+    (id) => platformApi.projectRepoReadme(id),
+  );
+  const readmeHtml = createMemo(() => {
+    const text = readme();
+    if (!text) return "";
+    try { return sanitizeRichHtml(marked.parse(text, { async: false }) as string); } catch { return ""; }
+  });
+  const [draft, setDraft] = createSignal<string | null>(null);
+  const pathInput = () => draft() ?? `~/projects/${slugOf(project()?.name ?? "")}`;
+  const [binding, setBinding] = createSignal(false);
+  const [bindError, setBindError] = createSignal("");
+  async function bind(path: string) {
+    setBinding(true);
+    setBindError("");
+    try {
+      await platformApi.setProjectRepo(props.projectId, path);
+      setDraft(null);
+      await reloadProjects();
+    } catch (error) {
+      setBindError(humanError(error));
+    } finally {
+      setBinding(false);
+    }
+  }
+  return (
+    <Show
+      when={repoPath()}
+      fallback={
+        <form class="pw-repo-bind" onSubmit={(event) => { event.preventDefault(); void bind(pathInput()); }}>
+          <p class="pw-repo-hint">No git repository is bound to this project. Enter the path of a local repository (a leading <code>~/</code> is your home directory).</p>
+          <div class="pw-repo-bind-row">
+            <input class="pw-repo-path" type="text" aria-label="Repository path" spellcheck={false} value={pathInput()} onInput={(event) => setDraft(event.currentTarget.value)} />
+            <button type="submit" class="ghost ghost-pill" disabled={binding() || !pathInput().trim()}>{binding() ? "Binding…" : "Bind"}</button>
+          </div>
+          <Show when={bindError()}><p class="pw-error" role="alert">{bindError()}</p></Show>
+          <p class="pw-repo-hint"><GhostPill {...linkProps({ view: "Repos" })}>Open repositories →</GhostPill></p>
+        </form>
+      }
+    >
+      <div class="pw-repo">
+        <Show when={overview.error}><p class="pw-error" role="alert">{humanError(overview.error)}</p></Show>
+        <Show when={overview()}>
+          {(info) => (
+            <>
+              <div class="pw-repo-head">
+                <span class="pw-repo-branch">{info().detached ? "detached HEAD" : info().branch ?? "(no branch)"}</span>
+                <Show when={info().head_short}><code class="pw-repo-sha" title={info().head_id ?? undefined}>{info().head_short}</code></Show>
+                <Show when={info().ahead !== null && info().behind !== null} fallback={<span class="pw-repo-stat">no upstream</span>}>
+                  <span class="pw-repo-stat" title={info().upstream ?? undefined}>↑{info().ahead} ↓{info().behind}</span>
+                </Show>
+                <span class="pw-repo-stat" classList={{ dirty: info().dirty > 0 }}>{info().dirty ? `${info().dirty} uncommitted change${info().dirty === 1 ? "" : "s"}` : "clean"}</span>
+                <code class="pw-repo-where">{info().path}</code>
+              </div>
+              <div class="graph-table pw-repo-log" role="table" aria-label="Recent commits">
+                <For each={info().commits} fallback={<p class="pw-repo-hint">No commits yet.</p>}>
+                  {(commit) => <GraphRow commit={commit} node={undefined} refs={[]} laneCount={0} active={false} onSelect={() => {}} />}
+                </For>
+              </div>
+            </>
+          )}
+        </Show>
+        <Show when={readmeHtml()}>
+          <article class="pw-readme markdown-renderer" aria-label="README" innerHTML={readmeHtml()} />
+        </Show>
+        <p class="pw-repo-hint">
+          <GhostPill onClick={() => void reloadOverview()}>Refresh</GhostPill>{" "}
+          <GhostPill {...linkProps({ view: "Repos" })}>Open repositories →</GhostPill>
+        </p>
+      </div>
+    </Show>
   );
 }

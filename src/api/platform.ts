@@ -1,3 +1,4 @@
+import type { Commit } from "../api";
 import { invoke } from "@tauri-apps/api/core";
 
 export type Profile = { id: string; username: string; display_name: string; email: string | null; avatar_url: string | null; archived: boolean };
@@ -33,7 +34,14 @@ export type RoleAssignment = { id: string; role_id: string; profile_id: string |
  *  authorization input — every project member keeps identical access (all tasks, knowledge,
  *  calendar) and any member may create tasks for themselves and for others. */
 export type ProjectStatus = "open" | "done";
-export type Project = { id: string; name: string; key: string; description: string | null; created_by: string | null; archived: boolean; deadline: string | null; status?: ProjectStatus; lead_id: string | null };
+export type Project = { id: string; name: string; key: string; description: string | null; created_by: string | null; archived: boolean; deadline: string | null; status?: ProjectStatus; lead_id: string | null; /** Bound git repository root (V148); written only by `setProjectRepo`. */ repo_path?: string | null };
+/** One round trip for the Repository tab (`project_repo_overview`); `commits` are `Commit` rows of git.rs. */
+export type ProjectRepoOverview = {
+  path: string; name: string; branch: string | null; detached: boolean;
+  head_id: string | null; head_short: string | null;
+  ahead: number | null; behind: number | null; upstream: string | null;
+  dirty: number; commits: Commit[];
+};
 export type CfType = "text" | "text_list" | "int" | "int_list" | "enum" | "enum_list" | "open_enum" | "open_enum_list" | "bool" | "date" | "datetime" | "percentage" | "fraction" | "profile" | "profile_list" | "team" | "location" | "project" | "url" | "contact" | "contact_list" | "autonumber" | "issue" | "issue_list";
 export type CfDefinition = {
   id: string; entity_type: string; cf_type: CfType; name: string;
@@ -47,7 +55,7 @@ const call = <T>(command: string, args: Record<string, unknown> = {}) => invoke<
 // session identity, so the client can never name someone else as owner.
 // `lead_id` is optional at create time: a project without a lead is normal, and the
 // server column is nullable (serde default), so an omitted lead means "none yet".
-export type NewProject = Omit<Project, "created_by" | "lead_id"> & { lead_id?: string | null };
+export type NewProject = Omit<Project, "created_by" | "lead_id" | "repo_path"> & { lead_id?: string | null };
 const submitProject = (operation: "create" | "update", value: Project | NewProject) =>
   call<void>(`${operation}_project`, { project: value });
 
@@ -173,6 +181,14 @@ decideMembershipEdit: (id: string, approver_id: string, approve: boolean) => cal
    *  as the deadline — being lead grants nothing. `actor` is desktop-only (see above). */
   setProjectLead: (project_id: string, lead_id: string | null, actor?: string | null) =>
     call<Project>("set_project_lead", { projectId: project_id, leadId: lead_id, actorProfileId: actor ?? null }),
+  /** Bind a project to a local git repo (server validates it is one; owner-or-admin). Empty path unbinds. */
+  setProjectRepo: (project_id: string, path: string) =>
+    call<Project>("set_project_repo", { projectId: project_id, path }),
+  /** Read-only, project-scoped: the server resolves the path from the project row, never from the caller. */
+  projectRepoOverview: (project_id: string) =>
+    call<ProjectRepoOverview | null>("project_repo_overview", { projectId: project_id }),
+  projectRepoReadme: (project_id: string) =>
+    call<string | null>("project_repo_readme", { projectId: project_id }),
 
   // Custom Fields engine
   cfDefinitions: (entity_type?: string) => call<CfDefinition[]>("list_cf_definitions", { entityType: entity_type ?? null }),
