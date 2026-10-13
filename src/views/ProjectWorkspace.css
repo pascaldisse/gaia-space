@@ -246,3 +246,8 @@
 .pw-readme pre { overflow-x: auto; padding: 10px 12px; border-radius: 8px; background: var(--wash-2, #141d30); }
 .pw-readme code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; }
 .pw-readme img { max-width: 100%; }
+/* a long commit summary must ellipsize inside the card, never widen the grid track */
+.pw-dev { grid-template-columns: minmax(0, 1fr); }
+.pw-dev .pw-card { min-width: 0; }
+.pw-repo { grid-template-columns: minmax(0, 1fr); }
+.pw-repo-log .graph-row { min-width: 0; }
