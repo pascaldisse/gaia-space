@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>Label</key><string>com.gaia.space-web</string>
+<key>ProgramArguments</key><array><string>/opt/homebrew/bin/caddy</string><string>run</string><string>--config</string><string>/Users/pascaldisse/.gaia/space/Caddyfile</string><string>--adapter</string><string>caddyfile</string></array>
+<key>EnvironmentVariables</key><dict><key>HOME</key><string>/Users/pascaldisse</string></dict>
+<key>RunAtLoad</key><true/><key>KeepAlive</key><true/>
+<key>StandardOutPath</key><string>/Users/pascaldisse/.gaia/logs/space-web.log</string>
+<key>StandardErrorPath</key><string>/Users/pascaldisse/.gaia/logs/space-web.log</string>
+</dict></plist>

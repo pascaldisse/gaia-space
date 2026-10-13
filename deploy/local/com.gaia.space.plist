@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>Label</key><string>com.gaia.space</string>
+<key>ProgramArguments</key><array><string>/Users/pascaldisse/.gaia/space/bin/space-server</string></array>
+<key>WorkingDirectory</key><string>/Users/pascaldisse/.gaia/space/data</string>
+<key>EnvironmentVariables</key><dict>
+<key>SPACE_DB</key><string>/Users/pascaldisse/.gaia/space/data/space.db</string>
+<key>SPACE_PORT</key><string>8090</string>
+<key>SPACE_ADMIN_PASSWORD</key><string>REDACTED-see-~/.gaia/secrets/space.env</string>
+<key>HOME</key><string>/Users/pascaldisse</string>
+</dict>
+<key>RunAtLoad</key><true/><key>KeepAlive</key><true/>
+<key>StandardOutPath</key><string>/Users/pascaldisse/.gaia/logs/space.log</string>
+<key>StandardErrorPath</key><string>/Users/pascaldisse/.gaia/logs/space.log</string>
+</dict></plist>
