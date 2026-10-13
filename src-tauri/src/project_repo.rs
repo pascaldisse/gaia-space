@@ -120,7 +120,7 @@ pub fn overview_at(path: &str) -> Result<ProjectRepoOverview> {
     if let Ok(head) = repo.head() {
         if let Some(local) = head.target() {
             if let Ok(name) = repo.branch_upstream_name(head.name().unwrap_or("")) {
-                if let Some(name) = name.as_str() {
+                if let Ok(name) = name.as_str() {
                     if let Ok(up) = repo.refname_to_id(name) {
                         if let Ok((a, b)) = repo.graph_ahead_behind(local, up) {
                             ahead = Some(a);
@@ -168,7 +168,7 @@ pub fn readme_at(path: &str) -> Result<Option<String>> {
     };
     let tree = head.peel_to_commit().map_err(|e| e.to_string())?.tree().map_err(|e| e.to_string())?;
     for entry in tree.iter() {
-        let Some(name) = entry.name() else { continue };
+        let Ok(name) = entry.name() else { continue };
         if !name.eq_ignore_ascii_case("README.md") {
             continue;
         }
