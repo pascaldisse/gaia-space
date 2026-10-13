@@ -11,7 +11,7 @@ use axum::{
 use gaia_space_lib::{
     app_rights, applications, blogs, budget, calendar_feeds, calls, channel_feeds, channel_notes,
     chat, chatbot, crm, db, devenv, documents, events, git_hosting, issues, leads, meetings, oauth,
-    organization, package_registry, payload_dispatch, personal, pipelines, platform, review, vault,
+    organization, package_registry, payload_dispatch, personal, pipelines, platform, project_repo, review, vault,
 };
 use rand::RngCore;
 use rusqlite::{params, OptionalExtension};
@@ -3153,10 +3153,11 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
         "create_board" | "create_issue" | "clone_issue" | "move_issue_to_project" | "create_issue_status" => {
             CommandPolicy::ProjectMemberWrite
         }
-        "get_project" | "list_boards" | "list_issue_statuses" | "project_dashboard_aggregate" => CommandPolicy::ProjectRead,
+        "get_project" | "list_boards" | "list_issue_statuses" | "project_dashboard_aggregate"
+        | "project_repo_overview" | "project_repo_readme" => CommandPolicy::ProjectRead,
         // The lead is informational, but *editing* the project field is the same
         // owner-or-admin door as the deadline. It grants the lead nothing.
-        "set_project_deadline" | "update_project_deadline" | "set_project_lead" => {
+        "set_project_deadline" | "update_project_deadline" | "set_project_lead" | "set_project_repo" => {
             CommandPolicy::ProjectDeadlineWrite
         }
         "list_todos" | "dashboard_aggregate" | "get_dashboard_preferences" => CommandPolicy::TodoRead,
@@ -6450,6 +6451,9 @@ async fn cmd(
     "set_project_deadline" => platform::set_project_deadline(project_id: String, deadline: Option<String>, actor_profile_id: Option<String>),
     "update_project_deadline" => platform::update_project_deadline(project_id: String, expected_deadline: Option<String>, deadline: Option<String>, actor_profile_id: Option<String>),
     "set_project_lead" => platform::set_project_lead(project_id: String, lead_id: Option<String>, actor_profile_id: Option<String>),
+    "set_project_repo" => project_repo::set_project_repo(project_id: String, path: String),
+    "project_repo_overview" => project_repo::project_repo_overview(project_id: String),
+    "project_repo_readme" => project_repo::project_repo_readme(project_id: String),
     "update_quality_gate_rule" => review::update_quality_gate_rule(rule: review::QualityGateRule),
     "update_review" => review::update_review(review: review::Review),
     "update_role" => platform::update_role(role: platform::Role),

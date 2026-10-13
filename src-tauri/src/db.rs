@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 147;
+pub const SCHEMA_VERSION: i64 = 148;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -1123,6 +1123,11 @@ CREATE TRIGGER IF NOT EXISTS documents_source_anchor_update_pair BEFORE UPDATE O
 WHEN (NEW.source_entity_type IS NULL) != (NEW.source_entity_id IS NULL)
 BEGIN SELECT RAISE(ABORT, 'document source anchor must be paired'); END;")?;
         }
+    }
+    // V148: a project may be bound to one local git repository root. Nullable, additive,
+    // replay-safe; the path is validated at write time (`project_repo.rs`), never trusted on read.
+    if version < 148 && table_exists(&tx, "projects")? {
+        add_column_if_missing(&tx, "projects", "repo_path", "TEXT")?;
     }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()

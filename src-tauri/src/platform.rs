@@ -1438,6 +1438,11 @@ pub struct Project {
     /// `serde(default)` keeps every pre-V132 payload (and every old client) deserializable.
     #[serde(default)]
     pub lead_id: Option<String>,
+    /// Bound git repository root (V148), canonical absolute path. READ-ONLY on this struct:
+    /// `create_project_on`/`update_project_on` never write it, so a client echoing a stale row
+    /// cannot rebind; only `project_repo::set_project_repo` (validated, owner-or-admin) does.
+    #[serde(default)]
+    pub repo_path: Option<String>,
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn list_projects() -> Result<Vec<Project>> {
@@ -1452,7 +1457,7 @@ fn project_status(value: &str) -> Result<&str> {
 
 pub fn list_projects_on(c: &Connection) -> Result<Vec<Project>> {
     let mut s = c
-        .prepare("SELECT id,name,key,description,created_by,archived,deadline,lead_id,status FROM projects ORDER BY archived,status,name")
+        .prepare("SELECT id,name,key,description,created_by,archived,deadline,lead_id,status,repo_path FROM projects ORDER BY archived,status,name")
         .map_err(|e| e.to_string())?;
     let rows = s
         .query_map([], read_project)
@@ -1461,7 +1466,7 @@ pub fn list_projects_on(c: &Connection) -> Result<Vec<Project>> {
         .map_err(|e| e.to_string());
     rows
 }
-/// Single row shape for every project read: id,name,key,description,created_by,archived,deadline,lead_id,status.
+/// Single row shape for every project read: id,name,key,description,created_by,archived,deadline,lead_id,status,repo_path.
 fn read_project(r: &rusqlite::Row<'_>) -> rusqlite::Result<Project> {
     Ok(Project {
         id: r.get(0)?,
@@ -1473,6 +1478,7 @@ fn read_project(r: &rusqlite::Row<'_>) -> rusqlite::Result<Project> {
         deadline: r.get(6)?,
         lead_id: r.get(7)?,
         status: r.get(8)?,
+        repo_path: r.get(9)?,
     })
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
@@ -1996,7 +2002,7 @@ pub fn set_project_lead_on(
 
 pub fn project_on(c: &Connection, project_id: &str) -> Result<Option<Project>> {
     c.query_row(
-        "SELECT id,name,key,description,created_by,archived,deadline,lead_id,status FROM projects WHERE id=?1",
+        "SELECT id,name,key,description,created_by,archived,deadline,lead_id,status,repo_path FROM projects WHERE id=?1",
         [project_id],
         read_project,
     )
@@ -3068,6 +3074,7 @@ mod tests {
             deadline: None,
             status: "open".into(),
             lead_id: lead.map(str::to_owned),
+            repo_path: None,
         };
         // Create persists the lead; the owner is a member by construction.
         create_project_on(&c, project(Some("p"))).unwrap();
@@ -3173,7 +3180,7 @@ mod tests {
     fn project_status_round_trips_and_rejects_unknown_values() {
         let c = conn();
         c.execute("INSERT INTO profiles(id,username,display_name,created_at) VALUES('p','person','Person',1)", []).unwrap();
-        let project = Project { id:"pr".into(), name:"Project".into(), key:"PR".into(), description:None, created_by:Some("p".into()), archived:false, deadline:None, status:"open".into(), lead_id:None };
+        let project = Project { id:"pr".into(), name:"Project".into(), key:"PR".into(), description:None, created_by:Some("p".into()), archived:false, deadline:None, status:"open".into(), lead_id:None, repo_path:None };
         create_project_on(&c, project).unwrap();
         let mut project = project_on(&c, "pr").unwrap().unwrap();
         project.status = "done".into();
@@ -3199,6 +3206,7 @@ mod tests {
             deadline: None,
             status: "open".into(),
             lead_id: None,
+            repo_path: None,
         };
         // Desktop used to send no owner at all: the row landed with NULL `created_by`
         // and no owner-or-admin gate could ever pass for it again.

@@ -79,6 +79,8 @@ pub mod pipelines;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod platform;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
+pub mod project_repo;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod review;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod rights;
@@ -275,6 +277,9 @@ pub fn run() {
             platform::request_membership_edit,
             platform::decide_membership_edit,
             platform::list_projects,
+            project_repo::set_project_repo,
+            project_repo::project_repo_overview,
+            project_repo::project_repo_readme,
             platform::set_project_deadline,
             platform::update_project_deadline,
             platform::set_project_lead,
