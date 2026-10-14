@@ -1,0 +1,40 @@
+[HTTP 401] https://paloptic.com/space/api/cmd/get_organization
+[https://paloptic.com/space/] Failed to load resource: the server responded with a status of 401 ()
+[HTTP 401] https://paloptic.com/space/api/auth/me
+[https://paloptic.com/space/] Failed to load resource: the server responded with a status of 401 ()
+[HTTP 401] https://paloptic.com/space/api/cmd/finance_access_check
+[https://paloptic.com/space/] Failed to load resource: the server responded with a status of 401 ()
+[HTTP 400] https://paloptic.com/space/api/cmd/dashboard_aggregate
+[https://paloptic.com/space/home] Failed to load resource: the server responded with a status of 400 ()
+[HTTP 400] https://paloptic.com/space/api/cmd/dashboard_aggregate
+[https://paloptic.com/space/home] Failed to load resource: the server responded with a status of 400 ()
+[HTTP 403] https://paloptic.com/space/api/cmd/list_directory_feed
+[https://paloptic.com/space/home] Failed to load resource: the server responded with a status of 403 ()
+[HTTP 400] https://paloptic.com/space/api/cmd/dashboard_aggregate
+[https://paloptic.com/space/home] Failed to load resource: the server responded with a status of 400 ()
+[HTTP 403] https://paloptic.com/space/api/cmd/list_directory_feed
+[https://paloptic.com/space/projects/project-d75e9398-6ec4-46ef-8639-590dccc0c644/tasks] Failed to load resource: the server responded with a status of 403 ()
+[HTTP 400] https://paloptic.com/space/api/cmd/dashboard_aggregate
+[https://paloptic.com/space/projects/project-d75e9398-6ec4-46ef-8639-590dccc0c644/tasks] Failed to load resource: the server responded with a status of 400 ()
+[HTTP 403] https://paloptic.com/space/api/cmd/finance_access_check
+[https://paloptic.com/space/projects/project-d75e9398-6ec4-46ef-8639-590dccc0c644/tasks] Failed to load resource: the server responded with a status of 403 ()
+LINK_ADD_FAILED: locator.click: Timeout 4000ms exceeded.
+Call log:
+  - waiting for getByRole('button', { name: /add link|\+ link|link/i }).first()
+
+[HTTP 403] https://paloptic.com/space/api/cmd/finance_access_check
+[https://paloptic.com/space/projects/project-d75e9398-6ec4-46ef-8639-590dccc0c644/tasks] Failed to load resource: the server responded with a status of 403 ()
+[HTTP 400] https://paloptic.com/space/api/cmd/dashboard_aggregate
+[https://paloptic.com/space/projects/project-d75e9398-6ec4-46ef-8639-590dccc0c644/tasks] Failed to load resource: the server responded with a status of 400 ()
+[HTTP 403] https://paloptic.com/space/api/cmd/list_directory_feed
+[https://paloptic.com/space/projects/project-d75e9398-6ec4-46ef-8639-590dccc0c644/tasks] Failed to load resource: the server responded with a status of 403 ()
+[HTTP 403] https://paloptic.com/space/api/cmd/list_directory_feed
+[https://paloptic.com/space/projects/project-d75e9398-6ec4-46ef-8639-590dccc0c644/tasks] Failed to load resource: the server responded with a status of 403 ()
+[HTTP 400] https://paloptic.com/space/api/cmd/dashboard_aggregate
+[https://paloptic.com/space/projects/project-d75e9398-6ec4-46ef-8639-590dccc0c644/tasks] Failed to load resource: the server responded with a status of 400 ()
+[HTTP 403] https://paloptic.com/space/api/cmd/finance_access_check
+[https://paloptic.com/space/projects/project-d75e9398-6ec4-46ef-8639-590dccc0c644/tasks] Failed to load resource: the server responded with a status of 403 ()
+
+linkAdded=false
+savedUrl=https://paloptic.com/space/projects/project-d75e9398-6ec4-46ef-8639-590dccc0c644/tasks
+legacyLandedUrl=https://paloptic.com/space/projects/project-d75e9398-6ec4-46ef-8639-590dccc0c644/tasks

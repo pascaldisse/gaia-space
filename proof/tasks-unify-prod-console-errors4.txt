@@ -1,0 +1,56 @@
+[HTTP 401] https://paloptic.com/space/api/cmd/get_organization
+[https://paloptic.com/space/] Failed to load resource: the server responded with a status of 401 ()
+[HTTP 401] https://paloptic.com/space/api/cmd/finance_access_check
+[https://paloptic.com/space/] Failed to load resource: the server responded with a status of 401 ()
+[HTTP 401] https://paloptic.com/space/api/auth/me
+[https://paloptic.com/space/] Failed to load resource: the server responded with a status of 401 ()
+[HTTP 400] https://paloptic.com/space/api/cmd/dashboard_aggregate
+[https://paloptic.com/space/home] Failed to load resource: the server responded with a status of 400 ()
+[HTTP 403] https://paloptic.com/space/api/cmd/list_directory_feed
+[https://paloptic.com/space/home] Failed to load resource: the server responded with a status of 403 ()
+[HTTP 400] https://paloptic.com/space/api/cmd/dashboard_aggregate
+[https://paloptic.com/space/home] Failed to load resource: the server responded with a status of 400 ()
+[HTTP 400] https://paloptic.com/space/api/cmd/dashboard_aggregate
+[https://paloptic.com/space/home] Failed to load resource: the server responded with a status of 400 ()
+[HTTP 403] https://paloptic.com/space/api/cmd/finance_access_check
+[https://paloptic.com/space/projects/project-d75e9398-6ec4-46ef-8639-590dccc0c644/tasks] Failed to load resource: the server responded with a status of 403 ()
+[HTTP 400] https://paloptic.com/space/api/cmd/dashboard_aggregate
+[https://paloptic.com/space/projects/project-d75e9398-6ec4-46ef-8639-590dccc0c644/tasks] Failed to load resource: the server responded with a status of 400 ()
+[HTTP 403] https://paloptic.com/space/api/cmd/list_directory_feed
+[https://paloptic.com/space/projects/project-d75e9398-6ec4-46ef-8639-590dccc0c644/tasks] Failed to load resource: the server responded with a status of 403 ()
+LINK_ADD_FAILED: locator.click: Timeout 4000ms exceeded.
+Call log:
+  - waiting for getByRole('button', { name: /^add$|save|submit|confirm/i }).last()
+    - locator resolved to <button type="submit" class="primary composer-submit">Save</button>
+  - attempting click action
+    2 × waiting for element to be visible, enabled and stable
+      - element is visible, enabled and stable
+      - scrolling into view if needed
+      - done scrolling
+      - <div class="confirm-backdrop"></div> from <div aria-modal="true" role="alertdialog" class="confirm-root" aria-label="Delete task?">…</div> subtree intercepts pointer events
+    - retrying click action
+    - waiting 20ms
+    2 × waiting for element to be visible, enabled and stable
+      - element is visible, enabled and stable
+      - scrolling into view if needed
+      - done scrolling
+      - <div class="confirm-backdrop"></div> from <div aria-modal="true" role="alertdialog" class="confirm-root" aria-label="Delete task?">…</div> subtree intercepts pointer events
+    - retrying click action
+      - waiting 100ms
+    8 × waiting for element to be visible, enabled and stable
+      - element is visible, enabled and stable
+      - scrolling into view if needed
+      - done scrolling
+      - <div class="confirm-backdrop"></div> from <div aria-modal="true" role="alertdialog" class="confirm-root" aria-label="Delete task?">…</div> subtree intercepts pointer events
+    - retrying click action
+      - waiting 500ms
+
+[HTTP 403] https://paloptic.com/space/api/cmd/list_directory_feed
+[https://paloptic.com/space/projects/project-d75e9398-6ec4-46ef-8639-590dccc0c644/tasks] Failed to load resource: the server responded with a status of 403 ()
+[HTTP 400] https://paloptic.com/space/api/cmd/dashboard_aggregate
+[https://paloptic.com/space/projects/project-d75e9398-6ec4-46ef-8639-590dccc0c644/tasks] Failed to load resource: the server responded with a status of 400 ()
+[HTTP 403] https://paloptic.com/space/api/cmd/finance_access_check
+[https://paloptic.com/space/projects/project-d75e9398-6ec4-46ef-8639-590dccc0c644/tasks] Failed to load resource: the server responded with a status of 403 ()
+
+linkAdded=false
+linkPersists=false
