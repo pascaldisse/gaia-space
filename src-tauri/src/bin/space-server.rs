@@ -4960,6 +4960,11 @@ fn authorize_command(
             }
         }
         CommandPolicy::Session => {
+            // Space-Buy: approver/ordered_by/created_by are always the authenticated profile —
+            // the client never supplies (or forges) the actor.
+            if matches!(name, "save_buy_item" | "approve_buy_item" | "mark_buy_item_ordered") {
+                put_arg(body, "actor", json!(user.profile_id));
+            }
             if name == "create_message" {
                 let message = body
                     .get("message")
