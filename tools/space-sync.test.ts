@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { assertHost, parseArgs, parseManifest, sync, uniqueKey, type Options } from "./space-sync";
+import { assertHost, parseArgs, parseManifest, parseShoppingList, sync, syncBuy, uniqueKey, type Options } from "./space-sync";
 
 const PAT = "spat_SECRETSECRETSECRET";
 const BASE = "https://space.test/space";
@@ -165,4 +165,26 @@ const keys = s.st.projects.map((p: any) => p.key);
 expect(keys).toEqual(["AX", "BETA"]);
 expect(r.warnings.some((w) => w.includes("already taken"))).toBe(true);
 });
+});
+
+describe("space-buy seed", () => {
+  const LIST = "## Kitchen (Japan lane)\n- [ ] Katsuobushi block — honkarebushi grade · acceptance test: rings when tapped\n- [x] Done thing\n## Lab\n- [ ] Ferroelectric crystal sample — BaTiO3\nor similar, eBay/surplus-optics\n§ 2026-08-22 note\n";
+  test("parses open bullets only, joins continuation lines, keeps section in notes", () => {
+    const seeds = parseShoppingList(LIST);
+    expect(seeds.map((s) => s.title)).toEqual(["Katsuobushi block", "Ferroelectric crystal sample"]);
+    expect(seeds[0].notes).toContain("[Kitchen (Japan lane)]");
+    expect(seeds[1].vendor).toBe("eBay");
+  });
+  test("dry-run prints save_buy_item requests and sends no write", async () => {
+    const calls: string[] = [];
+    const f = (async (url: string) => { calls.push(url); return new Response(JSON.stringify({ ok: true, value: [{ title: "katsuobushi block" }], user: {} })); }) as unknown as typeof fetch;
+    const o = opts();
+    const r = await syncBuy(parseShoppingList(LIST), o, f);
+    expect(r.created).toEqual(["buy Ferroelectric crystal sample"]);
+    expect(r.skipped).toEqual(["buy Katsuobushi block"]);
+    expect(calls.every((u) => u.endsWith("/api/auth/me") || u.endsWith("/api/cmd/list_buy_items"))).toBe(true);
+    expect(o.lines.join("\n")).toContain("WRITE POST https://space.test/space/api/cmd/save_buy_item");
+    expect(o.lines.join("\n")).not.toContain(PAT);
+  });
+  test("--buy flag parses", () => expect(parseArgs(["--buy", "x.md"]).buy).toBe(true));
 });

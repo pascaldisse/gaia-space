@@ -4,6 +4,7 @@
 //
 // Usage:
 //   bun run tools/space-sync.ts manifest.yaml [--base-url https://gaia-systems.org/space] [--dry-run | --apply] [--update-docs] [--allow-host H]
+//   bun run tools/space-sync.ts --buy shopping-list.md [--dry-run | --apply]   # Space-Buy seed: open `- [ ]` bullets → wanted buy_items
 //   (host guard: base URL host must be gaia-systems.org unless --allow-host H)
 //   SPACE_PAT=spat_… bun run tools/space-sync.ts manifest.yaml --apply
 //
@@ -277,13 +278,62 @@ export async function sync(manifest: Manifest, o: Options, f: typeof fetch = fet
   return out;
 }
 
+// ───────────────────────── space-buy seed (shopping-list.md → buy_items) ─────────────────────────
+export type BuySeed = { title: string; url: string; vendor: string; notes: string };
+const BUY_VENDORS = ["eBay", "Kaufland", "DLsite", "Amazon", "Kleinanzeigen"];
+/** Open checklist bullets (`- [ ] …`) → wanted items. Section (`## …`) goes to notes; continuation lines join the bullet; `[x]` skipped. */
+export function parseShoppingList(text: string): BuySeed[] {
+const out: BuySeed[] = [];
+let section = "";
+let cur: string[] | null = null;
+const flush = () => {
+if (!cur) return;
+const raw = cur.join(" ").replace(/\s+/g, " ").trim();
+cur = null;
+const [head, ...rest] = raw.split(/\s+[·—]\s+/);
+const title = head.replace(/\s*→.*$/, "").trim();
+if (!title) return;
+const url = raw.match(/https?:\/\/[^\s)]+/)?.[0] ?? "";
+const vendor = BUY_VENDORS.find((v) => new RegExp(v, "i").test(raw)) ?? "";
+out.push({ title: title.slice(0, 200), url, vendor, notes: [section && `[${section}]`, ...rest, head.includes("→") ? head.slice(head.indexOf("→")) : ""].filter(Boolean).join(" · ").slice(0, 600) });
+};
+for (const line of text.split(/\r?\n/)) {
+const h = line.match(/^##\s+(.+)$/);
+const b = line.match(/^- \[( |x)\]\s+(.*)$/);
+if (h) { flush(); section = h[1].trim(); }
+else if (b) { flush(); if (b[1] === " ") cur = [b[2]]; }
+else if (cur && line.trim() && !/^(#|§|- )/.test(line)) cur.push(line.trim());
+else flush();
+}
+flush();
+return out;
+}
+type RBuy = { title: string };
+/** Dry-run by default (prints exact requests). Server forces status=wanted on create; re-runs skip titles already present. */
+export async function syncBuy(seeds: BuySeed[], o: Options, f: typeof fetch = fetch): Promise<Summary> {
+assertHost(o.baseUrl, o.allowHosts);
+const c = new Client(o, f);
+const out: Summary = { created: [], skipped: [], drift: [], warnings: [] };
+o.log(`# space-sync --buy ${o.apply ? "APPLY" : "DRY-RUN"} → ${o.baseUrl}`);
+await c.me();
+const have = new Set(((await c.cmd<RBuy[]>("list_buy_items", { status: null }, "read")) ?? []).map((i) => i.title.trim().toLowerCase()));
+for (const s of seeds) {
+if (have.has(s.title.toLowerCase())) { out.skipped.push(`buy ${s.title}`); continue; }
+have.add(s.title.toLowerCase());
+await c.cmd("save_buy_item", { item: { id: "", title: s.title, url: s.url, vendor: s.vendor, price_cents: null, currency: "EUR", qty: 1, notes: s.notes } }, "write");
+out.created.push(`buy ${s.title}`);
+}
+o.log(`\n# summary: ${out.created.length} wanted items to create, ${out.skipped.length} already present`);
+return out;
+}
 // ───────────────────────── cli ─────────────────────────
 
 export function parseArgs(argv: string[]) {
-  const a = { file: "", apply: false, dry: false, updateDocs: false, allowHosts: [] as string[], baseUrl: process.env.SPACE_BASE_URL ?? DEFAULT_BASE_URL };
+  const a = { file: "", buy: false, apply: false, dry: false, updateDocs: false, allowHosts: [] as string[], baseUrl: process.env.SPACE_BASE_URL ?? DEFAULT_BASE_URL };
   for (let i = 0; i < argv.length; i++) {
     const v = argv[i];
     if (v === "--apply") a.apply = true;
+else if (v === "--buy") a.buy = true;
     else if (v === "--dry-run") a.dry = true;
     else if (v === "--update-docs") a.updateDocs = true;
     else if (v === "--base-url") a.baseUrl = argv[++i] ?? "";
@@ -303,6 +353,10 @@ if (import.meta.main) {
     const pat = process.env.SPACE_PAT?.trim() || undefined;
     if (a.apply && !pat) throw new Error("--apply requires env SPACE_PAT (spat_…)");
     const file = resolve(a.file);
+    if (a.buy) {
+      await syncBuy(parseShoppingList(readFileSync(file, "utf8")), { apply: a.apply, baseUrl: a.baseUrl, pat, updateDocs: false, allowHosts: a.allowHosts, baseDir: dirname(file), log: (l) => console.log(l) });
+      process.exit(0);
+    }
     const manifest = parseManifest(readFileSync(file, "utf8"), file);
     const s = await sync(manifest, { apply: a.apply, baseUrl: a.baseUrl, pat, updateDocs: a.updateDocs, allowHosts: a.allowHosts, baseDir: dirname(file), log: (l) => console.log(l) });
     process.exit(s.drift.length && a.apply ? 3 : 0);

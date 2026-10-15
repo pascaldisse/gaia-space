@@ -1,0 +1,47 @@
+# space-sync --buy DRY-RUN → https://gaia-systems.org/space
+READ  GET https://gaia-systems.org/space/api/auth/me   (skipped: offline dry-run)
+      Authorization: Bearer <SPACE_PAT>
+READ  POST https://gaia-systems.org/space/api/cmd/list_buy_items   (skipped: offline dry-run, remote assumed empty)
+      Authorization: Bearer <SPACE_PAT>
+      {"status":null}
+WRITE POST https://gaia-systems.org/space/api/cmd/save_buy_item   (dry-run: not sent)
+      Authorization: Bearer <SPACE_PAT>
+      {"item":{"id":"","title":"Katsuobushi block","url":"","vendor":"","price_cents":null,"currency":"EUR","qty":1,"notes":"[Kitchen (Japan lane)] · honkarebushi grade · acceptance test: rings when tapped"}}
+WRITE POST https://gaia-systems.org/space/api/cmd/save_buy_item   (dry-run: not sent)
+      Authorization: Bearer <SPACE_PAT>
+      {"item":{"id":"","title":"Kezuriki shaving box (drawer type)","url":"","vendor":"","price_cents":null,"currency":"EUR","qty":1,"notes":"[Kitchen (Japan lane)]"}}
+WRITE POST https://gaia-systems.org/space/api/cmd/save_buy_item   (dry-run: not sent)
+      Authorization: Bearer <SPACE_PAT>
+      {"item":{"id":"","title":"Kombu dashi grade","url":"","vendor":"","price_cents":null,"currency":"EUR","qty":1,"notes":"[Kitchen (Japan lane)] · → first self-made dashi"}}
+WRITE POST https://gaia-systems.org/space/api/cmd/save_buy_item   (dry-run: not sent)
+      Authorization: Bearer <SPACE_PAT>
+      {"item":{"id":"","title":"House okonomiyaki sauce: worcester + oyster + ketchup + honey + spoon red miso (no Otafuku at local shop","url":"","vendor":"","price_cents":null,"currency":"EUR","qty":1,"notes":"[Kitchen (Japan lane)] · → make own)"}}
+WRITE POST https://gaia-systems.org/space/api/cmd/save_buy_item   (dry-run: not sent)
+      Authorization: Bearer <SPACE_PAT>
+      {"item":{"id":"","title":"Okonomiyaki night: cabbage, aonori","url":"","vendor":"","price_cents":null,"currency":"EUR","qty":1,"notes":"[Kitchen (Japan lane)]"}}
+WRITE POST https://gaia-systems.org/space/api/cmd/save_buy_item   (dry-run: not sent)
+      Authorization: Bearer <SPACE_PAT>
+      {"item":{"id":"","title":"Physarum polycephalum (\"alien egg\", eBay) + RO water + oats","url":"","vendor":"eBay","price_cents":null,"currency":"EUR","qty":1,"notes":"[Creatures (balcony biosphere)]"}}
+WRITE POST https://gaia-systems.org/space/api/cmd/save_buy_item   (dry-run: not sent)
+      Authorization: Bearer <SPACE_PAT>
+      {"item":{"id":"","title":"Triops \"dinosaur eggs\" = Urkrebse restoration (childhood menagerie gen 2)","url":"","vendor":"","price_cents":null,"currency":"EUR","qty":1,"notes":"[Creatures (balcony biosphere)]"}}
+WRITE POST https://gaia-systems.org/space/api/cmd/save_buy_item   (dry-run: not sent)
+      Authorization: Bearer <SPACE_PAT>
+      {"item":{"id":"","title":"Ferroelectric crystal sample","url":"","vendor":"eBay","price_cents":null,"currency":"EUR","qty":1,"notes":"[Lab (matter lane)] · BaTiO3 (barium titanate) single crystal or similar, eBay/surplus-optics · ref: woven-matter discovery (Sabine 08-20, youtu.be/NzQQXQK_Ngk) · weave forms @17°C on cooling · stretch goal: polarized-light viewing (2 polarizer film sheets) + green laser pointer for rewrite experiments"}}
+WRITE POST https://gaia-systems.org/space/api/cmd/save_buy_item   (dry-run: not sent)
+      Authorization: Bearer <SPACE_PAT>
+      {"item":{"id":"","title":"Oyster mushroom grow kit/spawn (Pleurotus ostreatus)","url":"","vendor":"eBay","price_cents":null,"currency":"EUR","qty":1,"notes":"[Lab (matter lane)] · easiest, proven on PE/PU (Yale/Livin Studio 'Fungi Mutarium'); fruit on plastic+substrate, anise note when eaten · Berlin: Pilzzucht-Shop / eBay Körnerbrut"}}
+WRITE POST https://gaia-systems.org/space/api/cmd/save_buy_item   (dry-run: not sent)
+      Authorization: Bearer <SPACE_PAT>
+      {"item":{"id":"","title":"Pestalotiopsis microspora (Amazon PU-eater, anaerobic ok)","url":"","vendor":"Amazon","price_cents":null,"currency":"EUR","qty":1,"notes":"[Lab (matter lane)] · culture via DSMZ/CBS/ATCC strain order (research supplier, not pet shop); UNVERIFIED hobby availability"}}
+WRITE POST https://gaia-systems.org/space/api/cmd/save_buy_item   (dry-run: not sent)
+      Authorization: Bearer <SPACE_PAT>
+      {"item":{"id":"","title":"Arctic/alpine 15 °C strains Neodevriesia","url":"","vendor":"","price_cents":null,"currency":"EUR","qty":1,"notes":"[Lab (matter lane)] · Lachnellula (WSL 2023) · lab-only, DSMZ check"}}
+WRITE POST https://gaia-systems.org/space/api/cmd/save_buy_item   (dry-run: not sent)
+      Authorization: Bearer <SPACE_PAT>
+      {"item":{"id":"","title":"Aspergillus tubingensis (landfill PU, 2017)","url":"","vendor":"","price_cents":null,"currency":"EUR","qty":1,"notes":"[Lab (matter lane)] · DSMZ; ⚠ Aspergillus = spore caution indoors"}}
+WRITE POST https://gaia-systems.org/space/api/cmd/save_buy_item   (dry-run: not sent)
+      Authorization: Bearer <SPACE_PAT>
+      {"item":{"id":"","title":"Superworm larvae (Zophobas morio) + styrofoam","url":"","vendor":"","price_cents":null,"currency":"EUR","qty":1,"notes":"[Lab (matter lane)] · pet-shop, cheap, pairs w/ Triops/Physarum lane Setup: sealed grow bag/box, UV pre-treat PP caps (Australian method), 15–30 °C depending on strain. Sits next to Physarum + Triops."}}
+
+# summary: 13 wanted items to create, 0 already present
