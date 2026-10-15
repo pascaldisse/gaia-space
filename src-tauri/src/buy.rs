@@ -317,7 +317,9 @@ pub fn delete_buy_vendor(name: String) -> Result<()> {
 mod tests {
     use super::*;
     fn conn() -> Connection {
-        db::open_in_memory().expect("db")
+        let c = db::open_in_memory().expect("db");
+        db::migrate(&c).expect("migrate");
+        c
     }
     fn item(title: &str) -> BuyItem {
         serde_json::from_value(serde_json::json!({"title": title, "vendor": "Amazon", "status": "ordered", "approver": "forged"})).unwrap()
