@@ -9,7 +9,7 @@ use axum::{
     Json, Router,
 };
 use gaia_space_lib::{
-    app_rights, applications, blogs, budget, calendar_feeds, calls, channel_feeds, channel_notes,
+    app_rights, applications, blogs, budget, buy, calendar_feeds, calls, channel_feeds, channel_notes,
     chat, chatbot, crm, db, devenv, documents, events, git_hosting, issues, leads, meetings, oauth,
     organization, package_registry, payload_dispatch, personal, pipelines, platform, project_repo, review, vault,
 };
@@ -3146,6 +3146,8 @@ fn command_policy(name: &str) -> Option<CommandPolicy> {
     Some(match name {
         "create_hosted_repo" | "delete_hosted_repo" | "list_hosted_repos" | "hosted_repo_clone_url" => CommandPolicy::Session,
         "vault_invite" => CommandPolicy::Session,
+// Space-Buy (docs/space-buy): any authed session/PAT; approver/ordered_by come from the bound `actor`.
+"list_buy_items" | "save_buy_item" | "approve_buy_item" | "mark_buy_item_ordered" | "set_buy_item_status" | "delete_buy_item" | "list_buy_vendors" | "save_buy_vendor" | "delete_buy_vendor" => CommandPolicy::Session,
         "crm_snapshot" | "crm_put_records" | "crm_purge_records" => CommandPolicy::CrmAccess,
 "create_project" => CommandPolicy::ProjectCreate,
         "update_project" => CommandPolicy::ProjectWrite,
@@ -6272,6 +6274,15 @@ async fn cmd(
     "reserve_meeting_room" => meetings::reserve_meeting_room(meeting_id: String, room_id: String),
     "list_meetings" => meetings::list_meetings_scoped(profile_id: String),
     "list_locations" => platform::list_locations(),
+"list_buy_items" => buy::list_buy_items(status: Option<String>),
+"save_buy_item" => buy::save_buy_item(item: buy::BuyItem, actor: Option<String>),
+"approve_buy_item" => buy::approve_buy_item(id: String, actor: Option<String>),
+"mark_buy_item_ordered" => buy::mark_buy_item_ordered(id: String, order_ref: String, actor: Option<String>),
+"set_buy_item_status" => buy::set_buy_item_status(id: String, status: String),
+"delete_buy_item" => buy::delete_buy_item(id: String),
+"list_buy_vendors" => buy::list_buy_vendors(),
+"save_buy_vendor" => buy::save_buy_vendor(vendor: buy::BuyVendor),
+"delete_buy_vendor" => buy::delete_buy_vendor(name: String),
     "list_leads" => leads::list_leads(),
     "delete_lead" => leads::delete_lead(id: String),
     "save_location" => platform::save_location(location: platform::Location),

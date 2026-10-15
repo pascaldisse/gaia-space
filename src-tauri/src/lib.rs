@@ -19,6 +19,8 @@ pub mod blogs;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod budget;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
+pub mod buy;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod calls;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod channel_feeds;
@@ -440,6 +442,15 @@ pub fn run() {
             budget::budget_statement,
             budget::budget_add_expense,
             budget::budget_export_statement,
+            buy::list_buy_items,
+            buy::save_buy_item,
+            buy::approve_buy_item,
+            buy::mark_buy_item_ordered,
+            buy::set_buy_item_status,
+            buy::delete_buy_item,
+            buy::list_buy_vendors,
+            buy::save_buy_vendor,
+            buy::delete_buy_vendor,
             vault::vault_invite,
             documents::list_documents,
             documents::get_document,

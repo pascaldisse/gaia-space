@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 148;
+pub const SCHEMA_VERSION: i64 = 149;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -1129,6 +1129,11 @@ BEGIN SELECT RAISE(ABORT, 'document source anchor must be paired'); END;")?;
     if version < 148 && table_exists(&tx, "projects")? {
         add_column_if_missing(&tx, "projects", "repo_path", "TEXT")?;
     }
+    // V149: Space-Buy (docs/space-buy/DESIGN.md) — agent-proposed wants, human-approved, with a vendor
+    // table that flags bot-hostile shops. Additive, replay-safe; Amazon seeded agent_allowed=0.
+    if version < 149 {
+        tx.execute_batch(SCHEMA_V149)?;
+    }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()
 }
@@ -1394,6 +1399,34 @@ CREATE TABLE IF NOT EXISTS lfs_file_locks (
  created_at INTEGER NOT NULL DEFAULT (unixepoch()),
  UNIQUE(repo_id, path)
 );
+"#;
+pub(crate) const SCHEMA_V149: &str = r#"
+CREATE TABLE IF NOT EXISTS buy_vendors (
+ name TEXT PRIMARY KEY,
+ kind TEXT NOT NULL CHECK(kind IN ('api','browser','manual')),
+ agent_allowed INTEGER NOT NULL DEFAULT 0 CHECK(agent_allowed IN (0,1)),
+ notes TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS buy_items (
+ id TEXT PRIMARY KEY,
+ project_id TEXT REFERENCES projects(id) ON DELETE SET NULL,
+ title TEXT NOT NULL,
+ url TEXT NOT NULL DEFAULT '',
+ vendor TEXT NOT NULL DEFAULT '',
+ price_cents INTEGER CHECK(price_cents IS NULL OR price_cents >= 0),
+ currency TEXT NOT NULL DEFAULT 'EUR',
+ qty INTEGER NOT NULL DEFAULT 1 CHECK(qty >= 1),
+ status TEXT NOT NULL DEFAULT 'wanted' CHECK(status IN ('wanted','approved','ordered','delivered','cancelled')),
+ notes TEXT NOT NULL DEFAULT '',
+ approver TEXT,
+ ordered_by TEXT,
+ order_ref TEXT,
+ created_by TEXT,
+ created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+ updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+);
+CREATE INDEX IF NOT EXISTS buy_items_status ON buy_items(status, created_at);
+INSERT OR IGNORE INTO buy_vendors(name,kind,agent_allowed,notes) VALUES('Amazon','manual',0,'blocks agent checkout — human orders via deep link');
 "#;
 pub(crate) const SCHEMA_V141: &str = r#"
 CREATE TABLE IF NOT EXISTS hosted_repositories (
