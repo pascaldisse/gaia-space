@@ -1,0 +1,65 @@
+# bun run tools/space-sync.ts tools/manifests/2026-10-15-splitscreen-refresh.yaml [--apply]  (SPACE_PAT from ~/.gaia/secrets/space-sync.pat)
+# status tags in task titles: [DONE] [IN-PROGRESS] [BLOCKED-Pascal]. Facts = git -C ~/projects/<repo> log, 2026-10-15.
+# live gaia-systems.org/space = 500 on 2026-10-15 → do NOT --apply remote.
+# note: cited hashes are the ones in the brief; some are ancestors of current HEAD (gta-reversed HEAD da2138e6, path-of-neo-gwe HEAD 831f534, worms-gwe HEAD 158f4e8).
+projects:
+- name: halo-ce
+  description: "Halo CE → Mac (OpenCE). br mac-port 655c11d0 · 2P co-op split WORKING on Mac"
+  tasks:
+  - {title: "[DONE] 2P co-op splitscreen on Mac (655c11d0)", category: dev, notes: "git log -1 halo-ce @ mac-port = 655c11d0 'docs(mac): splitscreen reached - a10 two viewports via CO-OP CAMPAIGN + P2 keyboard stub; hold.sh' · proof docs/mac/splitscreen.png · docs/mac/SPLITSCREEN.md"}
+  - {title: "[IN-PROGRESS] P2 keyboard stub → real P2 input", category: dev, notes: "655c11d0 · P2 input is a keyboard stub only"}
+- name: conker
+  description: "conker-wt/recomp-r1 5405d21 (br r2e/flip-stall) · R15 done · R16 vertex stride queued"
+  tasks:
+  - {title: "[DONE] R15: legal → New Profile dialog centred (5405d21)", category: dev, notes: "git log -1 conker-wt/recomp-r1 = 5405d21 'r15(2+3): doc, proof frames, logs; ground-tex cause named (inline 12-dw vertex vs a0-only fmt); Create = New Profile keyboard'"}
+  - {title: "[IN-PROGRESS] R16: vertex stride (queued)", category: dev, notes: "cause named in 5405d21: inline 12-dw vertex vs a0-only fmt → ground textures · queued, not started"}
+- name: gta-sa
+  description: "gta-reversed splitscreen/step4 · Separate_Cars reversed from PS2 ELF · runtime blocked (no SA exe)"
+  tasks:
+  - {title: "[DONE] CCam::Process_Cam_TwoPlayer_Separate_Cars reversed from PS2 ELF (6858371e)", category: dev, notes: "git -C gta-reversed log: 6858371e 'splitscreen(step4-d): ...Separate_Cars reversed from PS2 ELF 0x212c60 (clang22 -fsyntax-only +/- GTASA_SPLITSCREEN: baseline-equal, mutation-tested)' · branch splitscreen/step4 · current HEAD da2138e6 (step4-b Process_Cam_TwoPlayer, clang gate NOT RUN => UNVERIFIED)"}
+  - {title: "[IN-PROGRESS] TwoPlayer / InCarAndShooting reversal", category: dev, notes: "gta-reversed splitscreen/step4 · da2138e6 reversed Process_Cam_TwoPlayer 0x210ee0; InCarAndShooting still open"}
+  - {title: "[BLOCKED-Pascal] SA exe for runtime test of splitscreen", category: decide, notes: "runtime blocked: no GTA SA exe on box · static reversal + clang -fsyntax-only only until supplied"}
+- name: darkness-recomp
+  description: "The Darkness recomp. br mac-split 7613839 · host split = 2 viewports of the same scene"
+  tasks:
+  - {title: "[DONE] Host split: 2 viewports, same scene (7613839)", category: dev, notes: "git log -1 darkness-recomp @ mac-split = 7613839 'mac-split: P2 pan gate (prompt draws), DARKNESS_SPLIT_SCENE experiment, proof png, docs/SPLITSCREEN.md (real-2P notes)'"}
+  - {title: "[IN-PROGRESS] P2 view-matrix + cutscene gate", category: dev, notes: "7613839 · P2 needs own view matrix · cutscenes must gate split off"}
+- name: path-of-neo-gwe
+  description: "Path of Neo → GWE. br lane/split · Trinity as P2 in progress"
+  tasks:
+  - {title: "[IN-PROGRESS] Trinity P2 splitscreen (8e837c7)", category: dev, notes: "git -C path-of-neo-gwe: 8e837c7 'SPLIT atom1: recon doc' → HEAD 831f534 'SPLIT atom2: play.sh --split / SPLIT=1 + split.test (bun 197/0)' · br lane/split"}
+- name: furon
+  description: "NEW. ~/projects/furon · X360 title → Mac via ReXGlue. main af62133 · ReXGlue builds mac-arm64 · needs X360 NTSC-U ISO · shipped 2P split"
+  repo: {name: furon, description: "furon ReXGlue mac-arm64 recomp"}
+  tasks:
+  - {title: "[DONE] ReXGlue builds mac-arm64 (af62133)", category: dev, notes: "git log -1 furon = af62133 'atoms2-4: ReDAHM census, host-only mac attempt (patch), MAC-PORT.md' · shipped 2P split"}
+  - {title: "[BLOCKED-Pascal] X360 NTSC-U ISO for furon", category: decide, notes: "needed to run/extract beyond host-only attempt · af62133 docs/MAC-PORT.md"}
+- name: mercenaries
+  description: "NEW. ~/projects/mercenaries · recomp census. main 832002a · needs Xbox USA ISO"
+  repo: {name: mercenaries, description: "mercenaries recomp census + MAC-PORT"}
+  tasks:
+  - {title: "[DONE] Recomp census + MAC-PORT doc (832002a)", category: dev, notes: "git log -1 mercenaries = 832002a 'atom4: docs/MAC-PORT.md'"}
+  - {title: "[BLOCKED-Pascal] Xbox USA ISO for mercenaries", category: decide, notes: "PS2 discs downloading = PCSX2 only, not recomp-usable · need Xbox USA image"}
+  - {title: "[IN-PROGRESS] Multi-title recomp toolchain lane", category: dev, notes: "lane out 2026-10-15"}
+- name: worms-gwe
+  description: "Worms → GWE. Rumble link dead (UE4, not Unity) · realtime core lane out"
+  tasks:
+  - {title: "[DONE] Rumble recon: link dead, UE4 (a5a06d5)", category: dev, notes: "git -C worms-gwe: a5a06d5 'docs: trim' (056e694 rumble-splitscreen recon: UE4 not Unity; UE4SS lane) · HEAD 158f4e8 rt3: tests + STATUS"}
+  - {title: "[IN-PROGRESS] Realtime core lane (lane/realtime-core)", category: dev, notes: "rt1-rt3 committed (ws-sim, ws-world GWE ext, tests + STATUS) · lane out"}
+- name: hexe
+  description: "hexe main 7332228 · parity FINISHED · zero Houdini dependency"
+  tasks:
+  - {title: "[DONE] Parity finished: 161 MATCH / 0 TOPO-DIFF (7332228)", category: dev, notes: "git log -1 hexe = 7332228 'parity: MATCH(cyclic) prim comparer (rotation-invariant start vertex); sop-boolean TOPO-DIFF -> MATCH, gate 161/12/0/1' · zero Houdini dep"}
+- name: nari-brain
+  description: "nari-brain br s14c/mlx-embed bf12b82 · S14c engram done · S15 fly-MB out"
+  tasks:
+  - {title: "[DONE] S14c: hippocampus engram recall (bf12b82)", category: dev, notes: "git log -1 nari-brain = bf12b82 'S14c-B: hippocampus engram recall (remember/recall, npz), /say recall_top3 + mouth remembered:, proofs, docs'"}
+  - {title: "[IN-PROGRESS] S15: fly-MB", category: dev, notes: "lane out 2026-10-15"}
+- name: mind-atlas
+  description: "mind-atlas main 67f0e22 · thinking-suppression finding"
+  tasks:
+  - {title: "[DONE] Finding: thinking-suppression (67f0e22)", category: dev, notes: "git log -1 mind-atlas = 67f0e22 'docs/findings: thinking-suppression (jailbreak/DAN = register+reach), repo-grounded, OPEN where no data'"}
+- name: gaia-space
+  description: "gaia-space itself. live gaia-systems.org/space = 500 on 2026-10-15"
+  tasks:
+  - {title: "[BLOCKED-Pascal] IONOS SSH user for live gaia-systems.org (500)", category: decide, notes: "live server returns 500 · need IONOS SSH user to inspect/fix · do NOT --apply remote until fixed"}
