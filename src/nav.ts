@@ -23,7 +23,7 @@ export const NAV_GROUPS: NavGroup[] = [
   // Packages stay routable (deep links, Go to) but is not a tab.
   { id: "projects", label: "Projects", icon: "layers", views: ["Projects", "Development", "Repos", "Code Reviews", "Pipelines", "Dev Environments"] },
   { id: "calendar", label: "Calendar", icon: "calendar-nav", views: ["Calendar", "Meetings"] },
-  { id: "knowledge", label: "Knowledge", icon: "book-nav", views: ["Documents", "Blogs", "Passwords"] },
+  { id: "knowledge", label: "Knowledge", icon: "book-nav", views: ["Documents", "Blogs", "Passwords", "Buy"] },
   { id: "inbox", label: "Inbox", icon: "inbox", views: ["Inbox", "Chat"] },
   { id: "timeoff", label: "Time off", icon: "clock-nav", views: ["Absences"] },
   // Leads (landing-page contact submissions, administrator-only) is an ORGANISATION
@@ -152,6 +152,7 @@ const MODE_OF_VIEW: Record<string, RailMode> = {
   Documents: "library",
   Blogs: "library",
   Passwords: "passwords",
+  Buy: "library",
   Members: "home",
   Development: "development",
   Repos: "development",
