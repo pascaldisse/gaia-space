@@ -12,6 +12,7 @@ import { Icon } from "../components/Icon";
 import PageHeader, { Chip } from "../components/PageHeader";
 import ContentHead from "../components/ContentHead";
 import "./devCards.css";
+import HistoryOps from "./HistoryOps";
 import { GraphRow, when, type Ref } from "../components/CommitGraph";
 import { assignLanes, type GraphCommit, type GraphLayout } from "../gitGraph";
 
@@ -256,8 +257,11 @@ export default function App() {
       run("Stashing\u2026", async () => { await api.repoStashSave(p); refetchAll(); });
       return;
     }
-    const index = Number(value.slice("pop:".length));
-    run("Popping stash\u2026", async () => { await api.repoStashPop(p, index); refetchAll(); });
+    const [verb, idx] = value.split(":");
+    const index = Number(idx);
+    if (verb === "apply") run("Applying stash\u2026", async () => { await api.repoStashApply(p, index); refetchAll(); });
+    else if (verb === "drop") run("Dropping stash\u2026", async () => { await api.repoStashDrop(p, index); refetchAll(); });
+    else run("Popping stash\u2026", async () => { await api.repoStashPop(p, index); refetchAll(); });
   }
   async function openInFinder() {
     const p = active();
@@ -567,7 +571,11 @@ export default function App() {
                     {(s) => (
                       <li class="stash-row">
                         <span>stash@{"{"}{s.index}{"}"}: {s.message}</span>
-                        <GhostPill onClick={() => onStashAction(`pop:${s.index}`)}>Pop</GhostPill>
+                        <span class="stash-actions">
+                          <GhostPill onClick={() => onStashAction(`apply:${s.index}`)}>Apply</GhostPill>
+                          <GhostPill onClick={() => onStashAction(`pop:${s.index}`)}>Pop</GhostPill>
+                          <GhostPill onClick={() => onStashAction(`drop:${s.index}`)}>Drop</GhostPill>
+                        </span>
                       </li>
                     )}
                   </For>
@@ -740,6 +748,9 @@ export default function App() {
                             )}
                           </For>
                         </ul>
+                        <Show when={active()}>
+                          <HistoryOps path={active()!} commit={c()} onChanged={refetchAll} />
+                        </Show>
                       </div>
                     )}
                   </Show>

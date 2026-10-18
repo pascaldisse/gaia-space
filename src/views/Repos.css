@@ -454,3 +454,5 @@
    row beneath it. The row then sat glued to the subline. Restated here, for this root
    only, with the same token the shared rule uses. Structure, unscoped. */
 .repos-view > .page-header:has(+ .page-actionbar) { padding-bottom: var(--view-head-gap, 22px); }
+
+.ref-list .stash-actions { display: inline-flex; gap: 4px; }
