@@ -36,6 +36,8 @@ export type Branch = {
   target: string | null;
 };
 export type StatusEntry = { path: string; status: string; staged: boolean };
+export type ChangeEntry = { path: string; status: string };
+export type Changes = { staged: ChangeEntry[]; unstaged: ChangeEntry[]; untracked: ChangeEntry[] };
 export type Tag = { name: string; target: string };
 export type RemoteInfo = { name: string; url: string };
 export type StashEntry = { index: number; message: string };
@@ -68,15 +70,27 @@ export const api = {
     invoke<string>("repo_diff", { path, id: id ?? null }),
   repoStage: (path: string, files: string[]) =>
     invoke<void>("repo_stage", { path, files }),
-  repoCommit: (path: string, message: string) =>
-    invoke<string>("repo_commit", { path, message }),
+  repoCommit: (path: string, message: string, amend = false) =>
+    invoke<string>("repo_commit", { path, message, amend }),
+  repoChanges: (path: string) => invoke<Changes>("repo_changes", { path }),
+  repoFileDiff: (path: string, file: string, staged = false) =>
+    invoke<string>("repo_file_diff", { path, file, staged }),
+  repoStageHunk: (path: string, file: string, hunk = 0) =>
+    invoke<void>("repo_stage_hunk", { path, file, hunk }),
+  repoUnstageHunk: (path: string, file: string, hunk = 0) =>
+    invoke<void>("repo_unstage_hunk", { path, file, hunk }),
+  repoDiscard: (path: string, files: string[]) =>
+    invoke<void>("repo_discard", { path, files }),
+  repoBranchDelete: (path: string, name: string, force = false) =>
+    invoke<void>("repo_branch_delete", { path, name, force }),
   repoFetch: (path: string, remote?: string) =>
     invoke<void>("repo_fetch", { path, remote: remote ?? null }),
-  repoPull: (path: string) => invoke<string>("repo_pull", { path }),
+  repoPull: (path: string, remote?: string) =>
+    invoke<string>("repo_pull", { path, remote: remote ?? null }),
   repoPush: (path: string, remote?: string, branch?: string) =>
     invoke<void>("repo_push", { path, remote: remote ?? null, branch: branch ?? null }),
-  repoCheckout: (path: string, branch: string) =>
-    invoke<void>("repo_checkout", { path, branch }),
+  repoCheckout: (path: string, branch: string, create = false) =>
+    invoke<void>("repo_checkout", { path, branch, create }),
   repoBranchCreate: (path: string, name: string, from?: string) =>
     invoke<void>("repo_branch_create", { path, name, from: from ?? null }),
   repoTags: (path: string) => invoke<Tag[]>("repo_tags", { path }),

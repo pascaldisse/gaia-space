@@ -1,7 +1,7 @@
 import { createResource, createSignal, createMemo, createEffect, For, Show, type JSX } from "solid-js";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
-import { api, type Commit, type RepoRef } from "../api";
+import { api, type ChangeEntry, type Commit, type RepoRef } from "../api";
 import { orderRefs } from "../gitGraph";
 import { Diff } from "../Diff";
 import { Resizer, paneWidth } from "../components/Resizer";
@@ -98,12 +98,60 @@ function FileTree(props: { path: string | null; commitId: string | null }) {
   );
 }
 
+type Side = "staged" | "unstaged" | "untracked";
+/** One file's diff split into hunks, each with its own stage/unstage button.
+ *  Hunk numbers sent to Rust are the 0-based order of `@@` headers in this text. */
+function HunkView(props: { path: string; file: string; side: Side; rev: number; onChanged: () => void; onError: (e: unknown) => void }) {
+  const key = () => ({ p: props.path, f: props.file, s: props.side, rev: props.rev });
+  const [text] = createResource(key, (k) => api.repoFileDiff(k.p, k.f, k.s === "staged"));
+  const hunks = createMemo(() => {
+    const out: { header: string; lines: string[] }[] = [];
+    for (const l of (text() ?? "").split("\n")) {
+      if (l.startsWith("@@")) out.push({ header: l, lines: [] });
+      else if (out.length) out[out.length - 1].lines.push(l);
+    }
+    for (const h of out) while (h.lines.length && h.lines[h.lines.length - 1] === "") h.lines.pop();
+    return out;
+  });
+  async function act(i: number) {
+    try {
+      if (props.side === "staged") await api.repoUnstageHunk(props.path, props.file, i);
+      else await api.repoStageHunk(props.path, props.file, i);
+      props.onChanged();
+    } catch (e) {
+      props.onError(e);
+    }
+  }
+  return (
+    <div class="hunk-view" data-testid="hunk-view">
+      <div class="hunk-file">{props.file} <span class="hunk-side">{props.side}</span></div>
+      <Show when={!text.loading} fallback={<p class="hint pad">Loading diff…</p>}>
+        <For each={hunks()} fallback={<p class="hint pad">No textual changes (binary or mode-only).</p>}>
+          {(h, i) => (
+            <div class="hunk">
+              <div class="hunk-head">
+                <span class="hunk-range">{h.header}</span>
+                <GhostPill onClick={() => act(i())}>{props.side === "staged" ? "Unstage hunk" : props.side === "untracked" ? "Stage file" : "Stage hunk"}</GhostPill>
+              </div>
+              <pre class="hunk-lines">
+                <For each={h.lines}>{(l) => <div classList={{ "hl-add": l.startsWith("+"), "hl-del": l.startsWith("-") }}>{l || " "}</div>}</For>
+              </pre>
+            </div>
+          )}
+        </For>
+      </Show>
+    </div>
+  );
+}
 export default function App() {
   const [repos, { mutate: setRepos }] = createResource<RepoRef[]>(() => api.repoList());
   const [active, setActive] = createSignal<string | null>(null);
   const [selected, setSelected] = createSignal<Commit | "working" | null>(null);
   const [message, setMessage] = createSignal("");
   const [error, setError] = createSignal<string | null>(null);
+  const [notice, setNotice] = createSignal<string | null>(null);
+  const [amend, setAmend] = createSignal(false);
+  const [newBranch, setNewBranch] = createSignal("");
   const [sideW, setSideW] = paneWidth("repos.side.width", 240);
   const [centerW, setCenterW] = paneWidth("repos.center.width", 480);
 
@@ -116,7 +164,17 @@ export default function App() {
   const [info, { refetch: refetchInfo }] = createResource(active, (p) => api.repoInfo(p));
   const [log, { refetch: refetchLog }] = createResource(active, (p) => api.repoLog(p));
   const [branches, { refetch: refetchBranches }] = createResource(active, (p) => api.repoBranches(p));
-  const [status, { refetch: refetchStatus }] = createResource(active, (p) => api.repoStatus(p));
+  const [changes, { refetch: refetchChanges }] = createResource(active, (p) => api.repoChanges(p));
+  const [rev, setRev] = createSignal(0);
+  const changeCount = createMemo(() => {
+    const c = changes();
+    return c ? new Set([...c.staged, ...c.unstaged, ...c.untracked].map((f) => f.path)).size : 0;
+  });
+  /** Every working-copy mutation ends here: lists + open hunk view re-read from Rust. */
+  function changed() {
+    setRev((n) => n + 1);
+    refetchChanges();
+  }
   const [tags, { refetch: refetchTags }] = createResource(active, (p) => api.repoTags(p));
   const [stashes, { refetch: refetchStashes }] = createResource(active, (p) => api.repoStashList(p));
   const [worktrees, { refetch: refetchWorktrees }] = createResource(active, (p) => api.repoWorktrees(p));
@@ -161,7 +219,7 @@ export default function App() {
     refetchLog();
     if (leftView() === "graph") refetchGraph();
     refetchBranches();
-    refetchStatus();
+    refetchChanges();
     refetchTags();
     refetchStashes();
     refetchWorktrees();
@@ -196,6 +254,12 @@ export default function App() {
   // ---------- detail pane tabs ----------
   const [tab, setTab] = createSignal<"commit" | "changes" | "tree">("commit");
   const [focusFile, setFocusFile] = createSignal<string | null>(null);
+  const [focusSide, setFocusSide] = createSignal<Side>("unstaged");
+  function focus(f: ChangeEntry, side: Side) {
+    setFocusFile(f.path);
+    setFocusSide(side);
+    setTab("changes");
+  }
   // "Commit" has no meaning for the working tree — land on Changes instead of a
   // tab that would just be blank.
   createEffect(() => {
@@ -238,15 +302,15 @@ export default function App() {
   }
   function doFetch() {
     const p = active();
-    if (p) run("Fetching\u2026", async () => { await api.repoFetch(p); refetchAll(); });
+    if (p) run("Fetching\u2026", async () => { await api.repoFetch(p); setNotice("Fetched."); refetchAll(); });
   }
   function doPull() {
     const p = active();
-    if (p) run("Pulling\u2026", async () => { await api.repoPull(p); refetchAll(); });
+    if (p) run("Pulling\u2026", async () => { setNotice(await api.repoPull(p)); refetchAll(); });
   }
   function doPush() {
     const p = active();
-    if (p) run("Pushing\u2026", async () => { await api.repoPush(p); refetchAll(); });
+    if (p) run("Pushing\u2026", async () => { await api.repoPush(p); setNotice("Pushed."); refetchAll(); });
   }
   function doCheckout(branch: string) {
     const p = active();
@@ -277,7 +341,7 @@ export default function App() {
     }
   }
   const stashOptions = createMemo(() => [
-    { value: "save", label: "Stash changes", disabled: !(status()?.length) },
+    { value: "save", label: "Stash changes", disabled: !changeCount() },
     ...(stashes() ?? []).map((s) => ({ value: `pop:${s.index}`, label: `Pop stash@{${s.index}}: ${s.message}` })),
   ]);
   const branchOptions = createMemo(() => localBranches().map((b) => ({ value: b.name, label: b.name })));
@@ -305,50 +369,75 @@ export default function App() {
     }
   }
 
-  // ---------- local changes: stage / unstage / commit ----------
-  const stagedFiles = createMemo(() => (status() ?? []).filter((s) => s.staged));
-  const unstagedFiles = createMemo(() => (status() ?? []).filter((s) => !s.staged));
-
-  async function stageFiles(files: string[]) {
+  // ---------- local changes: stage / unstage / discard / commit / branches ----------
+  const stagedFiles = createMemo(() => changes()?.staged ?? []);
+  const unstagedFiles = createMemo(() => changes()?.unstaged ?? []);
+  const untrackedFiles = createMemo(() => changes()?.untracked ?? []);
+  async function mutate(fn: (p: string) => Promise<void>) {
     const p = active();
-    if (!p || !files.length) return;
+    if (!p) return;
     try {
-      await api.repoStage(p, files);
-      refetchStatus();
+      await fn(p);
+      changed();
     } catch (e) {
       setError(String(e));
     }
   }
-  async function unstageFiles(files: string[]) {
-    const p = active();
-    if (!p || !files.length) return;
-    try {
-      await api.repoUnstage(p, files);
-      refetchStatus();
-    } catch (e) {
-      setError(String(e));
-    }
+  const stageFiles = (files: string[]) => (files.length ? mutate((p) => api.repoStage(p, files)) : undefined);
+  const unstageFiles = (files: string[]) => (files.length ? mutate((p) => api.repoUnstage(p, files)) : undefined);
+  function discardFiles(files: string[]) {
+    if (!files.length || !window.confirm(`Discard changes to ${files.length === 1 ? files[0] : files.length + " files"}? This cannot be undone.`)) return;
+    mutate((p) => api.repoDiscard(p, files));
   }
   async function commit() {
     const p = active();
     if (!p) return;
     setError(null);
     try {
-      await api.repoCommit(p, message());
+      await api.repoCommit(p, message(), amend());
       setMessage("");
-      refetchStatus();
+      setAmend(false);
+      changed();
       refetchLog();
+      setNotice("Committed.");
     } catch (e) {
       setError(String(e));
     }
   }
-
+  // Fork prefills the previous message when Amend is ticked.
+  createEffect(() => {
+    if (amend() && !message().trim()) setMessage(log()?.[0]?.summary ?? "");
+  });
+  function createBranch(ev: SubmitEvent) {
+    ev.preventDefault();
+    const p = active();
+    const name = newBranch().trim();
+    if (!p || !name) return;
+    run("Creating branch\u2026", async () => {
+      await api.repoCheckout(p, name, true);
+      setNewBranch("");
+      refetchAll();
+    });
+  }
+  async function deleteBranch(name: string) {
+    const p = active();
+    if (!p || !window.confirm(`Delete branch ${name}?`)) return;
+    await run("Deleting branch\u2026", async () => {
+      try {
+        await api.repoBranchDelete(p, name);
+      } catch (e) {
+        if (!String(e).includes("not fully merged") || !window.confirm(`${name} is not fully merged. Delete anyway?`)) throw e;
+        await api.repoBranchDelete(p, name, true);
+      }
+      refetchAll();
+    });
+  }
   // ---------- diff / commit-files / tree resources for the detail pane ----------
   const diffKey = () => {
     const p = active();
     const s = selected();
     if (!p || !s) return null;
-    return { path: p, id: s === "working" ? undefined : s.id };
+    return { path: p, id: s === "working" ? undefined : s.id, rev: rev() };
   };
   const [diff] = createResource(diffKey, (k) => api.repoDiff(k.path, k.id));
 
@@ -436,6 +525,9 @@ export default function App() {
         <ContentHead icon="repo" title="Repositories" line="Local git checkouts this machine knows about." />
       </Show>
 
+      <Show when={notice() && !error()}>
+        <div class="repos-notice" role="status" onClick={() => setNotice(null)}>{notice()}</div>
+      </Show>
       <Show when={error()}>
         <div class="repos-error" role="alert" onClick={() => setError(null)}>{error()}</div>
       </Show>
@@ -551,9 +643,9 @@ export default function App() {
             <Show when={active()}>
               <div class="side-nav">
                 <button type="button" class="side-nav-row" classList={{ active: leftView() === "changes" }} onClick={selectLocalChanges}>
-                  <span class="side-nav-dot" classList={{ dirty: (status()?.length ?? 0) > 0 }} aria-hidden="true" />
+                  <span class="side-nav-dot" classList={{ dirty: changeCount() > 0 }} aria-hidden="true" />
                   <span>Local Changes</span>
-                  <span class="side-nav-badge">{status()?.length ?? 0}</span>
+                  <span class="side-nav-badge">{changeCount()}</span>
                 </button>
                 <button type="button" class="side-nav-row" classList={{ active: leftView() === "commits" }} onClick={() => setLeftView("commits")}>
                   <Icon name="clock" size={14} />
@@ -568,11 +660,20 @@ export default function App() {
               <QuietSearch label="Filter commits and branches" placeholder="Filter…" value={filter()} onInput={setFilter} class="side-filter" />
 
               <Group title="Branches" count={localBranches().length} open={groupsOpen().branches} onToggle={() => toggleGroup("branches")}>
+                <form class="branch-form" onSubmit={createBranch}>
+                  <input aria-label="New branch name" placeholder="New branch…" value={newBranch()} onInput={(e) => setNewBranch(e.currentTarget.value)} />
+                  <GhostPill type="submit" disabled={!!busy() || !newBranch().trim()}>Create &amp; checkout</GhostPill>
+                </form>
                 <ul class="ref-list">
-                  <For each={localBranches().filter((b) => matchesFilter(b.name))} fallback={<li class="hint">No branches.</li>}>
+                <For each={localBranches().filter((b) => matchesFilter(b.name))} fallback={<li class="hint">No branches.</li>}>
                     {(b) => (
-                      <li classList={{ head: b.is_head }} onClick={() => !b.is_head && doCheckout(b.name)}>
-                        {b.is_head ? "● " : ""}{b.name}
+                      <li classList={{ head: b.is_head }} class="branch-row" onClick={() => !b.is_head && doCheckout(b.name)}>
+                        <span>{b.is_head ? "● " : ""}{b.name}</span>
+                        <Show when={!b.is_head}>
+                          <IconButton class="small" label={`Delete branch ${b.name}`} onClick={(e: MouseEvent) => { e.stopPropagation(); deleteBranch(b.name); }}>
+                            <Icon name="close" size={12} />
+                          </IconButton>
+                        </Show>
                       </li>
                     )}
                   </For>
@@ -630,8 +731,8 @@ export default function App() {
               <Show
                 when={leftView() !== "changes"}
                 fallback={
-                  <div class="local-changes">
-                    <div class="lc-section">
+                  <div class="local-changes" data-testid="local-changes">
+                    <div class="lc-section" data-testid="lc-staged">
                       <div class="lc-section-head">
                         <span>Staged</span>
                         <span class="lc-count">{stagedFiles().length}</span>
@@ -642,14 +743,10 @@ export default function App() {
                       <ul class="lc-file-list">
                         <For each={stagedFiles()} fallback={<li class="hint">Nothing staged.</li>}>
                           {(f) => (
-                            <li classList={{ active: focusFile() === f.path }} onClick={() => setFocusFile(f.path)}>
+                            <li classList={{ active: focusFile() === f.path && focusSide() === "staged" }} onClick={() => focus(f, "staged")}>
                               <span class={`badge ${f.status}`}>{f.status[0]}</span>
                               <span class="lc-file-path">{f.path}</span>
-                              <IconButton
-                                class="small"
-                                label={`Unstage ${f.path}`}
-                                onClick={(e: MouseEvent) => { e.stopPropagation(); unstageFiles([f.path]); }}
-                              >
+                              <IconButton class="small" label={`Unstage ${f.path}`} onClick={(e: MouseEvent) => { e.stopPropagation(); unstageFiles([f.path]); }}>
                                 <Icon name="close" size={12} />
                               </IconButton>
                             </li>
@@ -657,25 +754,50 @@ export default function App() {
                         </For>
                       </ul>
                     </div>
-                    <div class="lc-section">
+                    <div class="lc-section" data-testid="lc-unstaged">
                       <div class="lc-section-head">
                         <span>Unstaged</span>
                         <span class="lc-count">{unstagedFiles().length}</span>
                         <Show when={unstagedFiles().length}>
+                          <GhostPill onClick={() => discardFiles(unstagedFiles().map((f) => f.path))}>Discard all</GhostPill>
                           <GhostPill onClick={() => stageFiles(unstagedFiles().map((f) => f.path))}>Stage all</GhostPill>
                         </Show>
                       </div>
                       <ul class="lc-file-list">
-                        <For each={unstagedFiles()} fallback={<li class="hint">Working tree clean.</li>}>
+                        <For each={unstagedFiles()} fallback={<li class="hint">No modified files.</li>}>
                           {(f) => (
-                            <li classList={{ active: focusFile() === f.path }} onClick={() => setFocusFile(f.path)}>
+                            <li classList={{ active: focusFile() === f.path && focusSide() === "unstaged" }} onClick={() => focus(f, "unstaged")}>
                               <span class={`badge ${f.status}`}>{f.status[0]}</span>
                               <span class="lc-file-path">{f.path}</span>
-                              <IconButton
-                                class="small"
-                                label={`Stage ${f.path}`}
-                                onClick={(e: MouseEvent) => { e.stopPropagation(); stageFiles([f.path]); }}
-                              >
+                              <IconButton class="small" label={`Discard ${f.path}`} onClick={(e: MouseEvent) => { e.stopPropagation(); discardFiles([f.path]); }}>
+                                <Icon name="close" size={12} />
+                              </IconButton>
+                              <IconButton class="small" label={`Stage ${f.path}`} onClick={(e: MouseEvent) => { e.stopPropagation(); stageFiles([f.path]); }}>
+                                <Icon name="plus" size={12} />
+                              </IconButton>
+                            </li>
+                          )}
+                        </For>
+                      </ul>
+                    </div>
+                    <div class="lc-section" data-testid="lc-untracked">
+                      <div class="lc-section-head">
+                        <span>Untracked</span>
+                        <span class="lc-count">{untrackedFiles().length}</span>
+                        <Show when={untrackedFiles().length}>
+                          <GhostPill onClick={() => stageFiles(untrackedFiles().map((f) => f.path))}>Stage all</GhostPill>
+                        </Show>
+                      </div>
+                      <ul class="lc-file-list">
+                        <For each={untrackedFiles()} fallback={<li class="hint">No untracked files.</li>}>
+                          {(f) => (
+                            <li classList={{ active: focusFile() === f.path && focusSide() === "untracked" }} onClick={() => focus(f, "untracked")}>
+                              <span class={`badge ${f.status}`}>{f.status[0]}</span>
+                              <span class="lc-file-path">{f.path}</span>
+                              <IconButton class="small" label={`Delete ${f.path}`} onClick={(e: MouseEvent) => { e.stopPropagation(); discardFiles([f.path]); }}>
+                                <Icon name="close" size={12} />
+                              </IconButton>
+                              <IconButton class="small" label={`Stage ${f.path}`} onClick={(e: MouseEvent) => { e.stopPropagation(); stageFiles([f.path]); }}>
                                 <Icon name="plus" size={12} />
                               </IconButton>
                             </li>
@@ -684,14 +806,14 @@ export default function App() {
                       </ul>
                     </div>
                     <div class="commit-box">
-                      <textarea
-                        placeholder="Commit message"
-                        value={message()}
-                        onInput={(e) => setMessage(e.currentTarget.value)}
-                      />
+                      <textarea placeholder="Commit message" value={message()} onInput={(e) => setMessage(e.currentTarget.value)} />
                       <div class="row-actions">
-                        <button class="primary" onClick={commit} disabled={!message().trim() || !stagedFiles().length}>
-                          Commit
+                        <label class="amend-check">
+                          <input type="checkbox" checked={amend()} onChange={(e) => setAmend(e.currentTarget.checked)} />
+                          Amend last commit
+                        </label>
+                        <button class="primary" onClick={commit} disabled={amend() ? false : !message().trim() || !stagedFiles().length}>
+                          {amend() ? "Amend" : "Commit"}
                         </button>
                       </div>
                     </div>
@@ -777,13 +899,20 @@ export default function App() {
                   </Show>
                 </Show>
                 <Show when={tab() === "changes"}>
-                  <Diff
-                    text={diff() ?? ""}
-                    loading={diff.loading}
-                    focusFile={focusFile()}
-                    ownedFiles={focusFile() ? [focusFile()!] : undefined}
-                    ownedOnly={!!focusFile()}
-                  />
+                  <Show
+                    when={selected() === "working" && focusFile()}
+                    fallback={
+                      <Diff
+                        text={diff() ?? ""}
+                        loading={diff.loading}
+                        focusFile={focusFile()}
+                        ownedFiles={focusFile() ? [focusFile()!] : undefined}
+                        ownedOnly={!!focusFile()}
+                      />
+                    }
+                  >
+                    <HunkView path={active()!} file={focusFile()!} side={focusSide()} rev={rev()} onChanged={changed} onError={(e) => setError(String(e))} />
+                  </Show>
                 </Show>
                 <Show when={tab() === "tree"}>
                   <FileTree path={active()} commitId={treeCommitId()} />
