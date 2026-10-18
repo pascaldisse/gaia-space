@@ -1,4 +1,4 @@
-import { createResource, createSignal, For, Show } from "solid-js";
+import { createSignal, For, Show } from "solid-js";
 import { api, type Commit, type RebaseAction, type RebaseOutcome, type RebaseRow, type ResetMode } from "../api";
 import { GhostPill, PillSelect } from "../components/controls";
 import "./HistoryOps.css";
