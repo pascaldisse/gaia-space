@@ -39,6 +39,7 @@ const mock = `
         case "repo_log": return commits;
         case "repo_branches": return [{ name: "main", is_head: true, remote: false, target: commits[0].id }];
         case "repo_commit_files": return [{ path: "src/graph.ts", status: "M" }];
+        case "repo_changes": return { staged: [], unstaged: [], untracked: [] };
         case "repo_rebase_plan": return plan;
         case "repo_rebase_apply": return { status: "done", head: commits[0].id, message: "rebased", conflicts: [], abort_command: null };
         default: return [];

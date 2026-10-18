@@ -26,6 +26,7 @@ fn main() {
         "repo_log_graph" => out(git::repo_log_graph(p, a["limit"].as_u64().map(|n| n as usize), os(&a, "reference"))),
         "repo_branches" => out(git::repo_branches(p)),
         "repo_status" => out(git::repo_status(p)),
+        "repo_changes" => out(git::repo_changes(p)),
         "repo_tags" => out(git::repo_tags(p)),
         "repo_remotes" => out(git::repo_remotes(p)),
         "repo_stash_list" => out(git::repo_stash_list(p)),
