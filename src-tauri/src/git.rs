@@ -6,7 +6,8 @@ use git2::{
     RemoteCallbacks, Repository, Sort, StatusOptions,
 };
 use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 pub type Result<T> = std::result::Result<T, String>;
 
@@ -54,6 +55,18 @@ pub struct StatusEntry {
     pub path: String,
     pub status: String,
     pub staged: bool,
+}
+#[derive(Serialize)]
+pub struct ChangeEntry {
+    pub path: String,
+    pub status: String,
+}
+/// Working-copy state split Fork-style. One file can sit in `staged` AND `unstaged`.
+#[derive(Serialize)]
+pub struct Changes {
+    pub staged: Vec<ChangeEntry>,
+    pub unstaged: Vec<ChangeEntry>,
+    pub untracked: Vec<ChangeEntry>,
 }
 #[derive(Serialize)]
 pub struct Tag {
@@ -108,12 +121,43 @@ fn remote_callbacks() -> RemoteCallbacks<'static> {
             }
         }
         Err(git2::Error::from_str(&format!(
-            "no git credentials available for {url}: tried the git credential helper and the ssh agent"
+            "no git credentials available for {}: tried the git credential helper and the ssh agent",
+            redact(url)
         )))
     });
     cb
 }
 
+/// Strip `user:secret@` userinfo from any URL embedded in a message, so a token
+/// baked into a remote URL can never reach the UI or a log through an error string.
+fn redact(msg: &str) -> String {
+    let mut out = String::with_capacity(msg.len());
+    let mut rest = msg;
+    while let Some(i) = rest.find("://") {
+        let (head, tail) = rest.split_at(i + 3);
+        out.push_str(head);
+        let end = tail.find(|c: char| c == '/' || c.is_whitespace()).unwrap_or(tail.len());
+        let authority = &tail[..end];
+        match authority.rfind('@') {
+            Some(at) => {
+                out.push_str("***@");
+                out.push_str(&authority[at + 1..]);
+            }
+            None => out.push_str(authority),
+        }
+        rest = &tail[end..];
+    }
+    out.push_str(rest);
+    out
+}
+/// Repo-relative path guard for every per-file command: no absolute paths, no `..`.
+fn rel_path(p: &str) -> Result<&Path> {
+    let pp = Path::new(p);
+    if p.is_empty() || pp.is_absolute() || pp.components().any(|c| matches!(c, Component::ParentDir)) {
+        return Err(format!("invalid repo-relative path: {p}"));
+    }
+    Ok(pp)
+}
 // ---------- store of known repositories ----------
 
 fn store_path() -> PathBuf {
@@ -303,6 +347,9 @@ pub fn repo_diff(path: String, id: Option<String>) -> Result<String> {
     }
     .map_err(|e| e.to_string())?;
 
+    diff_text(&diff)
+}
+fn diff_text(diff: &git2::Diff) -> Result<String> {
     let mut buf = String::new();
     diff.print(git2::DiffFormat::Patch, |_d, _h, line| {
         match line.origin() {
@@ -313,7 +360,6 @@ pub fn repo_diff(path: String, id: Option<String>) -> Result<String> {
         true
     })
     .map_err(|e| e.to_string())?;
-
     Ok(buf)
 }
 
@@ -332,9 +378,12 @@ pub fn repo_stage(path: String, files: Vec<String>) -> Result<()> {
     index.write().map_err(|e| e.to_string())
 }
 
+/// Commit the index. `amend` (default false) rewrites HEAD with the index tree; an
+/// empty message then keeps the old one. A normal commit still requires a message.
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn repo_commit(path: String, message: String) -> Result<String> {
-    if message.trim().is_empty() {
+pub fn repo_commit(path: String, message: String, amend: Option<bool>) -> Result<String> {
+    let amend = amend.unwrap_or(false);
+    if !amend && message.trim().is_empty() {
         return Err("commit message is empty".into());
     }
     let repo = open(&path)?;
@@ -344,16 +393,31 @@ pub fn repo_commit(path: String, message: String) -> Result<String> {
     let mut index = repo.index().map_err(|e| e.to_string())?;
     let tree_id = index.write_tree().map_err(|e| e.to_string())?;
     let tree = repo.find_tree(tree_id).map_err(|e| e.to_string())?;
-
-    let parents: Vec<git2::Commit> = match repo.head().ok().and_then(|h| h.target()) {
-        Some(oid) => vec![repo.find_commit(oid).map_err(|e| e.to_string())?],
-        None => vec![],
+    let (oid, message) = if amend {
+        let head = repo
+            .head()
+            .and_then(|h| h.peel_to_commit())
+            .map_err(|e| format!("nothing to amend: {e}"))?;
+        let msg = if message.trim().is_empty() {
+            head.message().unwrap_or("").to_string()
+        } else {
+            message
+        };
+        let oid = head
+            .amend(Some("HEAD"), None, Some(&sig), None, Some(&msg), Some(&tree))
+            .map_err(|e| e.to_string())?;
+        (oid, msg)
+    } else {
+        let parents: Vec<git2::Commit> = match repo.head().ok().and_then(|h| h.target()) {
+            Some(oid) => vec![repo.find_commit(oid).map_err(|e| e.to_string())?],
+            None => vec![],
+        };
+        let parent_refs: Vec<&git2::Commit> = parents.iter().collect();
+        let oid = repo
+            .commit(Some("HEAD"), &sig, &sig, &message, &tree, &parent_refs)
+            .map_err(|e| e.to_string())?;
+        (oid, message)
     };
-    let parent_refs: Vec<&git2::Commit> = parents.iter().collect();
-
-    let oid = repo
-        .commit(Some("HEAD"), &sig, &sig, &message, &tree, &parent_refs)
-        .map_err(|e| e.to_string())?;
     let branch = repo
         .head()
         .ok()
@@ -373,13 +437,14 @@ pub fn repo_fetch(path: String, remote: Option<String>) -> Result<()> {
     let mut opts = FetchOptions::new();
     opts.remote_callbacks(remote_callbacks());
     r.fetch(&[] as &[&str], Some(&mut opts), None)
-        .map_err(|e| format!("fetch {remote_name}: {e}"))?;
+        .map_err(|e| redact(&format!("fetch {remote_name}: {e}")))?;
     Ok(())
 }
-/// Fetch + fast-forward only. A non-fast-forward upstream (diverged history)
-/// returns an explicit error instead of attempting a silent merge.
+/// Fetch + fast-forward only. Diverged history and local edits that the update
+/// would overwrite both return one explicit error (`diverged:` / `conflict:`);
+/// the working tree is never force-overwritten and no merge is attempted.
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn repo_pull(path: String) -> Result<String> {
+pub fn repo_pull(path: String, remote: Option<String>) -> Result<String> {
     let repo = open(&path)?;
     let head_ref = repo.head().map_err(|e| e.to_string())?;
     let branch_name = head_ref
@@ -387,7 +452,7 @@ pub fn repo_pull(path: String) -> Result<String> {
         .ok()
         .ok_or("HEAD has no shorthand (detached?)")?
         .to_string();
-    let remote_name = "origin".to_string();
+    let remote_name = remote.unwrap_or_else(|| "origin".to_string());
     let mut remote = repo
         .find_remote(&remote_name)
         .map_err(|e| format!("remote {remote_name}: {e}"))?;
@@ -395,7 +460,7 @@ pub fn repo_pull(path: String) -> Result<String> {
     opts.remote_callbacks(remote_callbacks());
     remote
         .fetch(&[branch_name.as_str()], Some(&mut opts), None)
-        .map_err(|e| format!("fetch: {e}"))?;
+        .map_err(|e| redact(&format!("fetch {remote_name}: {e}")))?;
     let fetch_head = repo
         .find_reference("FETCH_HEAD")
         .map_err(|e| e.to_string())?;
@@ -409,15 +474,27 @@ pub fn repo_pull(path: String) -> Result<String> {
         return Ok("up to date".into());
     }
     if !analysis.is_fast_forward() {
-        return Err("pull would require a merge (non-fast-forward); resolve manually".into());
+        return Err(
+            "diverged: pull would require a merge (non-fast-forward); resolve manually".into(),
+        );
     }
     let refname = format!("refs/heads/{branch_name}");
+    let target = repo
+        .find_object(fetch_commit.id(), None)
+        .map_err(|e| e.to_string())?;
+    // Safe checkout BEFORE moving the ref: libgit2 diffs against the still-old HEAD,
+    // so uncommitted edits on touched files abort instead of being clobbered.
+    repo.checkout_tree(&target, Some(&mut CheckoutBuilder::new().safe()))
+        .map_err(|e| {
+            if e.code() == git2::ErrorCode::Conflict {
+                format!("conflict: local changes would be overwritten by pull: {e}")
+            } else {
+                e.to_string()
+            }
+        })?;
     let mut reference = repo.find_reference(&refname).map_err(|e| e.to_string())?;
     reference
         .set_target(fetch_commit.id(), "fast-forward pull")
-        .map_err(|e| e.to_string())?;
-    repo.set_head(&refname).map_err(|e| e.to_string())?;
-    repo.checkout_head(Some(CheckoutBuilder::new().force()))
         .map_err(|e| e.to_string())?;
     Ok(format!("fast-forwarded to {}", fetch_commit.id()))
 }
@@ -436,30 +513,79 @@ pub fn repo_push(path: String, remote: Option<String>, branch: Option<String>) -
     let mut r = repo
         .find_remote(&remote_name)
         .map_err(|e| format!("remote {remote_name}: {e}"))?;
+    // libgit2 returns Ok even when the server rejects a ref; capture per-ref status.
+    let rejected: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+    let seen = rejected.clone();
+    let mut cb = remote_callbacks();
+    cb.push_update_reference(move |name, status| {
+        if let Some(s) = status {
+            *seen.lock().unwrap() = Some(format!("{name}: {s}"));
+        }
+        Ok(())
+    });
     let mut opts = PushOptions::new();
-    opts.remote_callbacks(remote_callbacks());
+    opts.remote_callbacks(cb);
     let refspec = format!("refs/heads/{branch_name}:refs/heads/{branch_name}");
     r.push(&[refspec.as_str()], Some(&mut opts))
-        .map_err(|e| format!("push {branch_name} to {remote_name}: {e}"))?;
+        .map_err(|e| redact(&format!("push {branch_name} to {remote_name}: {e}")))?;
+    if let Some(why) = rejected.lock().unwrap().take() {
+        return Err(redact(&format!("push rejected by {remote_name}: {why}")));
+    }
     Ok(())
 }
 // ---------- branches / tags / remotes ----------
+/// Switch branch (safe checkout: conflicting local edits abort). `create` (default
+/// false) first creates `branch` at HEAD.
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn repo_checkout(path: String, branch: String) -> Result<()> {
+pub fn repo_checkout(path: String, branch: String, create: Option<bool>) -> Result<()> {
+    if create.unwrap_or(false) {
+        repo_branch_create(path.clone(), branch.clone(), None)?;
+    }
     let repo = open(&path)?;
     let refname = format!("refs/heads/{branch}");
     let obj = repo
         .revparse_single(&refname)
         .or_else(|_| repo.revparse_single(&branch))
         .map_err(|e| format!("branch {branch}: {e}"))?;
-    repo.checkout_tree(&obj, Some(&mut CheckoutBuilder::new()))
-        .map_err(|e| e.to_string())?;
+    repo.checkout_tree(&obj, Some(&mut CheckoutBuilder::new().safe()))
+        .map_err(|e| {
+            if e.code() == git2::ErrorCode::Conflict {
+                format!("conflict: local changes would be overwritten by checkout of {branch}: {e}")
+            } else {
+                e.to_string()
+            }
+        })?;
     if repo.find_reference(&refname).is_ok() {
         repo.set_head(&refname).map_err(|e| e.to_string())?;
     } else {
         repo.set_head_detached(obj.id()).map_err(|e| e.to_string())?;
     }
     Ok(())
+}
+/// Delete a local branch. Refuses the checked-out branch, and an unmerged one
+/// (tip not reachable from HEAD) unless `force` (default false).
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn repo_branch_delete(path: String, name: String, force: Option<bool>) -> Result<()> {
+    let repo = open(&path)?;
+    let mut branch = repo
+        .find_branch(&name, git2::BranchType::Local)
+        .map_err(|e| format!("branch {name}: {e}"))?;
+    if branch.is_head() {
+        return Err(format!("cannot delete the checked-out branch {name}"));
+    }
+    if !force.unwrap_or(false) {
+        let tip = branch.get().target().ok_or("branch has no target")?;
+        let head = repo
+            .head()
+            .ok()
+            .and_then(|h| h.target())
+            .ok_or("HEAD has no target")?;
+        let merged = tip == head || repo.graph_descendant_of(head, tip).unwrap_or(false);
+        if !merged {
+            return Err(format!("branch {name} is not fully merged into HEAD; pass force to delete it anyway"));
+        }
+    }
+    branch.delete().map_err(|e| e.to_string())
 }
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn repo_branch_create(path: String, name: String, from: Option<String>) -> Result<()> {
@@ -544,6 +670,160 @@ pub fn repo_stash_list(path: String) -> Result<Vec<StashEntry>> {
     })
     .map_err(|e| e.to_string())?;
     Ok(out)
+}
+// ---------- working copy: status split / per-file+hunk stage / discard ----------
+/// Fork-style status: staged, unstaged and untracked as three lists. Unlike
+/// `repo_status` a file with both index and worktree edits appears in both.
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn repo_changes(path: String) -> Result<Changes> {
+    let repo = open(&path)?;
+    let mut opts = StatusOptions::new();
+    opts.include_untracked(true).recurse_untracked_dirs(true);
+    let statuses = repo.statuses(Some(&mut opts)).map_err(|e| e.to_string())?;
+    let mut out = Changes {
+        staged: vec![],
+        unstaged: vec![],
+        untracked: vec![],
+    };
+    for e in statuses.iter() {
+        let s = e.status();
+        let p = e.path().unwrap_or("").to_string();
+        let entry = |label: &str| ChangeEntry {
+            path: p.clone(),
+            status: label.to_string(),
+        };
+        if s.is_index_new() {
+            out.staged.push(entry("new"));
+        } else if s.is_index_deleted() {
+            out.staged.push(entry("deleted"));
+        } else if s.is_index_renamed() {
+            out.staged.push(entry("renamed"));
+        } else if s.is_index_modified() || s.is_index_typechange() {
+            out.staged.push(entry("modified"));
+        }
+        if s.is_conflicted() {
+            out.unstaged.push(entry("conflicted"));
+        } else if s.is_wt_new() {
+            out.untracked.push(entry("new"));
+        } else if s.is_wt_deleted() {
+            out.unstaged.push(entry("deleted"));
+        } else if s.is_wt_renamed() {
+            out.unstaged.push(entry("renamed"));
+        } else if s.is_wt_modified() || s.is_wt_typechange() {
+            out.unstaged.push(entry("modified"));
+        }
+    }
+    for list in [&mut out.staged, &mut out.unstaged, &mut out.untracked] {
+        list.sort_by(|a, b| a.path.cmp(&b.path));
+    }
+    Ok(out)
+}
+fn file_diff_opts(file: &str) -> DiffOptions {
+    let mut opts = DiffOptions::new();
+    opts.pathspec(file)
+        .disable_pathspec_match(true)
+        .include_untracked(true)
+        .recurse_untracked_dirs(true)
+        .show_untracked_content(true);
+    opts
+}
+/// Unified diff of ONE file: index→worktree (default) or, with `staged`, HEAD→index.
+/// Hunk numbers used by the hunk commands count the `@@` headers of this text.
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn repo_file_diff(path: String, file: String, staged: Option<bool>) -> Result<String> {
+    rel_path(&file)?;
+    let repo = open(&path)?;
+    let mut opts = file_diff_opts(&file);
+    let diff = if staged.unwrap_or(false) {
+        let head_tree = repo.head().ok().and_then(|h| h.peel_to_tree().ok());
+        repo.diff_tree_to_index(head_tree.as_ref(), None, Some(&mut opts))
+    } else {
+        repo.diff_index_to_workdir(None, Some(&mut opts))
+    }
+    .map_err(|e| e.to_string())?;
+    diff_text(&diff)
+}
+/// Apply only hunk number `hunk` (0-based) of `diff` to the index.
+fn apply_one_hunk(repo: &Repository, diff: &git2::Diff, hunk: usize) -> Result<()> {
+    let mut seen = 0usize;
+    let mut taken = false;
+    {
+        let mut ao = git2::ApplyOptions::new();
+        ao.hunk_callback(|_h| {
+            let take = seen == hunk;
+            seen += 1;
+            taken |= take;
+            take
+        });
+        repo.apply(diff, git2::ApplyLocation::Index, Some(&mut ao))
+            .map_err(|e| format!("apply hunk {hunk}: {e}"))?;
+    }
+    if !taken {
+        return Err(format!("hunk {hunk} not found ({seen} hunks in diff)"));
+    }
+    Ok(())
+}
+/// Stage one hunk of `file` (`hunk` default 0). Untracked files have no hunks and
+/// are staged whole.
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn repo_stage_hunk(path: String, file: String, hunk: Option<usize>) -> Result<()> {
+    let p = rel_path(&file)?;
+    let repo = open(&path)?;
+    if repo.status_file(p).map(|s| s.is_wt_new()).unwrap_or(false) {
+        return repo_stage(path, vec![file]);
+    }
+    let mut opts = file_diff_opts(&file);
+    let diff = repo
+        .diff_index_to_workdir(None, Some(&mut opts))
+        .map_err(|e| e.to_string())?;
+    apply_one_hunk(&repo, &diff, hunk.unwrap_or(0))?;
+    let mut index = repo.index().map_err(|e| e.to_string())?;
+    index.write().map_err(|e| e.to_string())
+}
+/// Unstage one hunk of `file` (`hunk` default 0) by applying the reversed
+/// HEAD→index diff to the index. A file absent from HEAD is unstaged whole.
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn repo_unstage_hunk(path: String, file: String, hunk: Option<usize>) -> Result<()> {
+    let p = rel_path(&file)?;
+    let repo = open(&path)?;
+    let head_tree = repo.head().ok().and_then(|h| h.peel_to_tree().ok());
+    let in_head = head_tree.as_ref().map(|t| t.get_path(p).is_ok()).unwrap_or(false);
+    if !in_head {
+        return repo_unstage(path, vec![file]);
+    }
+    let mut opts = file_diff_opts(&file);
+    opts.reverse(true);
+    let diff = repo
+        .diff_tree_to_index(head_tree.as_ref(), None, Some(&mut opts))
+        .map_err(|e| e.to_string())?;
+    apply_one_hunk(&repo, &diff, hunk.unwrap_or(0))?;
+    let mut index = repo.index().map_err(|e| e.to_string())?;
+    index.write().map_err(|e| e.to_string())
+}
+/// Throw away worktree edits: tracked files are restored from the index, untracked
+/// files are deleted. Staged content is untouched. Irreversible — the UI confirms.
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn repo_discard(path: String, files: Vec<String>) -> Result<()> {
+    let repo = open(&path)?;
+    let workdir = repo.workdir().ok_or("bare repository has no working copy")?.to_path_buf();
+    for f in &files {
+        let p = rel_path(f)?;
+        let st = repo.status_file(p).map_err(|e| format!("{f}: {e}"))?;
+        if st.is_wt_new() {
+            let full = workdir.join(p);
+            if full.is_dir() {
+                std::fs::remove_dir_all(&full).map_err(|e| format!("{f}: {e}"))?;
+            } else {
+                std::fs::remove_file(&full).map_err(|e| format!("{f}: {e}"))?;
+            }
+        } else {
+            let mut cb = CheckoutBuilder::new();
+            cb.force().path(p);
+            repo.checkout_index(None, Some(&mut cb))
+                .map_err(|e| format!("discard {f}: {e}"))?;
+        }
+    }
+    Ok(())
 }
 // ---------- commit / tree inspection ----------
 #[cfg_attr(feature = "desktop", tauri::command)]
@@ -735,7 +1015,7 @@ mod tests {
     fn write_and_commit(path: &str, file: &str, contents: &str, message: &str) -> String {
         std::fs::write(Path::new(path).join(file), contents).expect("write file");
         repo_stage(path.to_string(), vec![file.to_string()]).expect("stage");
-        repo_commit(path.to_string(), message.to_string()).expect("commit")
+        repo_commit(path.to_string(), message.to_string(), None).expect("commit")
     }
 
     #[test]
@@ -745,7 +1025,7 @@ mod tests {
         repo_branch_create(path.clone(), "feature".into(), None).expect("branch create");
         let branches = repo_branches(path.clone()).expect("branches");
         assert!(branches.iter().any(|b| b.name == "feature"));
-        repo_checkout(path.clone(), "feature".into()).expect("checkout");
+        repo_checkout(path.clone(), "feature".into(), None).expect("checkout");
         let info = repo_info(path.clone()).expect("info");
         assert_eq!(info.head.as_deref(), Some("feature"));
     }
@@ -806,5 +1086,212 @@ mod tests {
         assert!(repo_tags(path.clone()).expect("tags").is_empty());
         assert!(repo_remotes(path.clone()).expect("remotes").is_empty());
         assert!(repo_worktrees(path).expect("worktrees").is_empty());
+    }
+
+    // ---------- working copy: hunks / amend / discard / branches / remotes ----------
+    fn read(path: &str, file: &str) -> String {
+        std::fs::read_to_string(Path::new(path).join(file)).unwrap()
+    }
+    fn lines(n: usize, edits: &[(usize, &str)]) -> String {
+        (1..=n)
+            .map(|i| {
+                edits
+                    .iter()
+                    .find(|(l, _)| *l == i)
+                    .map(|(_, t)| t.to_string())
+                    .unwrap_or_else(|| format!("line{i}"))
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+            + "\n"
+    }
+    fn count_hunks(diff: &str) -> usize {
+        diff.lines().filter(|l| l.starts_with("@@")).count()
+    }
+    #[test]
+    fn changes_split_staged_unstaged_untracked() {
+        let (_dir, path) = init_temp_repo();
+        write_and_commit(&path, "a.txt", "one\n", "first");
+        std::fs::write(Path::new(&path).join("a.txt"), "two\n").unwrap();
+        repo_stage(path.clone(), vec!["a.txt".into()]).unwrap();
+        std::fs::write(Path::new(&path).join("a.txt"), "three\n").unwrap();
+        std::fs::write(Path::new(&path).join("new.txt"), "x").unwrap();
+        let c = repo_changes(path).unwrap();
+        assert_eq!(c.staged.len(), 1);
+        assert_eq!(c.staged[0].path, "a.txt");
+        assert_eq!(c.unstaged.len(), 1, "same file also unstaged");
+        assert_eq!(c.untracked.len(), 1);
+        assert_eq!(c.untracked[0].path, "new.txt");
+    }
+    #[test]
+    fn stage_hunk_stages_only_the_chosen_hunk() {
+        let (_dir, path) = init_temp_repo();
+        write_and_commit(&path, "f.txt", &lines(40, &[]), "base");
+        // two far-apart edits => two hunks
+        std::fs::write(
+            Path::new(&path).join("f.txt"),
+            lines(40, &[(2, "EDIT-A"), (38, "EDIT-B")]),
+        )
+        .unwrap();
+        let wt = repo_file_diff(path.clone(), "f.txt".into(), None).unwrap();
+        assert_eq!(count_hunks(&wt), 2);
+        repo_stage_hunk(path.clone(), "f.txt".into(), Some(1)).unwrap();
+        let staged = repo_file_diff(path.clone(), "f.txt".into(), Some(true)).unwrap();
+        assert_eq!(count_hunks(&staged), 1);
+        assert!(staged.contains("+EDIT-B") && !staged.contains("EDIT-A"));
+        let rest = repo_file_diff(path.clone(), "f.txt".into(), None).unwrap();
+        assert_eq!(count_hunks(&rest), 1);
+        assert!(rest.contains("+EDIT-A") && !rest.contains("EDIT-B"));
+        assert!(read(&path, "f.txt").contains("EDIT-A"), "worktree untouched");
+        // index survives a fresh open (it was written to disk)
+        let c = repo_changes(path.clone()).unwrap();
+        assert_eq!(c.staged.len(), 1);
+        assert_eq!(c.unstaged.len(), 1);
+        // unstage the same hunk again
+        repo_unstage_hunk(path.clone(), "f.txt".into(), Some(0)).unwrap();
+        let c = repo_changes(path.clone()).unwrap();
+        assert!(c.staged.is_empty(), "{:?}", c.staged.len());
+        let wt = repo_file_diff(path, "f.txt".into(), None).unwrap();
+        assert_eq!(count_hunks(&wt), 2);
+    }
+    #[test]
+    fn stage_hunk_on_untracked_stages_whole_file_and_rejects_bad_paths() {
+        let (_dir, path) = init_temp_repo();
+        write_and_commit(&path, "a.txt", "one\n", "first");
+        std::fs::write(Path::new(&path).join("n.txt"), "n\n").unwrap();
+        repo_stage_hunk(path.clone(), "n.txt".into(), None).unwrap();
+        assert_eq!(repo_changes(path.clone()).unwrap().staged[0].path, "n.txt");
+        assert!(repo_stage_hunk(path.clone(), "../x".into(), None).is_err());
+        assert!(repo_discard(path.clone(), vec!["/etc/passwd".into()]).is_err());
+        assert!(repo_stage_hunk(path, "a.txt".into(), Some(0)).is_err(), "no hunks in a clean file");
+    }
+    #[test]
+    fn discard_restores_tracked_and_removes_untracked_keeping_staged() {
+        let (_dir, path) = init_temp_repo();
+        write_and_commit(&path, "a.txt", "one\n", "first");
+        std::fs::write(Path::new(&path).join("a.txt"), "two\n").unwrap();
+        repo_stage(path.clone(), vec!["a.txt".into()]).unwrap();
+        std::fs::write(Path::new(&path).join("a.txt"), "three\n").unwrap();
+        std::fs::write(Path::new(&path).join("u.txt"), "u").unwrap();
+        repo_discard(path.clone(), vec!["a.txt".into(), "u.txt".into()]).unwrap();
+        assert_eq!(read(&path, "a.txt"), "two\n", "restored to the staged version");
+        assert!(!Path::new(&path).join("u.txt").exists());
+        let c = repo_changes(path).unwrap();
+        assert_eq!(c.staged.len(), 1);
+        assert!(c.unstaged.is_empty() && c.untracked.is_empty());
+    }
+    #[test]
+    fn amend_rewrites_head_and_blank_message_keeps_old() {
+        let (_dir, path) = init_temp_repo();
+        let first = write_and_commit(&path, "a.txt", "one\n", "first msg");
+        std::fs::write(Path::new(&path).join("b.txt"), "b\n").unwrap();
+        repo_stage(path.clone(), vec!["b.txt".into()]).unwrap();
+        let amended = repo_commit(path.clone(), "".into(), Some(true)).unwrap();
+        assert_ne!(amended, first);
+        let log = repo_log(path.clone(), None).unwrap();
+        assert_eq!(log.len(), 1, "amend replaces, does not add");
+        assert_eq!(log[0].id, amended);
+        assert_eq!(log[0].summary, "first msg");
+        let files = repo_commit_files(path.clone(), amended).unwrap();
+        assert_eq!(files.len(), 2, "amended commit carries the staged file");
+        std::fs::write(Path::new(&path).join("c.txt"), "c\n").unwrap();
+        repo_stage(path.clone(), vec!["c.txt".into()]).unwrap();
+        repo_commit(path.clone(), "renamed".into(), Some(true)).unwrap();
+        assert_eq!(repo_log(path.clone(), None).unwrap()[0].summary, "renamed");
+        assert!(repo_commit(path, "  ".into(), None).is_err(), "plain commit still needs a message");
+    }
+    #[test]
+    fn checkout_create_and_branch_delete_guards() {
+        let (_dir, path) = init_temp_repo();
+        write_and_commit(&path, "a.txt", "one\n", "first");
+        let main = repo_info(path.clone()).unwrap().head.unwrap();
+        repo_checkout(path.clone(), "topic".into(), Some(true)).unwrap();
+        assert_eq!(repo_info(path.clone()).unwrap().head.as_deref(), Some("topic"));
+        assert!(repo_branch_delete(path.clone(), "topic".into(), None).is_err(), "checked-out");
+        write_and_commit(&path, "b.txt", "b\n", "on topic");
+        repo_checkout(path.clone(), main.clone(), None).unwrap();
+        assert!(!Path::new(&path).join("b.txt").exists(), "checkout swapped the tree");
+        let err = repo_branch_delete(path.clone(), "topic".into(), None).unwrap_err();
+        assert!(err.contains("not fully merged"), "{err}");
+        repo_branch_delete(path.clone(), "topic".into(), Some(true)).unwrap();
+        assert!(!repo_branches(path.clone()).unwrap().iter().any(|b| b.name == "topic"));
+        repo_branch_create(path.clone(), "merged".into(), None).unwrap();
+        repo_branch_delete(path, "merged".into(), None).expect("merged branch deletes without force");
+    }
+    #[test]
+    fn checkout_refuses_to_clobber_local_edits() {
+        let (_dir, path) = init_temp_repo();
+        write_and_commit(&path, "a.txt", "one\n", "first");
+        repo_checkout(path.clone(), "other".into(), Some(true)).unwrap();
+        write_and_commit(&path, "a.txt", "other\n", "other change");
+        let main = repo_branches(path.clone()).unwrap().into_iter().find(|b| b.name != "other").unwrap().name;
+        repo_checkout(path.clone(), main, None).unwrap();
+        std::fs::write(Path::new(&path).join("a.txt"), "dirty\n").unwrap();
+        let err = repo_checkout(path.clone(), "other".into(), None).unwrap_err();
+        assert!(err.starts_with("conflict:"), "{err}");
+        assert_eq!(read(&path, "a.txt"), "dirty\n");
+    }
+    // bare origin + two clones on local paths: no network, no credentials.
+    fn origin_and_clones() -> (tempfile::TempDir, String, String, String) {
+        let root = tempfile::tempdir().unwrap();
+        let bare = root.path().join("origin.git");
+        Repository::init_bare(&bare).unwrap();
+        let url = bare.to_string_lossy().to_string();
+        let a = root.path().join("a").to_string_lossy().to_string();
+        let b = root.path().join("b").to_string_lossy().to_string();
+        let ra = Repository::init(&a).unwrap();
+        let mut cfg = ra.config().unwrap();
+        cfg.set_str("user.name", "A").unwrap();
+        cfg.set_str("user.email", "a@example.com").unwrap();
+        ra.remote("origin", &url).unwrap();
+        write_and_commit(&a, "f.txt", "1\n", "c1");
+        repo_push(a.clone(), None, None).expect("initial push");
+        // bare HEAD may point at a different default name; clone the pushed branch explicitly
+        let branch = repo_info(a.clone()).unwrap().head.unwrap();
+        let rb = git2::build::RepoBuilder::new().branch(&branch).clone(&url, Path::new(&b)).unwrap();
+        let mut cfg = rb.config().unwrap();
+        cfg.set_str("user.name", "B").unwrap();
+        cfg.set_str("user.email", "b@example.com").unwrap();
+        (root, url, a, b)
+    }
+    #[test]
+    fn push_fetch_pull_fast_forward_round_trip() {
+        let (_root, _url, a, b) = origin_and_clones();
+        write_and_commit(&a, "f.txt", "1\n2\n", "c2");
+        repo_push(a.clone(), None, None).unwrap();
+        repo_fetch(b.clone(), None).unwrap();
+        let msg = repo_pull(b.clone(), None).unwrap();
+        assert!(msg.starts_with("fast-forwarded"), "{msg}");
+        assert_eq!(read(&b, "f.txt"), "1\n2\n");
+        assert_eq!(repo_log(b.clone(), None).unwrap()[0].summary, "c2");
+        assert_eq!(repo_pull(b, None).unwrap(), "up to date");
+    }
+    #[test]
+    fn pull_reports_diverged_and_conflict_without_touching_the_tree() {
+        let (_root, _url, a, b) = origin_and_clones();
+        // conflict: upstream edits f.txt, B has uncommitted edits to f.txt
+        write_and_commit(&a, "f.txt", "upstream\n", "c2");
+        repo_push(a.clone(), None, None).unwrap();
+        std::fs::write(Path::new(&b).join("f.txt"), "local-dirty\n").unwrap();
+        let err = repo_pull(b.clone(), None).unwrap_err();
+        assert!(err.starts_with("conflict:"), "{err}");
+        assert_eq!(read(&b, "f.txt"), "local-dirty\n");
+        assert_eq!(repo_log(b.clone(), None).unwrap().len(), 1, "ref not moved");
+        // diverged: B commits locally on top of old base
+        repo_discard(b.clone(), vec!["f.txt".into()]).unwrap();
+        write_and_commit(&b, "g.txt", "g\n", "local c");
+        let err = repo_pull(b.clone(), None).unwrap_err();
+        assert!(err.starts_with("diverged:"), "{err}");
+    }
+    #[test]
+    fn push_to_missing_remote_errors_and_urls_are_redacted() {
+        let (_dir, path) = init_temp_repo();
+        write_and_commit(&path, "a.txt", "one\n", "first");
+        assert!(repo_push(path, Some("nope".into()), None).is_err());
+        assert_eq!(
+            redact("fetch failed https://user:ghp_SECRET@github.com/x/y.git: 403"),
+            "fetch failed https://***@github.com/x/y.git: 403"
+        );
+        assert_eq!(redact("plain https://github.com/x"), "plain https://github.com/x");
     }
 }

@@ -2416,7 +2416,7 @@ mod delivery_tests {
             ],
         );
 
-        let oid = crate::git::repo_commit(path.clone(), "first".into()).expect("commit");
+        let oid = crate::git::repo_commit(path.clone(), "first".into(), None).expect("commit");
 
         let queued = queued_webhook_ids();
         let payload = queued_payload("hook-git");
