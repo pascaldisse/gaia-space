@@ -42,6 +42,26 @@ pub struct Commit {
 }
 
 #[derive(Serialize)]
+pub struct GraphRef {
+    pub name: String,
+    /// "head" | "branch" | "remote" | "tag"
+    pub kind: String,
+}
+#[derive(Serialize)]
+pub struct GraphCommit {
+    pub id: String,
+    pub short_id: String,
+    pub parents: Vec<String>,
+    pub author: String,
+    pub email: String,
+    pub summary: String,
+    /// seconds since epoch
+    pub date: i64,
+    pub refs: Vec<GraphRef>,
+}
+/// Default commit budget for `repo_log_graph` when the caller passes no limit.
+pub const DEFAULT_GRAPH_LIMIT: usize = 500;
+#[derive(Serialize)]
 pub struct Branch {
     pub name: String,
     pub is_head: bool,
@@ -226,6 +246,74 @@ pub fn repo_log(path: String, limit: Option<usize>) -> Result<Vec<Commit>> {
     Ok(out)
 }
 
+/// Commit graph feed: topologically ordered (children before parents, newest first among
+/// peers), each commit carrying the branch/tag/HEAD refs that point at it. With `reference`
+/// (any rev spec: branch, tag, sha) only that ref's ancestry is walked; without it, every
+/// local branch, remote branch, tag and HEAD seeds the walk, as Fork's "all branches" view.
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn repo_log_graph(path: String, limit: Option<usize>, reference: Option<String>) -> Result<Vec<GraphCommit>> {
+    let repo = open(&path)?;
+    let mut refs_by_oid: std::collections::HashMap<git2::Oid, Vec<GraphRef>> = std::collections::HashMap::new();
+    let head_oid = repo.head().ok().and_then(|h| h.peel_to_commit().ok()).map(|c| c.id());
+    let head_branch = if repo.head_detached().unwrap_or(false) {
+        None
+    } else {
+        repo.head().ok().and_then(|h| h.shorthand().ok().map(str::to_string))
+    };
+    if let Some(oid) = head_oid {
+        // HEAD marker first so the UI shows it leading the chip list.
+        refs_by_oid.entry(oid).or_default().push(GraphRef { name: "HEAD".into(), kind: "head".into() });
+    }
+    let mut walk = repo.revwalk().map_err(|e| e.to_string())?;
+    walk.set_sorting(Sort::TOPOLOGICAL | Sort::TIME).map_err(|e| e.to_string())?;
+    match reference.as_deref().map(str::trim).filter(|r| !r.is_empty()) {
+        Some(spec) => {
+            let obj = repo.revparse_single(spec).map_err(|e| format!("ref {spec}: {e}"))?;
+            let commit = obj.peel_to_commit().map_err(|e| format!("ref {spec}: {e}"))?;
+            walk.push(commit.id()).map_err(|e| e.to_string())?;
+        }
+        None => {
+            for glob in ["refs/heads/*", "refs/remotes/*", "refs/tags/*"] {
+                walk.push_glob(glob).map_err(|e| e.to_string())?;
+            }
+            let _ = walk.push_head(); // unborn HEAD / empty repo: nothing to push
+        }
+    }
+    for r in repo.references().map_err(|e| e.to_string())? {
+        let r = r.map_err(|e| e.to_string())?;
+        let full = match r.name() { Ok(n) => n.to_string(), Err(_) => continue };
+        let (kind, short) = if let Some(n) = full.strip_prefix("refs/heads/") {
+            (if Some(n) == head_branch.as_deref() { "head" } else { "branch" }, n)
+        } else if let Some(n) = full.strip_prefix("refs/remotes/") {
+            if n.ends_with("/HEAD") { continue; }
+            ("remote", n)
+        } else if let Some(n) = full.strip_prefix("refs/tags/") {
+            ("tag", n)
+        } else {
+            continue;
+        };
+        if let Ok(c) = r.peel_to_commit() {
+            refs_by_oid.entry(c.id()).or_default().push(GraphRef { name: short.to_string(), kind: kind.to_string() });
+        }
+    }
+    let mut out = Vec::new();
+    for oid in walk.take(limit.unwrap_or(DEFAULT_GRAPH_LIMIT)) {
+        let oid = oid.map_err(|e| e.to_string())?;
+        let c = repo.find_commit(oid).map_err(|e| e.to_string())?;
+        let author = c.author();
+        out.push(GraphCommit {
+            id: oid.to_string(),
+            short_id: oid.to_string()[..8].to_string(),
+            parents: c.parent_ids().map(|p| p.to_string()).collect(),
+            author: author.name().unwrap_or("").to_string(),
+            email: author.email().unwrap_or("").to_string(),
+            summary: c.summary().ok().flatten().unwrap_or("").to_string(),
+            date: c.time().seconds(),
+            refs: refs_by_oid.remove(&oid).unwrap_or_default(),
+        });
+    }
+    Ok(out)
+}
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn repo_branches(path: String) -> Result<Vec<Branch>> {
     let repo = open(&path)?;
@@ -800,6 +888,42 @@ mod tests {
         assert_eq!(contents, "two", "unstage must not touch the working tree");
     }
 
+    #[test]
+    fn log_graph_topological_with_refs_and_limit() {
+        let (_dir, path) = init_temp_repo();
+        let root = write_and_commit(&path, "a.txt", "one", "root");
+        repo_branch_create(path.clone(), "feature".into(), None).expect("branch");
+        repo_checkout(path.clone(), "feature".into()).expect("co feature");
+        let side = write_and_commit(&path, "b.txt", "b", "side");
+        let main = repo_branches(path.clone()).unwrap().into_iter().find(|b| b.name != "feature").unwrap().name;
+        repo_checkout(path.clone(), main).expect("co main");
+        let tip = write_and_commit(&path, "c.txt", "c", "mainline");
+        let repo = Repository::open(&path).unwrap();
+        let obj = repo.find_object(git2::Oid::from_str(&root).unwrap(), None).unwrap();
+        repo.tag_lightweight("v1", &obj, false).unwrap();
+        let g = repo_log_graph(path.clone(), None, None).expect("graph");
+        assert_eq!(g.len(), 3, "all branches walked, not only HEAD");
+        let pos = |id: &str| g.iter().position(|c| c.id == id).unwrap();
+        assert!(pos(&tip) < pos(&root) && pos(&side) < pos(&root), "children before parents");
+        assert_eq!(g[pos(&root)].parents.len(), 0);
+        assert_eq!(g[pos(&tip)].parents, vec![root.clone()]);
+        let names = |id: &str| g[pos(id)].refs.iter().map(|r| format!("{}:{}", r.kind, r.name)).collect::<Vec<_>>();
+        assert!(names(&tip).contains(&"head:HEAD".to_string()));
+        assert!(names(&side).contains(&"branch:feature".to_string()));
+        assert!(names(&root).contains(&"tag:v1".to_string()));
+        assert_eq!(g[pos(&tip)].summary, "mainline");
+        assert_eq!(g[pos(&tip)].author, "Test");
+        // limit param + ref param
+        assert_eq!(repo_log_graph(path.clone(), Some(1), None).unwrap().len(), 1);
+        let only = repo_log_graph(path.clone(), None, Some("feature".into())).unwrap();
+        assert_eq!(only.len(), 2);
+        assert!(repo_log_graph(path.clone(), None, Some("nope".into())).is_err());
+    }
+    #[test]
+    fn log_graph_empty_repo_is_empty() {
+        let (_dir, path) = init_temp_repo();
+        assert!(repo_log_graph(path, None, None).expect("graph").is_empty());
+    }
     #[test]
     fn tags_and_remotes_read_empty_repo_without_error() {
         let (_dir, path) = init_temp_repo();

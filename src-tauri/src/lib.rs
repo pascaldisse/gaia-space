@@ -228,6 +228,7 @@ pub fn run() {
             git::repo_remove,
             git::repo_info,
             git::repo_log,
+            git::repo_log_graph,
             git::repo_branches,
             git::repo_status,
             git::repo_diff,
