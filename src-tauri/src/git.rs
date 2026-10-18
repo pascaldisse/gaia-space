@@ -281,7 +281,7 @@ pub fn repo_log_graph(path: String, limit: Option<usize>, reference: Option<Stri
     }
     for r in repo.references().map_err(|e| e.to_string())? {
         let r = r.map_err(|e| e.to_string())?;
-        let full = match r.name() { Some(n) => n.to_string(), None => continue };
+        let full = match r.name() { Ok(n) => n.to_string(), Err(_) => continue };
         let (kind, short) = if let Some(n) = full.strip_prefix("refs/heads/") {
             (if Some(n) == head_branch.as_deref() { "head" } else { "branch" }, n)
         } else if let Some(n) = full.strip_prefix("refs/remotes/") {
