@@ -83,18 +83,24 @@ export function assignLanes(commits: GraphCommit[]): GraphLayout {
       return { id: parentId, lane: claim(parentId) };
     });
 
-    // CONVERGENCE: two branches can both still be waiting on the same not-yet-
-    // visited ancestor (a merge base). Without this, the later of the two lanes
-    // would hold a reservation for a commit that only ever gets drawn once, in
-    // the earlier lane — wasting a column for the rest of the graph. The lowest
-    // lane index keeps the reservation; every later duplicate frees up here,
-    // which is also exactly the row after which their graph lines should merge.
+    // CONVERGENCE: two branches can both still be waiting on the same not-yet-visited ancestor
+    // (a merge base). The duplicate reservation must be dropped, but WHICH one survives matters:
+    // links emitted on EARLIER rows already ended (row-local edge) in the older lane and rows since
+    // then draw it as a passthrough. Freeing the older lane would kill those lines mid-graph. So the
+    // reservation that already existed when this row started (`entering`) always wins; only slots
+    // newly set by THIS row (first-parent inheritance / claim) yield, and the links this row just
+    // emitted are re-pointed below. With no older reservation the lowest index wins.
     const owner = new Map<string, number>();
     for (let i = 0; i < active.length; i++) {
       const id = active[i];
+      if (id !== null && entering[i] === id) owner.set(id, i);
+    }
+    for (let i = 0; i < active.length; i++) {
+      const id = active[i];
       if (id === null) continue;
-      if (owner.has(id)) active[i] = null;
-      else owner.set(id, i);
+      if (owner.has(id)) {
+        if (owner.get(id) !== i) active[i] = null;
+      } else owner.set(id, i);
     }
 
     // Re-point each parent link at the lane that actually SURVIVED convergence, so the edge
