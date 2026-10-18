@@ -97,6 +97,12 @@ export function assignLanes(commits: GraphCommit[]): GraphLayout {
       else owner.set(id, i);
     }
 
+    // Re-point each parent link at the lane that actually SURVIVED convergence, so the edge
+    // curves into the shared ancestor's lane instead of dead-ending in a lane that was freed.
+    for (const link of parentLanes) {
+      const owned = owner.get(link.id);
+      if (owned !== undefined) link.lane = owned;
+    }
     const passthroughLanes = entering.reduce<number[]>((acc, id, index) => {
       if (id !== null && index !== lane) acc.push(index);
       return acc;
@@ -106,4 +112,25 @@ export function assignLanes(commits: GraphCommit[]): GraphLayout {
   }
 
   return { nodes, laneCount };
+}
+
+/** SVG path for one Fork-style edge from a node (x1,y1) to its parent's lane (x2,y2).
+ *  Same lane -> straight line; lane change -> S-curve (vertical tangents at both ends) so the
+ *  connector meets the lane verticals smoothly instead of cutting a hard diagonal. `curve`
+ *  is the fraction of the row height the bend takes (0 = diagonal-free straight drop). */
+export function edgePath(x1: number, y1: number, x2: number, y2: number, curve = 0.5): string {
+  if (x1 === x2) return `M ${x1} ${y1} L ${x2} ${y2}`;
+  const dy = (y2 - y1) * curve;
+  return `M ${x1} ${y1} C ${x1} ${y1 + dy}, ${x2} ${y2 - dy}, ${x2} ${y2}`;
+}
+
+/** Ref chip kinds, as emitted by the backend `repo_log_graph`. */
+export type GraphRefKind = "head" | "branch" | "remote" | "tag";
+export type GraphRefChip = { name: string; kind: GraphRefKind | string };
+const REF_ORDER: Record<string, number> = { head: 0, branch: 1, remote: 2, tag: 3 };
+/** Chip order on a row: HEAD first, then local branches, remotes, tags; name as tiebreak. */
+export function orderRefs<T extends GraphRefChip>(refs: T[]): T[] {
+  return refs
+    .slice()
+    .sort((a, b) => (REF_ORDER[a.kind] ?? 9) - (REF_ORDER[b.kind] ?? 9) || a.name.localeCompare(b.name));
 }

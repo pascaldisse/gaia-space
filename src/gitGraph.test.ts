@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { assignLanes, type GraphCommit } from "./gitGraph";
+import { assignLanes, edgePath, orderRefs, type GraphCommit } from "./gitGraph";
 
 function c(id: string, parents: string[] = []): GraphCommit {
   return { id, parents };
@@ -42,7 +42,8 @@ describe("assignLanes", () => {
       // and must draw a plain vertical straight through this row.
       { id: "A", lane: 0, parentLanes: [{ id: "Base", lane: 0 }], passthroughLanes: [1] },
       // Symmetric: lane 0 is now waiting on Base, and passes straight through B's row.
-      { id: "B", lane: 1, parentLanes: [{ id: "Base", lane: 1 }], passthroughLanes: [0] },
+// B's edge curves INTO lane 0 (the surviving owner of Base), not into the freed lane 1.
+      { id: "B", lane: 1, parentLanes: [{ id: "Base", lane: 0 }], passthroughLanes: [0] },
       { id: "Base", lane: 0, parentLanes: [], passthroughLanes: [] },
     ]);
   });
@@ -112,5 +113,46 @@ describe("assignLanes", () => {
   test("deterministic: same input order always yields the same layout", () => {
     const commits = [c("M", ["A", "B"]), c("A", ["Base"]), c("B", ["Base"]), c("Base")];
     expect(assignLanes(commits)).toEqual(assignLanes(commits));
+  });
+});
+
+describe("edgePath", () => {
+  test("same lane is a straight line", () => {
+    expect(edgePath(8, 15, 8, 30)).toBe("M 8 15 L 8 30");
+  });
+  test("lane change is a cubic S-curve with vertical tangents", () => {
+    expect(edgePath(8, 15, 24, 30)).toBe("M 8 15 C 8 22.5, 24 22.5, 24 30");
+    expect(edgePath(8, 15, 24, 30, 0.25)).toBe("M 8 15 C 8 18.75, 24 26.25, 24 30");
+  });
+});
+describe("orderRefs", () => {
+  test("HEAD, branches, remotes, tags; alphabetical within a kind", () => {
+    const out = orderRefs([
+      { name: "v1", kind: "tag" },
+      { name: "origin/main", kind: "remote" },
+      { name: "zeta", kind: "branch" },
+      { name: "HEAD", kind: "head" },
+      { name: "alpha", kind: "branch" },
+    ]);
+    expect(out.map((r) => r.name)).toEqual(["HEAD", "alpha", "zeta", "origin/main", "v1"]);
+  });
+});
+describe("assignLanes — graph feed shapes", () => {
+  test("two long-lived branches interleaved keep their lanes and converge on the merge base", () => {
+    // topo order as repo_log_graph emits for main(m2<-m1<-base) + feature(f2<-f1<-base)
+    const { nodes, laneCount } = assignLanes([
+      c("m2", ["m1"]), c("f2", ["f1"]), c("m1", ["base"]), c("f1", ["base"]), c("base"),
+    ]);
+    expect(laneCount).toBe(2);
+    expect(nodes.map((n) => n.lane)).toEqual([0, 1, 0, 1, 0]);
+    expect(nodes[3].parentLanes).toEqual([{ id: "base", lane: 0 }]);
+    // base row sits on lane 0; lane 1 was released by f1's edge curving into lane 0
+    expect(nodes[4]).toEqual({ id: "base", lane: 0, parentLanes: [], passthroughLanes: [] });
+  });
+  test("every parent edge targets a lane that the parent row actually occupies or inherits", () => {
+    const commits = [c("M", ["A", "B"]), c("A", ["R"]), c("B", ["R"]), c("R")];
+    const { nodes } = assignLanes(commits);
+    const byId = new Map(nodes.map((n) => [n.id, n]));
+    for (const n of nodes) for (const link of n.parentLanes) expect(byId.get(link.id)).toBeDefined();
   });
 });
