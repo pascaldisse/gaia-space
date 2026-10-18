@@ -45,3 +45,4 @@ bridge/github-push/state.json
 # build artifacts once committed by mistake (09-06)
 legacy/flutter/.gradle/
 legacy/flutter/.expo/
+dist-proof/

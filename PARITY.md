@@ -128,7 +128,7 @@ Note: lane reported 1 dashboard test fail; independent re-run (crown) = 99 pass/
 | fork + fork relationship | fork_service.dart | UNVERIFIED | |
 | branch protection | branch_protection_service.dart | UNVERIFIED | |
 | pull requests | pull_request_service.dart | UNVERIFIED | |
-| commit graph / diff viewer / image diff | ui/widgets/git/* | UNVERIFIED | |
+| commit graph / diff viewer / image diff | ui/widgets/git/* | partial — commit graph + diff viewer DONE (branch gv/graph); image diff UNVERIFIED | commit graph: src-tauri/src/git.rs `repo_log_graph` (+ tests `git::tests::log_graph_*`), src/gitGraph.ts (`assignLanes`/`edgePath`/`orderRefs`, src/gitGraph.test.ts), src/components/CommitGraph.tsx + src/views/Repos.tsx Graph tab (curved SVG lanes, branch/tag/HEAD chips, HEAD ring, row click -> commit detail + changed files, file click -> src/Diff.tsx). Headless proof (vite preview + playwright, real git.rs via src-tauri/examples/git_cli.rs): reports/git-ui/graph.png, graph-detail.png, graph-diff.png; harness proof/git-graph/shoot.mjs |
 | custom commands | custom_command_service.dart | UNVERIFIED | |
 | discord integration | discord_service.dart | UNVERIFIED | |
 | virtual directory browser | virtual_directory_browser.dart | UNVERIFIED | |

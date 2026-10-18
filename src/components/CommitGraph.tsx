@@ -108,8 +108,9 @@ export function GraphRow(props: {
         </Show>
       </svg>
       <span class="graph-summary">
-        {props.commit.summary || "(no summary)"}
+        {/* Fork order: ref chips lead the message so they survive the ellipsis. */}
         <For each={props.refs}>{(r) => <span class={`ref-badge ref-${r.kind}`}>{r.label}</span>}</For>
+        {props.commit.summary || "(no summary)"}
       </span>
       <span class="graph-sha">{props.commit.short_id}</span>
       <span class="graph-date" title={when(props.commit.time)}>{relativeTime(props.commit.time)}</span>
