@@ -43,6 +43,16 @@ export type RemoteInfo = { name: string; url: string };
 export type StashEntry = { index: number; message: string };
 export type TreeEntry = { name: string; path: string; is_dir: boolean; id: string };
 export type CommitFile = { path: string; status: string };
+export type RebaseAction = "pick" | "squash" | "fixup" | "reword" | "drop";
+export type RebaseRow = { id: string; action: RebaseAction; summary: string; message?: string | null };
+export type RebaseOutcome = {
+  status: "done" | "conflict";
+  head: string | null;
+  message: string;
+  conflicts: string[];
+  abort_command: string | null;
+};
+export type ResetMode = "soft" | "mixed" | "hard";
 export type WorktreeInfo = { name: string; path: string };
 export type HostedRepository = {
   id: string;
@@ -100,6 +110,21 @@ export const api = {
   repoStashPop: (path: string, index?: number) =>
     invoke<void>("repo_stash_pop", { path, index: index ?? null }),
   repoStashList: (path: string) => invoke<StashEntry[]>("repo_stash_list", { path }),
+  repoStashApply: (path: string, index?: number) =>
+    invoke<void>("repo_stash_apply", { path, index: index ?? null }),
+  repoStashDrop: (path: string, index?: number) =>
+    invoke<void>("repo_stash_drop", { path, index: index ?? null }),
+  repoCherryPick: (path: string, commit: string) =>
+    invoke<string>("repo_cherry_pick", { path, commit }),
+  repoRevert: (path: string, commit: string) =>
+    invoke<string>("repo_revert", { path, commit }),
+  repoReset: (path: string, commit: string, mode?: ResetMode) =>
+    invoke<string>("repo_reset", { path, commit, mode: mode ?? null }),
+  repoRebasePlan: (path: string, onto: string, from?: string) =>
+    invoke<RebaseRow[]>("repo_rebase_plan", { path, onto, from: from ?? null }),
+  repoRebaseApply: (path: string, onto: string, plan: RebaseRow[], from?: string) =>
+    invoke<RebaseOutcome>("repo_rebase_apply", { path, onto, from: from ?? null, plan }),
+  repoRebaseAbort: (path: string) => invoke<void>("repo_rebase_abort", { path }),
   repoCommitFiles: (path: string, id: string) =>
     invoke<CommitFile[]>("repo_commit_files", { path, id }),
   repoTree: (path: string, id: string, dir?: string) =>

@@ -476,3 +476,4 @@
 .ref-list li.branch-row .icon-button { opacity: 0; }
 .ref-list li.branch-row:hover .icon-button { opacity: 1; }
 .amend-check { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; margin-right: auto; }
+.ref-list .stash-actions { display: inline-flex; gap: 4px; }

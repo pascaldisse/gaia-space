@@ -1,0 +1,19 @@
+.history-ops { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--line, #243050); }
+.history-ops h4 { margin: 0 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--text-muted, #8a96b0); }
+.history-ops-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.history-ops-reset { display: inline-flex; align-items: center; gap: 4px; }
+.history-ops-error { color: var(--status-danger-ink, #e5484d); font-size: 12px; margin: 8px 0 0; word-break: break-word; }
+.rebase-editor { margin-top: 12px; border: 1px solid var(--line, #243050); border-radius: 8px; overflow: hidden; }
+.rebase-head { padding: 8px 12px; font-size: 12px; color: var(--text-muted, #8a96b0); border-bottom: 1px solid var(--line, #243050); }
+.rebase-plan { width: 100%; border-collapse: collapse; font-size: 13px; }
+.rebase-plan th { text-align: left; font-weight: 500; font-size: 11px; color: var(--text-faint, #6b7794); padding: 6px 12px; }
+.rebase-plan td { padding: 5px 12px; border-top: 1px solid var(--line, #243050); vertical-align: middle; }
+.rebase-plan td.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--accent, #6aa5ff); }
+.rebase-plan tr.dropped .rebase-summary { text-decoration: line-through; opacity: .55; }
+.rebase-plan tr[data-action="squash"] td:first-child, .rebase-plan tr[data-action="fixup"] td:first-child { box-shadow: inset 3px 0 var(--attn-amber, #e0a030); }
+.rebase-plan tr[data-action="reword"] td:first-child { box-shadow: inset 3px 0 var(--accent, #6aa5ff); }
+.rebase-plan tr[data-action="drop"] td:first-child { box-shadow: inset 3px 0 var(--status-danger-ink, #e5484d); }
+.rebase-plan input[type="text"] { width: 100%; box-sizing: border-box; }
+.rebase-actions { display: flex; gap: 8px; padding: 8px 12px; border-top: 1px solid var(--line, #243050); }
+.rebase-conflict { margin-top: 12px; padding: 10px 12px; border: 1px solid var(--attn-amber, #e0a030); border-radius: 8px; font-size: 13px; display: grid; gap: 6px; }
+.rebase-conflict .abort-cmd { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; word-break: break-all; }
