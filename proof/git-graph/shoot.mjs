@@ -1,8 +1,13 @@
+// PREREQS (undocumented before): (1) `cargo build --example git_cli` in src-tauri; (2) `bunx vite build --config vite.proof.config.ts`
+// (writes dist-proof/, which `vite preview` serves -- stale/missing dist-proof = stale/blank page);
+// (3) run with bun: `GIT_PROOF_PORT=5441 bun proof/git-graph/shoot.mjs`. See proof/git-graph/README.md.
+// stats.brokenEdges = gitGraph.ts brokenEdges() over the REAL repo_log_graph feed the page rendered (must be 0).
 // Headless proof: vite preview (built proof harness) + playwright headless chromium page.screenshot.
 // Backend = the REAL git.rs via src-tauri/examples/git_cli (cargo build --example git_cli first).
 // Params (env): GIT_PROOF_REPO (default: this checkout), GIT_PROOF_PORT (4173), GIT_PROOF_OUT
 // (reports/git-ui), GIT_CLI (path to built git_cli), GIT_PROOF_VIEWPORT ("1800x1000").
 import { chromium } from "playwright";
+import { assignLanes, brokenEdges } from "../../src/gitGraph.ts";
 import { spawn } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import { resolve, dirname } from "node:path";
@@ -34,6 +39,7 @@ const browser = await chromium.launch({ headless: true });
 try {
   const page = await browser.newPage({ viewport: { width: vw, height: vh } });
   const calls = [];
+  let graphFeed = null;
   page.on("console", (m) => { if (m.type() === "error") console.error("console.error:", m.text()); });
   page.on("pageerror", (e) => console.error("pageerror:", e.message));
   await page.exposeFunction("__gitProof", async (cmd, args) => {
@@ -42,6 +48,7 @@ try {
     if (["list_projects", "list_hosted_repos"].includes(cmd)) return [];
     const r = await run(cmd, args);
     if (!r.ok) throw new Error(r.error);
+    if (cmd === "repo_log_graph" && !graphFeed) graphFeed = r.value;
     return r.value;
   });
   await page.addInitScript(() => {
@@ -69,7 +76,11 @@ try {
     headMarkers: document.querySelectorAll("[data-head-marker]").length,
     paths: document.querySelectorAll(".graph-row svg path").length,
   }));
+  const broken = brokenEdges(assignLanes((graphFeed ?? []).map((c) => ({ id: c.id, parents: c.parents }))));
+  stats.brokenEdges = broken.length;
+  if (broken.length) console.error("BROKEN EDGES:", JSON.stringify(broken.slice(0, 5)));
   console.log(JSON.stringify({ repo, stats, calls: [...new Set(calls)] }));
+  if (broken.length) process.exitCode = 1;
 } finally {
   await browser.close();
   stop();

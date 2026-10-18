@@ -83,18 +83,24 @@ export function assignLanes(commits: GraphCommit[]): GraphLayout {
       return { id: parentId, lane: claim(parentId) };
     });
 
-    // CONVERGENCE: two branches can both still be waiting on the same not-yet-
-    // visited ancestor (a merge base). Without this, the later of the two lanes
-    // would hold a reservation for a commit that only ever gets drawn once, in
-    // the earlier lane — wasting a column for the rest of the graph. The lowest
-    // lane index keeps the reservation; every later duplicate frees up here,
-    // which is also exactly the row after which their graph lines should merge.
+    // CONVERGENCE: two branches can both still be waiting on the same not-yet-visited ancestor
+    // (a merge base). The duplicate reservation must be dropped, but WHICH one survives matters:
+    // links emitted on EARLIER rows already ended (row-local edge) in the older lane and rows since
+    // then draw it as a passthrough. Freeing the older lane would kill those lines mid-graph. So the
+    // reservation that already existed when this row started (`entering`) always wins; only slots
+    // newly set by THIS row (first-parent inheritance / claim) yield, and the links this row just
+    // emitted are re-pointed below. With no older reservation the lowest index wins.
     const owner = new Map<string, number>();
     for (let i = 0; i < active.length; i++) {
       const id = active[i];
+      if (id !== null && entering[i] === id) owner.set(id, i);
+    }
+    for (let i = 0; i < active.length; i++) {
+      const id = active[i];
       if (id === null) continue;
-      if (owner.has(id)) active[i] = null;
-      else owner.set(id, i);
+      if (owner.has(id)) {
+        if (owner.get(id) !== i) active[i] = null;
+      } else owner.set(id, i);
     }
 
     // Re-point each parent link at the lane that actually SURVIVED convergence, so the edge
@@ -112,6 +118,32 @@ export function assignLanes(commits: GraphCommit[]): GraphLayout {
   }
 
   return { nodes, laneCount };
+}
+
+export type BrokenEdge = { row: number; from: string; to: string; lane: number; deadAtRow: number };
+
+/** INVARIANT CHECK (row-local-edge + passthroughLanes model of CommitGraph.tsx): a link emitted
+ *  at row r ends at the bottom of row r in `link.lane`. Every later row up to the parent must then
+ *  draw that lane as a passthrough (the line never dies), and the parent row must sit ON that lane.
+ *  A parent absent from the list (feed truncated) must stay alive to the last row.
+ *  Returns every violating edge; `[]` = graph is sound. */
+export function brokenEdges(layout: GraphLayout): BrokenEdge[] {
+  const { nodes } = layout;
+  const rowOf = new Map(nodes.map((n, i) => [n.id, i]));
+  const out: BrokenEdge[] = [];
+  nodes.forEach((n, r) => {
+    for (const link of n.parentLanes) {
+      const p = rowOf.get(link.id);
+      const end = p ?? nodes.length;
+      let dead = -1;
+      for (let j = r + 1; j < end; j++) {
+        if (!nodes[j].passthroughLanes.includes(link.lane)) { dead = j; break; }
+      }
+      if (dead === -1 && p !== undefined && nodes[p].lane !== link.lane) dead = p;
+      if (dead !== -1) out.push({ row: r, from: n.id, to: link.id, lane: link.lane, deadAtRow: dead });
+    }
+  });
+  return out;
 }
 
 /** SVG path for one Fork-style edge from a node (x1,y1) to its parent's lane (x2,y2).

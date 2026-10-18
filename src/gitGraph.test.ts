@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { assignLanes, edgePath, orderRefs, type GraphCommit } from "./gitGraph";
+import { assignLanes, brokenEdges, edgePath, orderRefs, type GraphCommit } from "./gitGraph";
 
 function c(id: string, parents: string[] = []): GraphCommit {
   return { id, parents };
@@ -149,10 +149,76 @@ describe("assignLanes — graph feed shapes", () => {
     // base row sits on lane 0; lane 1 was released by f1's edge curving into lane 0
     expect(nodes[4]).toEqual({ id: "base", lane: 0, parentLanes: [], passthroughLanes: [] });
   });
-  test("every parent edge targets a lane that the parent row actually occupies or inherits", () => {
+  test("every parent edge never dies: lane is a passthrough on every row until the parent row, which sits on it", () => {
     const commits = [c("M", ["A", "B"]), c("A", ["R"]), c("B", ["R"]), c("R")];
-    const { nodes } = assignLanes(commits);
-    const byId = new Map(nodes.map((n) => [n.id, n]));
-    for (const n of nodes) for (const link of n.parentLanes) expect(byId.get(link.id)).toBeDefined();
+    expect(brokenEdges(assignLanes(commits))).toEqual([]);
+  });
+  test("brokenEdges detects a dead line (self-check of the invariant)", () => {
+    const layout = assignLanes([c("A", ["B"]), c("B")]);
+    layout.nodes[0].parentLanes[0].lane = 3; // parent is on lane 0, nobody passes lane 3
+    expect(brokenEdges(layout)).toHaveLength(1);
+  });
+  test("VERDICT row74 shape: later convergence into a LOWER lane must not free the lane an earlier merge edge already took", () => {
+    // M merges A(lane0)+X(lane1): X's first parent P is held on lane 1.
+    // Then a commit Z on lane 0 also has first parent P -> convergence. Lowest-index-wins would free
+    // lane 1 (killing M->P-style edges already drawn into it); the older reservation must survive.
+    const commits = [
+      c("M", ["A", "P"]), // merge edge M->P takes a lane (lane 1)
+      c("A", ["A2"]),
+      c("A2", ["P"]), // lane 0 now ALSO waits for P -> convergence at this row
+      c("Q", ["R"]),
+      c("P", ["R"]),
+      c("R"),
+    ];
+    const layout = assignLanes(commits);
+    expect(brokenEdges(layout)).toEqual([]);
+    const m = layout.nodes[0].parentLanes.find((l) => l.id === "P")!;
+    const pRow = layout.nodes.find((n) => n.id === "P")!;
+    expect(pRow.lane).toBe(m.lane);
+  });
+});
+
+/** seeded PRNG (mulberry32) so the fuzz is fully deterministic */
+function rng(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/** Random DAG in feed order (children before parents). Each commit i has 1..3 parents drawn from
+ *  later rows, distinct (no redundant merge parents), biased to near rows for long-lived lanes. */
+function randomDag(rand: () => number, n: number): GraphCommit[] {
+  const commits: GraphCommit[] = [];
+  for (let i = 0; i < n; i++) {
+    const later = n - 1 - i;
+    const parents: string[] = [];
+    if (later > 0) {
+      const want = rand() < 0.3 ? (rand() < 0.2 ? 3 : 2) : 1;
+      while (parents.length < Math.min(want, later)) {
+        const span = rand() < 0.6 ? Math.min(later, 4) : later;
+        const id = `c${i + 1 + Math.floor(rand() * span)}`;
+        if (!parents.includes(id)) parents.push(id);
+      }
+    }
+    commits.push({ id: `c${i}`, parents });
+  }
+  return commits;
+}
+
+describe("assignLanes — fuzz", () => {
+  test("500 seeded random non-degenerate DAGs: 0 broken edges", () => {
+    const rand = rng(20261018);
+    const bad: string[] = [];
+    for (let g = 0; g < 500; g++) {
+      const commits = randomDag(rand, 8 + Math.floor(rand() * 60));
+      const broken = brokenEdges(assignLanes(commits));
+      if (broken.length) bad.push(`graph ${g}: ${JSON.stringify(broken[0])}`);
+    }
+    expect(bad).toEqual([]);
   });
 });
