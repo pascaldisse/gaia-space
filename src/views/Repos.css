@@ -467,7 +467,7 @@
 .hunk-lines div { padding: 0 8px; white-space: pre; }
 .hunk-lines .hl-add { background: rgba(46, 160, 67, .18); }
 .hunk-lines .hl-del { background: rgba(248, 81, 73, .18); }
-.branch-form { display: flex; gap: 6px; padding: 4px 8px; }
+.branch-form { display: flex; flex-direction: column; gap: 6px; padding: 4px 8px; }
 .branch-form input { flex: 1; min-width: 0; }
 .ref-list li.branch-row { display: flex; align-items: center; justify-content: space-between; }
 .ref-list li.branch-row .icon-button { opacity: 0; }

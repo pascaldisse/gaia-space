@@ -631,7 +631,7 @@ export default function App() {
               <Group title="Branches" count={localBranches().length} open={groupsOpen().branches} onToggle={() => toggleGroup("branches")}>
                 <form class="branch-form" onSubmit={createBranch}>
                   <input aria-label="New branch name" placeholder="New branch…" value={newBranch()} onInput={(e) => setNewBranch(e.currentTarget.value)} />
-                  <GhostPill disabled={!!busy() || !newBranch().trim()}>Create &amp; checkout</GhostPill>
+                  <GhostPill type="submit" disabled={!!busy() || !newBranch().trim()}>Create &amp; checkout</GhostPill>
                 </form>
                 <ul class="ref-list">
                 <For each={localBranches().filter((b) => matchesFilter(b.name))} fallback={<li class="hint">No branches.</li>}>
