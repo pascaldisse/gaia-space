@@ -298,6 +298,9 @@
   cursor: pointer;
   border-bottom: 1px solid var(--line, #141d30);
 }
+.graph-table.wide .graph-cell { flex: 0 0 auto; max-width: none; }
+.file-list li.file-open { cursor: pointer; }
+.file-list li.file-open:hover { background: var(--wash-2, #141d30); }
 .graph-row:hover { background: var(--wash-2, #141d30); }
 .graph-row.active { background: var(--accent-soft); }
 .graph-cell { flex: 0 1 64px; max-width: 64px; display: block; }

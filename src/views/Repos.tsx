@@ -2,6 +2,7 @@ import { createResource, createSignal, createMemo, createEffect, For, Show, type
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { api, type Commit, type RepoRef } from "../api";
+import { orderRefs } from "../gitGraph";
 import { Diff } from "../Diff";
 import { Resizer, paneWidth } from "../components/Resizer";
 import "../App.css";
@@ -158,6 +159,7 @@ export default function App() {
   function refetchAll() {
     refetchInfo();
     refetchLog();
+    if (leftView() === "graph") refetchGraph();
     refetchBranches();
     refetchStatus();
     refetchTags();
@@ -166,8 +168,13 @@ export default function App() {
   }
 
   // ---------- left sidebar: view switch / filter / collapsible groups ----------
-  const [leftView, setLeftView] = createSignal<"commits" | "changes">("commits");
+  const [leftView, setLeftView] = createSignal<"commits" | "graph" | "changes">("commits");
   const [filter, setFilter] = createSignal("");
+  // Graph tab feed: ALL branches/tags (not just HEAD's ancestry); only fetched while that tab is open.
+  const [graphLog, { refetch: refetchGraph }] = createResource(
+    () => (leftView() === "graph" && active() ? active() : null),
+    (p) => api.repoLogGraph(p),
+  );
   const [groupsOpen, setGroupsOpen] = createSignal({
     hosted: true,
     branches: true,
@@ -204,11 +211,12 @@ export default function App() {
     setSelected("working");
   }
   function selectCommit(c: Commit) {
-    setLeftView("commits");
+    // Stay on the Graph tab when the pick came from it; every other pick lands on All Commits.
+    setLeftView(leftView() === "graph" ? "graph" : "commits");
     setSelected(c);
   }
   function jumpToParent(id: string) {
-    const target = (log() ?? []).find((c) => c.id === id);
+    const target = feed().find((c) => c.id === id);
     if (target) {
       selectCommit(target);
       setTab("commit");
@@ -359,11 +367,25 @@ export default function App() {
   };
 
   // ---------- commit graph layout + ref badges ----------
-  const graphCommits = createMemo<GraphCommit[]>(() => (log() ?? []).map((c) => ({ id: c.id, parents: c.parents })));
+  // `feed` = the commit list the center pane draws: the all-branch graph feed on the Graph tab,
+  // HEAD's ancestry (`repo_log`) on All Commits. Same row component either way.
+  const graphAsCommits = createMemo<Commit[]>(() =>
+    (graphLog() ?? []).map((g) => ({
+      id: g.id, short_id: g.short_id, summary: g.summary, author: g.author, email: g.email, time: g.date, parents: g.parents,
+    })),
+  );
+  const feed = createMemo<Commit[]>(() => (leftView() === "graph" ? graphAsCommits() : log() ?? []));
+  const graphCommits = createMemo<GraphCommit[]>(() => feed().map((c) => ({ id: c.id, parents: c.parents })));
   const layout = createMemo<GraphLayout>(() => assignLanes(graphCommits()));
   const nodeById = createMemo(() => new Map(layout().nodes.map((n) => [n.id, n])));
   const refsByCommit = createMemo(() => {
     const map = new Map<string, Ref[]>();
+    if (leftView() === "graph") {
+      for (const g of graphLog() ?? []) {
+        if (g.refs.length) map.set(g.id, orderRefs(g.refs.map((r) => ({ label: r.name, name: r.name, kind: r.kind }))).map((r) => ({ label: r.label, kind: r.kind as Ref["kind"] })));
+      }
+      return map;
+    }
     const push = (id: string | null | undefined, ref: Ref) => {
       if (!id) return;
       const list = map.get(id) ?? [];
@@ -376,9 +398,14 @@ export default function App() {
     for (const t of tags() ?? []) push(t.target, { label: t.name, kind: "tag" });
     return map;
   });
+  /** Commit HEAD points at (marker ring): the "HEAD" ref chip on the graph feed, newest commit on HEAD's log. */
+  const headId = createMemo(() => {
+    if (leftView() === "graph") return (graphLog() ?? []).find((g) => g.refs.some((r) => r.name === "HEAD"))?.id ?? null;
+    return headCommitId();
+  });
   const filteredLog = createMemo(() => {
     const q = filter().trim().toLowerCase();
-    const list = log() ?? [];
+    const list = feed();
     if (!q) return list;
     return list.filter(
       (c) => c.summary.toLowerCase().includes(q) || c.author.toLowerCase().includes(q) || c.short_id.includes(q),
@@ -532,6 +559,10 @@ export default function App() {
                   <Icon name="clock" size={14} />
                   <span>All Commits</span>
                 </button>
+                <button type="button" class="side-nav-row" classList={{ active: leftView() === "graph" }} onClick={() => setLeftView("graph")}>
+                  <Icon name="repo" size={14} />
+                  <span>Graph</span>
+                </button>
               </div>
 
               <QuietSearch label="Filter commits and branches" placeholder="Filter…" value={filter()} onInput={setFilter} class="side-filter" />
@@ -597,7 +628,7 @@ export default function App() {
               <EmptyState variant="no-match" title="No repository open" hint="Pick a repository on the left to see its commits." />
             }>
               <Show
-                when={leftView() === "commits"}
+                when={leftView() !== "changes"}
                 fallback={
                   <div class="local-changes">
                     <div class="lc-section">
@@ -667,7 +698,7 @@ export default function App() {
                   </div>
                 }
               >
-                <div class="graph-table" role="table" aria-label="Commit graph">
+                <div class="graph-table" classList={{ wide: leftView() === "graph" }} role="table" aria-label="Commit graph">
                   <For each={filteredLog()} fallback={<EmptyState variant="no-match" title="No commits yet" hint="Commit from Local Changes to start this repository's history." />}>
                     {(c) => (
                       <GraphRow
@@ -676,6 +707,7 @@ export default function App() {
                         refs={refsByCommit().get(c.id) ?? []}
                         laneCount={layout().laneCount}
                         active={selectedCommit()?.id === c.id}
+                        isHead={headId() === c.id}
                         onSelect={() => selectCommit(c)}
                       />
                     )}
@@ -733,7 +765,7 @@ export default function App() {
                         <ul class="file-list">
                           <For each={commitFiles()}>
                             {(f) => (
-                              <li>
+                              <li class="file-open" title="Show this file's diff" onClick={() => { setFocusFile(f.path); setTab("changes"); }}>
                                 <span class={`file-badge ${f.status}`}>{f.status}</span>
                                 <span class="lc-file-path">{f.path}</span>
                               </li>

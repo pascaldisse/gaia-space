@@ -1,7 +1,7 @@
 import { For, Show } from "solid-js";
 import { UI_LOCALE } from "../calendar";
 import type { Commit } from "../api";
-import type { GraphLayout } from "../gitGraph";
+import { edgePath, type GraphLayout } from "../gitGraph";
 import "../views/Repos.css";
 
 /* The commit-graph row, extracted from views/Repos.tsx so the project Repository tab renders
@@ -65,6 +65,8 @@ export function GraphRow(props: {
   refs: Ref[];
   laneCount: number;
   active: boolean;
+  /** This commit is what HEAD points at: drawn with an outer ring. */
+  isHead?: boolean;
   onSelect: () => void;
 }) {
   const width = () => LANE_PAD * 2 + Math.max(props.laneCount, 1) * LANE_W;
@@ -89,16 +91,17 @@ export function GraphRow(props: {
               />
               <For each={node().parentLanes}>
                 {(link) => (
-                  <line
-                    x1={laneX(node().lane)}
-                    y1={ROW_H / 2}
-                    x2={laneX(link.lane)}
-                    y2={ROW_H}
+                  <path
+                    d={edgePath(laneX(node().lane), ROW_H / 2, laneX(link.lane), ROW_H)}
+                    fill="none"
                     stroke={laneColor(link.lane === node().lane ? node().lane : link.lane)}
                     stroke-width="2"
                   />
                 )}
               </For>
+              <Show when={props.isHead}>
+                <circle cx={laneX(node().lane)} cy={ROW_H / 2} r={7.5} fill="none" stroke={laneColor(node().lane)} stroke-width="1.5" data-head-marker="true" />
+              </Show>
               <circle cx={laneX(node().lane)} cy={ROW_H / 2} r={4.5} fill={laneColor(node().lane)} />
             </>
           )}

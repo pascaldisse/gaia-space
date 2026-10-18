@@ -17,6 +17,18 @@ export type Commit = {
   time: number;
   parents: string[];
 };
+export type GraphRef = { name: string; kind: "head" | "branch" | "remote" | "tag" };
+export type GraphLogCommit = {
+  id: string;
+  short_id: string;
+  parents: string[];
+  author: string;
+  email: string;
+  summary: string;
+  /** seconds since epoch */
+  date: number;
+  refs: GraphRef[];
+};
 export type Branch = {
   name: string;
   is_head: boolean;
@@ -47,6 +59,9 @@ export const api = {
   repoInfo: (path: string) => invoke<RepoInfo>("repo_info", { path }),
   repoLog: (path: string, limit = 200) =>
     invoke<Commit[]>("repo_log", { path, limit }),
+  /** All-branch topological graph feed; `limit` defaults server-side (500), `reference` narrows to one ref's ancestry. */
+  repoLogGraph: (path: string, limit?: number, reference?: string) =>
+    invoke<GraphLogCommit[]>("repo_log_graph", { path, limit: limit ?? null, reference: reference ?? null }),
   repoBranches: (path: string) => invoke<Branch[]>("repo_branches", { path }),
   repoStatus: (path: string) => invoke<StatusEntry[]>("repo_status", { path }),
   repoDiff: (path: string, id?: string) =>
