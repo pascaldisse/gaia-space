@@ -85,7 +85,7 @@ export default function HistoryOps(props: {
         <GhostPill disabled={busy()} onClick={() => run("reverted", () => api.repoRevert(props.path, props.commit.id))}>Revert</GhostPill>
         <span class="history-ops-reset">
           <PillSelect label="Reset mode" value={mode()} onChange={(v: string) => setMode(v as ResetMode)}>
-            <For each={RESET_MODES}>{(m) => <option value={m}>{m}</option>}</For>
+            <For each={RESET_MODES}>{(m) => <option value={m} selected={m === mode()}>{m}</option>}</For>
           </PillSelect>
           <GhostPill disabled={busy()} onClick={() => run(`reset --${mode()}`, () => api.repoReset(props.path, props.commit.id, mode()))}>Reset here</GhostPill>
         </span>
