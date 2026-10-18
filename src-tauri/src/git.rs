@@ -1514,10 +1514,10 @@ mod tests {
         let (_dir, path) = init_temp_repo();
         let root = write_and_commit(&path, "a.txt", "one", "root");
         repo_branch_create(path.clone(), "feature".into(), None).expect("branch");
-        repo_checkout(path.clone(), "feature".into()).expect("co feature");
+        repo_checkout(path.clone(), "feature".into(), None).expect("co feature");
         let side = write_and_commit(&path, "b.txt", "b", "side");
         let main = repo_branches(path.clone()).unwrap().into_iter().find(|b| b.name != "feature").unwrap().name;
-        repo_checkout(path.clone(), main).expect("co main");
+        repo_checkout(path.clone(), main, None).expect("co main");
         let tip = write_and_commit(&path, "c.txt", "c", "mainline");
         let repo = Repository::open(&path).unwrap();
         let obj = repo.find_object(git2::Oid::from_str(&root).unwrap(), None).unwrap();
@@ -1777,7 +1777,7 @@ mod hist_fixture {
     pub fn commit(path: &str, file: &str, contents: &str, message: &str) -> String {
         std::fs::write(Path::new(path).join(file), contents).expect("write");
         repo_stage(path.to_string(), vec![file.to_string()]).expect("stage");
-        repo_commit(path.to_string(), message.to_string()).expect("commit")
+        repo_commit(path.to_string(), message.to_string(), None).expect("commit")
     }
     pub fn summaries(path: &str) -> Vec<String> {
         repo_log(path.to_string(), None).expect("log").into_iter().map(|c| c.summary).collect()
@@ -1966,9 +1966,9 @@ mod history_ops {
         commit(&p, "base.txt", "b", "base");
         let main = repo_info(p.clone()).unwrap().head.unwrap();
         repo_branch_create(p.clone(), "side".into(), None).unwrap();
-        repo_checkout(p.clone(), "side".into()).unwrap();
+        repo_checkout(p.clone(), "side".into(), None).unwrap();
         let side = commit(&p, "side.txt", "s", "side work");
-        repo_checkout(p.clone(), main).unwrap();
+        repo_checkout(p.clone(), main, None).unwrap();
         assert!(!Path::new(&p).join("side.txt").exists());
         repo_cherry_pick(p.clone(), side).unwrap();
         assert_eq!(summaries(&p), vec!["side work", "base"]);
