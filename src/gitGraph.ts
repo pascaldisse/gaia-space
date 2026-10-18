@@ -114,6 +114,32 @@ export function assignLanes(commits: GraphCommit[]): GraphLayout {
   return { nodes, laneCount };
 }
 
+export type BrokenEdge = { row: number; from: string; to: string; lane: number; deadAtRow: number };
+
+/** INVARIANT CHECK (row-local-edge + passthroughLanes model of CommitGraph.tsx): a link emitted
+ *  at row r ends at the bottom of row r in `link.lane`. Every later row up to the parent must then
+ *  draw that lane as a passthrough (the line never dies), and the parent row must sit ON that lane.
+ *  A parent absent from the list (feed truncated) must stay alive to the last row.
+ *  Returns every violating edge; `[]` = graph is sound. */
+export function brokenEdges(layout: GraphLayout): BrokenEdge[] {
+  const { nodes } = layout;
+  const rowOf = new Map(nodes.map((n, i) => [n.id, i]));
+  const out: BrokenEdge[] = [];
+  nodes.forEach((n, r) => {
+    for (const link of n.parentLanes) {
+      const p = rowOf.get(link.id);
+      const end = p ?? nodes.length;
+      let dead = -1;
+      for (let j = r + 1; j < end; j++) {
+        if (!nodes[j].passthroughLanes.includes(link.lane)) { dead = j; break; }
+      }
+      if (dead === -1 && p !== undefined && nodes[p].lane !== link.lane) dead = p;
+      if (dead !== -1) out.push({ row: r, from: n.id, to: link.id, lane: link.lane, deadAtRow: dead });
+    }
+  });
+  return out;
+}
+
 /** SVG path for one Fork-style edge from a node (x1,y1) to its parent's lane (x2,y2).
  *  Same lane -> straight line; lane change -> S-curve (vertical tangents at both ends) so the
  *  connector meets the lane verticals smoothly instead of cutting a hard diagonal. `curve`
