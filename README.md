@@ -30,7 +30,7 @@ Feature parity against JetBrains Space is tracked in [`PARITY.md`](PARITY.md) (a
 
 A native agent runtime is being built into the Rust backend (`src-tauri/src/agent/`), so a task can run against a project's bound repository, be reviewed through the existing review UI, and be committed under its own identity. It is staged and not yet user-facing; the plan, the security constraints and the per-stage gates live in [`roadmap.md`](roadmap.md).
 
-What exists today: the V150 tables (provider keys, sessions, transcript, tool-call approvals), provider-key storage sealed with `secretbox` — keys are encrypted at rest and never travel back to the frontend in plaintext — and an OpenAI-compatible chat-completions client behind an injected transport, so tests script every reply and never touch the network.
+What exists today: the V150 tables (provider keys, sessions, transcript, tool-call approvals), provider-key storage sealed with `secretbox` — keys are encrypted at rest and never travel back to the frontend in plaintext — an OpenAI-compatible chat-completions client behind an injected transport, so tests script every reply and never touch the network, and the read-only loop: a session's transcript is stored in SQLite (and replayed from it), three tools — `read_file`, `list_files`, `grep` — operate only inside the project's bound repository, and every run ends at a final answer, the step budget or cancellation. The containment rule is component-wise, so `..`, absolute paths, symlinks out of the tree and `.git` are refused before a tool touches anything.
 
 ## Getting started
 

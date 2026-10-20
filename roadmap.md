@@ -4,7 +4,7 @@
 
 - [x] Stage 0 — Foundation: DB rung 150, `agent` module skeleton, encrypted provider keys
 - [x] Stage 1 — Provider: OpenAI-compatible client behind a mockable transport
-- [ ] Stage 2 — Read-only loop: session, transcript, read/list/grep tools, step budget
+- [x] Stage 2 — Read-only loop: session, transcript, read/list/grep tools, step budget
 - [ ] Stage 3 — Write + jail: containment tests written *before* the write tool exists
 - [ ] Stage 4 — Execute: `run_command` with classification, approval, scrubbed env
 - [ ] Stage 5 — Surface: `Agent.tsx`, approval UI, key entry in Settings, streaming
@@ -75,8 +75,8 @@ New module: `src-tauri/src/agent/`
 |---|---|
 | `mod.rs` | command surface, wiring, `pub mod agent;` from `lib.rs` |
 | `provider.rs` | OpenAI-compatible client behind a mockable transport |
-| `loop.rs` | session run loop: model call → tool calls → results → repeat |
-| `tools/` | `read_file`, `write_file`, `edit_file`, `list_files`, `grep`, `run_command`, git inspection via `git.rs` |
+| `run.rs` | session run loop: model call → tool calls → results → repeat (`loop` is a Rust keyword) |
+| `tools.rs` | `read_file`, `list_files`, `grep` today; `write_file`, `edit_file`, `run_command`, git inspection via `git.rs` in later stages |
 | `jail.rs` | repo-root containment, command classification, approval gate |
 | `keys.rs` | provider keys through `secretbox` |
 | `store.rs` | sessions, messages, tool calls, approvals |
@@ -135,7 +135,7 @@ override. Key decrypted at call time only; never logged. Non-streaming.
 response parsing · one manual live call to confirm the wire format.
 
 ### Stage 2 — Read-only loop
-`loop.rs` builds the prompt from the transcript, calls the provider, dispatches tool
+`run.rs` (the module this plan calls `loop.rs`; `loop` is a keyword) builds the prompt from the transcript, calls the provider, dispatches tool
 calls, appends results, and repeats until a final answer, the step budget, or
 cancellation. Tools: `read_file`, `list_files`, `grep` — all paths resolved against
 the repo root and rejected if they canonicalize outside it.
