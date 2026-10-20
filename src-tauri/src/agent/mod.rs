@@ -8,9 +8,13 @@
 //! - `store.rs`, `jail.rs`, `tools.rs`, `run.rs` (Stage 2): the session transcript, the
 //!   repository containment rule, the read-only tools and the run loop. The loop lives
 //!   in `run.rs` because `loop` is a keyword; it is the module roadmap.md calls `loop.rs`.
+//! - `tools.rs`, `run.rs`, `store.rs` (Stage 3): `write_file` and `edit_file` behind the
+//!   approval gate. A turn containing a write is proposed whole, stopping the run at
+//!   `awaiting_approval`; the write runs only from an `approved` ledger row, and a denial
+//!   is a result the model reads.
 //!
-//! Still to come: writes and approvals (Stage 3), `run_command` (Stage 4), the command
-//! surface (Stage 5) and agent identity for commits (Stage 6).
+//! Still to come: `run_command` with classification and a scrubbed environment (Stage 4),
+//! the command surface (Stage 5) and agent identity for commits (Stage 6).
 //!
 //! Everything the agent does is **project-scoped, never path-taking**: a command
 //! resolves its repository from `projects.repo_path` through

@@ -401,6 +401,79 @@ fn tool_result_in(c: &Connection, call_id: &str) -> Result<Option<String>> {
     }))
 }
 
+/// One ledger row, for the approval path. `status` is the schema's own word, so a caller
+/// compares against `approved`/`proposed` rather than a boolean that loses the history.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CallRow {
+    pub id: String,
+    pub session_id: String,
+    pub tool: String,
+    pub args_json: String,
+    pub status: String,
+}
+
+pub fn call_in(c: &Connection, call_id: &str) -> Result<CallRow> {
+    c.query_row(
+        "SELECT id,session_id,tool,args_json,status FROM agent_tool_calls WHERE id=?1",
+        [call_id],
+        |r| {
+            Ok(CallRow {
+                id: r.get(0)?,
+                session_id: r.get(1)?,
+                tool: r.get(2)?,
+                args_json: r.get(3)?,
+                status: r.get(4)?,
+            })
+        },
+    )
+    .map_err(|_| "tool call not found".to_string())
+}
+
+/// Record a human decision on a proposed call: `approved` or `denied`, and nothing else.
+/// A denial gets its result set now, so the transcript can show the model that the write
+/// did not happen without a second write to the row. Returns the session the call belongs
+/// to, which is the session whose run may now resume.
+pub fn decide_call_in(c: &Connection, call_id: &str, approved: bool) -> Result<String> {
+    let call = call_in(c, call_id)?;
+    let status = if approved { "approved" } else { "denied" };
+    let result = if approved {
+        None
+    } else {
+        Some(json!({ "ok": false, "output": "the user denied this tool call" }).to_string())
+    };
+    let changed = c
+        .execute(
+            "UPDATE agent_tool_calls SET status=?2, result_json=COALESCE(?3, result_json) \
+             WHERE id=?1 AND status='proposed'",
+            params![call_id, status, result],
+        )
+        .map_err(|e| e.to_string())?;
+    if changed == 0 {
+        return Err(format!(
+            "this tool call is {} and is not awaiting a decision",
+            call.status
+        ));
+    }
+    Ok(call.session_id)
+}
+
+/// Calls a session cannot move past: still proposed, or approved but not yet applied.
+pub fn pending_calls_in(c: &Connection, session_id: &str) -> Result<Vec<(String, String, String)>> {
+    let mut st = c
+        .prepare(
+            "SELECT id,tool,status FROM agent_tool_calls \
+             WHERE session_id=?1 AND status IN ('proposed','approved') ORDER BY rowid",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = st
+        .query_map([session_id], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?))
+        })
+        .map_err(|e| e.to_string())?;
+    rows.collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

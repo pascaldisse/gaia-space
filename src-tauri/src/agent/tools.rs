@@ -1,9 +1,11 @@
-//! The read-only tool set: `read_file`, `list_files`, `grep`.
+//! The tool set: `read_file`, `list_files` and `grep` are read-only; `write_file` and
+//! `edit_file` change the repository and are run only through the approval path
+//! ([`execute_write`]), never by the run loop directly.
 //!
 //! Every path argument is repository-relative and resolved through [`Jail`], so a tool
-//! cannot be talked into reading outside the project. A refusal is returned as the tool
-//! result — the model sees why — rather than aborting the run: an agent that wandered
-//! into `..` should be corrected, not killed.
+//! cannot be talked into reading or writing outside the project. A refusal is returned
+//! as the tool result — the model sees why — rather than aborting the run: an agent that
+//! wandered into `..` should be corrected, not killed.
 
 use crate::agent::jail::Jail;
 use crate::agent::provider::ToolSchema;
@@ -26,6 +28,9 @@ pub const MAX_GREP_FILE_BYTES: u64 = 512 * 1024;
 pub const MAX_WALK_DEPTH: usize = 32;
 /// Bytes inspected for a NUL before a file is called binary.
 const BINARY_SNIFF_BYTES: usize = 8 * 1024;
+/// One write may not put more than this into the repository. An agent that wants to
+/// paste a megabyte should be asked why first.
+pub const MAX_WRITE_BYTES: usize = 1024 * 1024;
 
 /// What the model is offered. Kept next to the implementations so a tool cannot be
 /// declared without existing, or exist without being declared.
@@ -67,21 +72,73 @@ pub fn schemas() -> Vec<ToolSchema> {
                 "additionalProperties": false
             }),
         ),
+        ToolSchema::function(
+            "write_file",
+            "Write one file in the repository, creating it or replacing its contents. The parent directory must already exist.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Repository-relative file path"},
+                    "content": {"type": "string", "description": "The complete new contents"}
+                },
+                "required": ["path", "content"],
+                "additionalProperties": false
+            }),
+        ),
+        ToolSchema::function(
+            "edit_file",
+            "Replace one exact, unique occurrence of `old_text` with `new_text`. If `old_text` is not unique, include more surrounding text.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Repository-relative file path"},
+                    "old_text": {"type": "string", "description": "Exact text to replace; must occur once"},
+                    "new_text": {"type": "string", "description": "Replacement text"}
+                },
+                "required": ["path", "old_text", "new_text"],
+                "additionalProperties": false
+            }),
+        ),
     ]
 }
 
 pub fn tool_names() -> Vec<&'static str> {
-    vec!["read_file", "list_files", "grep"]
+    vec![
+        "read_file",
+        "list_files",
+        "grep",
+        "write_file",
+        "edit_file",
+    ]
 }
 
-/// Run one tool. `args_json` is the model's own string, so a malformed call is reported
-/// rather than turned into a panic.
-pub fn execute(jail: &Jail, tool: &str, args_json: &str) -> Result<String> {
+/// Which tools change the repository. The run loop asks this before dispatching a turn:
+/// a turn containing any of these is proposed to the user and applied only after an
+/// explicit approval row, never in the same breath as the model's request.
+pub fn requires_approval(tool: &str) -> bool {
+    matches!(tool, "write_file" | "edit_file")
+}
+
+fn parse_args(tool: &str, args_json: &str) -> Result<Value> {
     let args: Value = serde_json::from_str(args_json)
         .map_err(|e| format!("{tool} arguments are not valid JSON: {e}"))?;
     if !args.is_object() {
         return Err(format!("{tool} arguments must be a JSON object"));
     }
+    Ok(args)
+}
+
+/// Run one read-only tool. `args_json` is the model's own string, so a malformed call is
+/// reported rather than turned into a panic.
+///
+/// A write reaching this door is an error, not a write: the only caller allowed to run
+/// one is [`run::apply_call_in`](crate::agent::run::apply_call_in), and only on a call
+/// the user approved.
+pub fn execute(jail: &Jail, tool: &str, args_json: &str) -> Result<String> {
+    if requires_approval(tool) {
+        return Err(format!("{tool} needs approval before it can run"));
+    }
+    let args = parse_args(tool, args_json)?;
     match tool {
         "read_file" => read_file(jail, &args),
         "list_files" => list_files(jail, &args),
@@ -90,10 +147,32 @@ pub fn execute(jail: &Jail, tool: &str, args_json: &str) -> Result<String> {
     }
 }
 
+/// Run one approved write. Refuses every read-only tool, so the approval path can never
+/// be used as a general dispatcher.
+pub fn execute_write(jail: &Jail, tool: &str, args_json: &str) -> Result<String> {
+    if !requires_approval(tool) {
+        return Err(format!("{tool} is not a write tool"));
+    }
+    let args = parse_args(tool, args_json)?;
+    match tool {
+        "write_file" => write_file(jail, &args),
+        "edit_file" => edit_file(jail, &args),
+        other => Err(format!("unknown tool {other}")),
+    }
+}
+
 fn required(args: &Value, name: &str) -> Result<String> {
     match args.get(name).and_then(Value::as_str).map(str::trim) {
         Some(value) if !value.is_empty() => Ok(value.to_string()),
         _ => Err(format!("{name} is required")),
+    }
+}
+
+/// Unlike [`required`], nothing is trimmed: leading whitespace inside a file is content.
+fn string_arg(args: &Value, name: &str) -> Result<String> {
+    match args.get(name).and_then(Value::as_str) {
+        Some(value) => Ok(value.to_string()),
+        None => Err(format!("{name} is required and must be a string")),
     }
 }
 
@@ -127,6 +206,66 @@ fn read_file(jail: &Jail, args: &Value) -> Result<String> {
         ));
     }
     Ok(text)
+}
+
+fn write_file(jail: &Jail, args: &Value) -> Result<String> {
+    let raw = required(args, "path")?;
+    let content = string_arg(args, "content")?;
+    if content.len() > MAX_WRITE_BYTES {
+        return Err(format!(
+            "content is {} bytes; the limit for one write is {MAX_WRITE_BYTES}",
+            content.len()
+        ));
+    }
+    let path = jail.resolve_for_write(&raw)?;
+    fs::write(&path, content.as_bytes()).map_err(|e| format!("could not write {raw}: {e}"))?;
+    Ok(format!("wrote {} bytes to {raw}", content.len()))
+}
+
+/// Exact-match replace, and the match must be unique — the same discipline this repo's
+/// own tooling uses. A repeated fragment is refused rather than guessed at: "replace the
+/// first one" is how an agent silently edits the wrong function.
+fn edit_file(jail: &Jail, args: &Value) -> Result<String> {
+    let raw = required(args, "path")?;
+    let old_text = string_arg(args, "old_text")?;
+    let new_text = string_arg(args, "new_text")?;
+    if old_text.is_empty() {
+        return Err("old_text must not be empty; quote the exact text to replace".into());
+    }
+    if old_text == new_text {
+        return Err("old_text and new_text are identical; there is nothing to replace".into());
+    }
+    let path = jail.resolve_for_write(&raw)?;
+    if !path.is_file() {
+        return Err(format!("{raw} is not an existing file; use write_file to create it"));
+    }
+    let bytes = fs::read(&path).map_err(|e| format!("could not read {raw}: {e}"))?;
+    if bytes[..bytes.len().min(BINARY_SNIFF_BYTES)].contains(&0) {
+        return Err(format!("{raw} looks like a binary file"));
+    }
+    let text = String::from_utf8(bytes).map_err(|_| format!("{raw} is not valid UTF-8"))?;
+    let found = text.matches(&old_text).count();
+    match found {
+        1 => {}
+        0 => return Err(format!("old_text was not found in {raw}")),
+        count => {
+            return Err(format!(
+                "old_text occurs {count} times in {raw}; include more surrounding text so it matches exactly once"
+            ))
+        }
+    }
+    let updated = text.replacen(&old_text, &new_text, 1);
+    if updated.len() > MAX_WRITE_BYTES {
+        return Err(format!(
+            "the edited file would be {} bytes; the limit for one write is {MAX_WRITE_BYTES}",
+            updated.len()
+        ));
+    }
+    fs::write(&path, updated.as_bytes()).map_err(|e| format!("could not write {raw}: {e}"))?;
+    Ok(format!(
+        "edited {raw}: 1 replacement, {} bytes",
+        updated.len()
+    ))
 }
 
 fn list_files(jail: &Jail, args: &Value) -> Result<String> {
@@ -367,5 +506,165 @@ mod tests {
         std::os::unix::fs::symlink(base.join("repo-evil"), base.join("repo/escape")).unwrap();
         let hits = execute(&jail, "grep", r#"{"pattern":"hello"}"#).unwrap();
         assert!(!hits.contains("outside"), "{hits}");
+    }
+
+    // --- writes (Stage 3) ---------------------------------------------------------
+
+    #[test]
+    fn a_write_is_not_reachable_through_the_read_door() {
+        let (_base, jail) = scratch("doors");
+        assert!(execute(&jail, "write_file", r#"{"path":"x","content":"y"}"#)
+            .unwrap_err()
+            .contains("needs approval"));
+        assert!(execute(&jail, "edit_file", r#"{"path":"README.md","old_text":"a","new_text":"b"}"#)
+            .unwrap_err()
+            .contains("needs approval"));
+        assert!(execute_write(&jail, "read_file", r#"{"path":"README.md"}"#)
+            .unwrap_err()
+            .contains("not a write tool"));
+    }
+
+    #[test]
+    fn requires_approval_classifies_every_declared_tool() {
+        let declared: Vec<String> = schemas()
+            .into_iter()
+            .map(|schema| schema.function.name)
+            .collect();
+        assert_eq!(declared.len(), tool_names().len());
+        for name in declared {
+            let expected = matches!(name.as_str(), "write_file" | "edit_file");
+            assert_eq!(requires_approval(&name), expected, "{name} is misclassified");
+        }
+        assert!(!requires_approval("no_such_tool"));
+    }
+
+    #[test]
+    fn write_file_creates_replaces_and_may_write_nothing() {
+        let (_base, jail) = scratch("write-file");
+        let summary = execute_write(
+            &jail,
+            "write_file",
+            r#"{"path":"src/new.rs","content":"fn a() {}\n"}"#,
+        )
+        .unwrap();
+        assert!(summary.starts_with("wrote "), "{summary}");
+        assert_eq!(
+            fs::read_to_string(jail.root().join("src/new.rs")).unwrap(),
+            "fn a() {}\n"
+        );
+
+        execute_write(
+            &jail,
+            "write_file",
+            r#"{"path":"README.md","content":"replaced\n"}"#,
+        )
+        .unwrap();
+        assert_eq!(fs::read_to_string(jail.root().join("README.md")).unwrap(), "replaced\n");
+
+        execute_write(&jail, "write_file", r#"{"path":"empty.txt","content":""}"#).unwrap();
+        assert_eq!(fs::read_to_string(jail.root().join("empty.txt")).unwrap(), "");
+
+        assert!(execute_write(&jail, "write_file", r#"{"path":"README.md"}"#)
+            .unwrap_err()
+            .contains("content"));
+    }
+
+    #[test]
+    fn write_file_cannot_escape_or_touch_git() {
+        let (base, jail) = scratch("write-escapes");
+        assert!(execute_write(&jail, "write_file", r#"{"path":"../out.txt","content":"x"}"#)
+            .unwrap_err()
+            .contains("climb out"));
+        assert!(execute_write(&jail, "write_file", r#"{"path":".git/hooks/pre-commit","content":"x"}"#)
+            .unwrap_err()
+            .contains(".git"));
+        assert!(
+            !base.join("repo-evil/out.txt").exists() && !base.join("out.txt").exists(),
+            "nothing may be created outside the repository"
+        );
+        assert_eq!(
+            fs::read_to_string(jail.root().join(".git/config")).unwrap(),
+            "hello from git\n",
+            "the repository's own config is untouched"
+        );
+    }
+
+    #[test]
+    fn edit_file_needs_one_exact_match() {
+        let (_base, jail) = scratch("edit");
+        execute_write(
+            &jail,
+            "write_file",
+            r#"{"path":"note.txt","content":"alpha beta alpha beta\n"}"#,
+        )
+        .unwrap();
+
+        let error = execute_write(
+            &jail,
+            "edit_file",
+            r#"{"path":"note.txt","old_text":"alpha","new_text":"gamma"}"#,
+        )
+        .unwrap_err();
+        assert!(error.contains("occurs 2 times"), "{error}");
+        assert_eq!(
+            fs::read_to_string(jail.root().join("note.txt")).unwrap(),
+            "alpha beta alpha beta\n",
+            "a refused edit changes nothing"
+        );
+
+        assert!(execute_write(
+            &jail,
+            "edit_file",
+            r#"{"path":"note.txt","old_text":"delta","new_text":"gamma"}"#,
+        )
+        .unwrap_err()
+        .contains("not found"));
+
+        let summary = execute_write(
+            &jail,
+            "edit_file",
+            r#"{"path":"note.txt","old_text":"alpha beta alpha","new_text":"gamma"}"#,
+        )
+        .unwrap();
+        assert!(summary.contains("1 replacement"), "{summary}");
+        assert_eq!(
+            fs::read_to_string(jail.root().join("note.txt")).unwrap(),
+            "gamma beta\n"
+        );
+
+        assert!(execute_write(
+            &jail,
+            "edit_file",
+            r#"{"path":"absent.txt","old_text":"a","new_text":"b"}"#,
+        )
+        .unwrap_err()
+        .contains("not an existing file"));
+    }
+
+    #[test]
+    fn edit_file_refuses_a_binary_file_and_an_empty_search() {
+        let (base, jail) = scratch("edit-refusals");
+        fs::write(base.join("repo/blob.bin"), [0u8, 1, 2]).unwrap();
+        assert!(execute_write(
+            &jail,
+            "edit_file",
+            r#"{"path":"blob.bin","old_text":"a","new_text":"b"}"#,
+        )
+        .unwrap_err()
+        .contains("binary"));
+        assert!(execute_write(
+            &jail,
+            "edit_file",
+            r#"{"path":"README.md","old_text":"","new_text":"b"}"#,
+        )
+        .unwrap_err()
+        .contains("must not be empty"));
+        assert!(execute_write(
+            &jail,
+            "edit_file",
+            r#"{"path":"README.md","old_text":"hello","new_text":"hello"}"#,
+        )
+        .unwrap_err()
+        .contains("identical"));
     }
 }

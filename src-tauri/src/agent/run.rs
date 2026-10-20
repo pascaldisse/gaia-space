@@ -79,6 +79,15 @@ pub fn run_session(
     if session.status == "running" {
         return Err("this session is already running".into());
     }
+    // A pending write is the one thing a run may not step over: the model asked for it,
+    // the user has not answered, and the transcript would not replay without it.
+    let pending = store::pending_calls_in(c, session_id)?;
+    if !pending.is_empty() {
+        return Err(format!(
+            "this session is waiting for {} tool call(s) to be approved or denied",
+            pending.len()
+        ));
+    }
 
     let mut messages = store::transcript_in(c, session_id)?;
     if messages.is_empty() {
@@ -194,6 +203,22 @@ pub fn run_session(
             Some(wire_calls),
         ));
 
+        // A turn that changes the repository is proposed whole: nothing in it runs — not
+        // even the reads beside it — until the user has decided on every call. Stopping
+        // here is what makes "no write without an approval row" true by construction.
+        if calls
+            .iter()
+            .any(|call| tools::requires_approval(&call.function.name))
+        {
+            store::set_status_in(c, session_id, "awaiting_approval")?;
+            return Ok(RunOutcome {
+                status: "awaiting_approval".into(),
+                steps,
+                final_text: None,
+                error: None,
+            });
+        }
+
         for (call, id) in calls.iter().zip(call_ids.iter()) {
             let (ok, output) =
                 match tools::execute(jail, &call.function.name, &call.function.arguments) {
@@ -204,6 +229,46 @@ pub fn run_session(
             messages.push(Message::tool(id.clone(), output));
         }
     }
+}
+
+/// Apply a call the user approved. The status check is the gate: anything that is not
+/// `approved` is refused, so a write can only ever run on the far side of an approval
+/// row. A read that shared a turn with a write is applied through the read door; a write
+/// through [`tools::execute_write`]. A tool-level refusal is recorded as a failed call,
+/// not returned as an error, because it is the model's next input.
+pub fn apply_call_in(c: &Connection, call_id: &str, jail: &Jail) -> Result<()> {
+    let call = store::call_in(c, call_id)?;
+    if call.status != "approved" {
+        return Err(format!(
+            "this tool call is {}; only an approved call may run",
+            call.status
+        ));
+    }
+    let outcome = if tools::requires_approval(&call.tool) {
+        tools::execute_write(jail, &call.tool, &call.args_json)
+    } else {
+        tools::execute(jail, &call.tool, &call.args_json)
+    };
+    let (ok, output) = match outcome {
+        Ok(output) => (true, output),
+        Err(error) => (false, error),
+    };
+    store::record_tool_result_in(c, call_id, ok, &output)
+}
+
+/// Approve or deny a proposed call in one step, applying it when approved. A denial
+/// touches nothing on disk; the model reads the denial on its next turn.
+pub fn resolve_approval_in(
+    c: &Connection,
+    call_id: &str,
+    approve: bool,
+    jail: &Jail,
+) -> Result<()> {
+    store::decide_call_in(c, call_id, approve)?;
+    if approve {
+        apply_call_in(c, call_id, jail)?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -279,6 +344,30 @@ mod tests {
         .to_string()
     }
 
+    /// One assistant turn asking for several tools at once — a read and a write, say.
+    fn multi_tool_call_reply(calls: &[(&str, &str)]) -> String {
+        let calls: Vec<Value> = calls
+            .iter()
+            .enumerate()
+            .map(|(index, (tool, arguments))| {
+                json!({
+                    "id": format!("call_{index}"),
+                    "type": "function",
+                    "function": {"name": tool, "arguments": arguments}
+                })
+            })
+            .collect();
+        json!({
+            "model": "gpt-test",
+            "choices": [{
+                "index": 0,
+                "message": {"role": "assistant", "content": null, "tool_calls": calls},
+                "finish_reason": "tool_calls"
+            }]
+        })
+        .to_string()
+    }
+
     struct Fixture {
         conn: Connection,
         jail: Jail,
@@ -345,6 +434,21 @@ mod tests {
             .unwrap()
     }
 
+    /// `(call_id, tool, status)` in the order the model proposed them.
+    fn calls(conn: &Connection, session: &str) -> Vec<(String, String, String)> {
+        let mut st = conn
+            .prepare(
+                "SELECT id,tool,status FROM agent_tool_calls WHERE session_id=?1 ORDER BY rowid",
+            )
+            .unwrap();
+        st.query_map([session], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+        })
+        .unwrap()
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .unwrap()
+    }
+
     #[test]
     fn a_scripted_session_reads_a_file_and_answers() {
         let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
@@ -381,7 +485,10 @@ mod tests {
             .iter()
             .map(|tool| tool["function"]["name"].as_str().unwrap())
             .collect();
-        assert_eq!(names, vec!["read_file", "list_files", "grep"]);
+        assert_eq!(
+            names,
+            vec!["read_file", "list_files", "grep", "write_file", "edit_file"]
+        );
         assert_eq!(sent[0]["messages"][0]["role"], "system");
         assert_eq!(sent[0]["messages"][1]["content"], "What does the README say?");
 
@@ -574,6 +681,171 @@ mod tests {
             )
             .unwrap();
         assert_eq!(status, "failed", "the ledger records the refusal as a failed call");
+    }
+
+    #[test]
+    fn a_write_is_proposed_and_waits_for_approval() {
+        let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        let f = fixture("approve", Some(6));
+        store::append_message_in(&f.conn, &f.session, "user", "Create NOTES.md").unwrap();
+        script(vec![tool_call_reply(
+            "write_file",
+            r#"{"path":"NOTES.md","content":"hello\n"}"#,
+        )]);
+        let provider = Provider::with_transport("sk-test", None::<String>, transport);
+        let cancel = CancelToken::new();
+        let outcome = run_session(&f.conn, &f.session, &f.jail, &provider, &cancel).unwrap();
+
+        assert_eq!(outcome.status, "awaiting_approval");
+        assert_eq!(outcome.steps, 1);
+        assert!(
+            !f.jail.root().join("NOTES.md").exists(),
+            "nothing may be written before the user approves"
+        );
+        let rows = calls(&f.conn, &f.session);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].2, "proposed");
+
+        // The run cannot step over the pending decision.
+        let error = run_session(&f.conn, &f.session, &f.jail, &provider, &cancel).unwrap_err();
+        assert!(error.contains("waiting for 1 tool call"), "{error}");
+
+        resolve_approval_in(&f.conn, &rows[0].0, true, &f.jail).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(f.jail.root().join("NOTES.md")).unwrap(),
+            "hello\n"
+        );
+        assert_eq!(calls(&f.conn, &f.session)[0].2, "ran");
+
+        script(vec![text_reply("Created NOTES.md.")]);
+        let outcome = run_session(&f.conn, &f.session, &f.jail, &provider, &cancel).unwrap();
+        assert_eq!(outcome.status, "done");
+        let sent = sent();
+        assert_eq!(
+            sent[0]["messages"].as_array().unwrap().len(),
+            4,
+            "the request carries system, user, the approved call and its result"
+        );
+        assert!(
+            sent[0]["messages"][3]["content"]
+                .as_str()
+                .unwrap()
+                .contains("wrote 6 bytes to NOTES.md"),
+            "the model is told what the write did"
+        );
+        assert_eq!(
+            transcript_roles(&f.conn, &f.session),
+            vec!["system", "user", "assistant", "assistant"],
+            "the tool result lives in the ledger, not as a stored message row"
+        );
+    }
+
+    #[test]
+    fn a_denied_write_never_touches_the_repository() {
+        let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        let f = fixture("deny", Some(6));
+        store::append_message_in(&f.conn, &f.session, "user", "Delete nothing, add NOTES.md")
+            .unwrap();
+        script(vec![tool_call_reply(
+            "write_file",
+            r#"{"path":"NOTES.md","content":"hello\n"}"#,
+        )]);
+        let provider = Provider::with_transport("sk-test", None::<String>, transport);
+        let cancel = CancelToken::new();
+        run_session(&f.conn, &f.session, &f.jail, &provider, &cancel).unwrap();
+
+        let call_id = calls(&f.conn, &f.session)[0].0.clone();
+        resolve_approval_in(&f.conn, &call_id, false, &f.jail).unwrap();
+        assert!(
+            !f.jail.root().join("NOTES.md").exists(),
+            "a denied write leaves the repository untouched"
+        );
+        let row = store::call_in(&f.conn, &call_id).unwrap();
+        assert_eq!(row.status, "denied");
+
+        script(vec![text_reply("Understood, nothing was written.")]);
+        let outcome = run_session(&f.conn, &f.session, &f.jail, &provider, &cancel).unwrap();
+        assert_eq!(outcome.status, "done");
+        assert!(
+            sent()[0]["messages"][3]["content"]
+                .as_str()
+                .unwrap()
+                .contains("denied"),
+            "the model learns the write was denied"
+        );
+    }
+
+    #[test]
+    fn an_approved_write_that_escapes_fails_and_writes_nothing() {
+        let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        let f = fixture("approve-escape", Some(6));
+        store::append_message_in(&f.conn, &f.session, "user", "Write outside").unwrap();
+        script(vec![tool_call_reply(
+            "write_file",
+            r#"{"path":"../escaped.txt","content":"x"}"#,
+        )]);
+        let provider = Provider::with_transport("sk-test", None::<String>, transport);
+        let cancel = CancelToken::new();
+        run_session(&f.conn, &f.session, &f.jail, &provider, &cancel).unwrap();
+
+        let call_id = calls(&f.conn, &f.session)[0].0.clone();
+        resolve_approval_in(&f.conn, &call_id, true, &f.jail).unwrap();
+        let row = store::call_in(&f.conn, &call_id).unwrap();
+        assert_eq!(row.status, "failed");
+        assert!(
+            !f.jail.root().parent().unwrap().join("escaped.txt").exists(),
+            "an approval is not a jail bypass"
+        );
+        assert_eq!(
+            store::pending_calls_in(&f.conn, &f.session).unwrap().len(),
+            0,
+            "a failed write is resolved, not still pending"
+        );
+    }
+
+    #[test]
+    fn a_turn_with_a_read_and_a_write_waits_together() {
+        let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        let f = fixture("mixed", Some(6));
+        store::append_message_in(&f.conn, &f.session, "user", "Read the README, then add a note")
+            .unwrap();
+        script(vec![multi_tool_call_reply(&[
+            ("read_file", r#"{"path":"README.md"}"#),
+            ("write_file", r#"{"path":"NOTES.md","content":"x"}"#),
+        ])]);
+        let provider = Provider::with_transport("sk-test", None::<String>, transport);
+        let cancel = CancelToken::new();
+        let outcome = run_session(&f.conn, &f.session, &f.jail, &provider, &cancel).unwrap();
+
+        assert_eq!(outcome.status, "awaiting_approval");
+        let rows = calls(&f.conn, &f.session);
+        assert_eq!(rows.len(), 2);
+        assert_eq!(
+            rows.iter().map(|(_, _, status)| status.as_str()).collect::<Vec<_>>(),
+            vec!["proposed", "proposed"],
+            "a turn is proposed whole; the read beside the write does not run early"
+        );
+
+        resolve_approval_in(&f.conn, &rows[0].0, true, &f.jail).unwrap();
+        resolve_approval_in(&f.conn, &rows[1].0, false, &f.jail).unwrap();
+        assert_eq!(calls(&f.conn, &f.session)[0].2, "ran");
+        assert!(!f.jail.root().join("NOTES.md").exists());
+
+        script(vec![text_reply("Read it; the write was denied.")]);
+        let outcome = run_session(&f.conn, &f.session, &f.jail, &provider, &cancel).unwrap();
+        assert_eq!(outcome.status, "done");
+        let sent = sent();
+        assert!(
+            sent[0]["messages"][3]["content"]
+                .as_str()
+                .unwrap()
+                .contains("hello from the repository"),
+            "the approved read result is in the replay"
+        );
+        assert!(sent[0]["messages"][4]["content"]
+            .as_str()
+            .unwrap()
+            .contains("denied"));
     }
 
     #[test]
