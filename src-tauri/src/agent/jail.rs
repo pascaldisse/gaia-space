@@ -49,6 +49,56 @@ impl Jail {
         Ok(canonical)
     }
 
+    /// Resolve a path that a tool is about to **write**, so it may not exist yet.
+    ///
+    /// The rules, in the order they are enforced:
+    ///
+    /// - the text must be relative, free of `..`, and free of `.git` ([`Self::relative`]);
+    /// - the parent directory must already exist — a write creates a file, never a tree —
+    ///   and its canonical form must be inside the root, so a symlinked directory cannot
+    ///   carry a write out of the project;
+    /// - an existing target must not be a symlink (not even a dangling one, which
+    ///   `fs::write` would happily follow to a path outside), and its canonical form must
+    ///   be inside the root;
+    /// - a directory is not a file.
+    ///
+    /// The returned path is the canonical file to write.
+    pub fn resolve_for_write(&self, raw: &str) -> Result<PathBuf> {
+        let relative = self.relative(raw)?;
+        if relative.as_os_str().is_empty() {
+            return Err("path must name a file, not the repository root".into());
+        }
+        let target = self.root.join(&relative);
+        let parent = target
+            .parent()
+            .ok_or_else(|| "path has no parent directory".to_string())?
+            .canonicalize()
+            .map_err(|_| format!("{} has no existing parent directory", raw.trim()))?;
+        self.contained(&parent, raw)?;
+        match std::fs::symlink_metadata(&target) {
+            Ok(metadata) => {
+                if metadata.file_type().is_symlink() {
+                    return Err(format!(
+                        "{} is a symlink; the agent does not write through links",
+                        raw.trim()
+                    ));
+                }
+                let canonical = target
+                    .canonicalize()
+                    .map_err(|_| format!("{} could not be resolved", raw.trim()))?;
+                self.contained(&canonical, raw)?;
+                if canonical.is_dir() {
+                    return Err(format!("{} is a directory, not a file", raw.trim()));
+                }
+                Ok(canonical)
+            }
+            Err(_) => match target.file_name() {
+                Some(name) => Ok(parent.join(name)),
+                None => Err("path must name a file".into()),
+            },
+        }
+    }
+
     /// The repository-relative form of a caller path, validated as text: relative, no
     /// `..`, no `.git`. `..` is refused even when it would stay inside the tree — an
     /// agent that has to normalize its own paths is one bug away from escaping, and the
@@ -209,5 +259,115 @@ mod tests {
         let (base, _repo) = scratch("missing-root");
         assert!(Jail::new(base.join("nope")).is_err());
         assert!(Jail::new(base.join("repo/README.md")).is_err(), "a file is not a root");
+    }
+
+    // --- write containment (Stage 3) ---------------------------------------------
+    //
+    // These came before `write_file` and `edit_file` existed. Every one of them is a
+    // way a write could land outside the project if containment were text-based or
+    // resolved only the path that already exists.
+
+    #[test]
+    fn a_write_that_stays_inside_is_allowed() {
+        let (_base, repo) = scratch("write-inside");
+        let jail = Jail::new(&repo).unwrap();
+        assert_eq!(
+            jail.resolve_for_write("src/new.rs").unwrap(),
+            repo.join("src/new.rs"),
+            "a new file in an existing directory is fine"
+        );
+        assert_eq!(
+            jail.resolve_for_write("./src/./new.rs").unwrap(),
+            repo.join("src/new.rs")
+        );
+        assert_eq!(jail.resolve_for_write("src//new.rs").unwrap(), repo.join("src/new.rs"));
+        assert_eq!(
+            jail.resolve_for_write("README.md").unwrap(),
+            repo.join("README.md"),
+            "an existing regular file is writable"
+        );
+    }
+
+    #[test]
+    fn a_write_target_may_not_escape_by_any_spelling() {
+        let (_base, repo) = scratch("write-escapes");
+        let jail = Jail::new(&repo).unwrap();
+        for raw in [
+            "../out.txt",
+            "../../out.txt",
+            "src/../../out.txt",
+            "/tmp/out.txt",
+            "src/../README.md",
+        ] {
+            assert!(
+                jail.resolve_for_write(raw).is_err(),
+                "{raw} must not resolve for writing"
+            );
+        }
+    }
+
+    #[test]
+    fn a_write_into_git_is_refused() {
+        let (_base, repo) = scratch("write-git");
+        let jail = Jail::new(&repo).unwrap();
+        for raw in [".git/config", ".git/hooks/pre-commit", ".git/new-file", ".git"] {
+            assert!(jail.resolve_for_write(raw).is_err(), "{raw} must not be writable");
+        }
+    }
+
+    #[test]
+    fn a_write_through_a_symlinked_directory_is_refused() {
+        let (base, repo) = scratch("write-symlink-dir");
+        let jail = Jail::new(&repo).unwrap();
+        std::os::unix::fs::symlink(base.join("repo-evil"), repo.join("escape")).unwrap();
+        let error = jail.resolve_for_write("escape/new.txt").unwrap_err();
+        assert!(error.contains("outside"), "{error}");
+        assert!(
+            !base.join("repo-evil/new.txt").exists(),
+            "resolving for a write must not create anything"
+        );
+    }
+
+    #[test]
+    fn a_write_through_a_symlinked_file_is_refused_even_when_it_dangles() {
+        let (base, repo) = scratch("write-symlink-file");
+        let jail = Jail::new(&repo).unwrap();
+        std::os::unix::fs::symlink(base.join("repo-evil/secret.txt"), repo.join("link.txt"))
+            .unwrap();
+        assert!(jail.resolve_for_write("link.txt").is_err());
+
+        // The target does not exist: `fs::write("dangling.txt")` would create
+        // `repo-evil/made.txt` outside the tree, so the link itself is refused.
+        std::os::unix::fs::symlink(base.join("repo-evil/made.txt"), repo.join("dangling.txt"))
+            .unwrap();
+        let error = jail.resolve_for_write("dangling.txt").unwrap_err();
+        assert!(error.contains("symlink"), "{error}");
+    }
+
+    #[test]
+    fn a_write_needs_an_existing_parent_directory() {
+        let (_base, repo) = scratch("write-parent");
+        let jail = Jail::new(&repo).unwrap();
+        let error = jail.resolve_for_write("no/such/dir/file.rs").unwrap_err();
+        assert!(error.contains("parent"), "{error}");
+    }
+
+    #[test]
+    fn the_root_and_directories_are_not_write_targets() {
+        let (_base, repo) = scratch("write-dirs");
+        let jail = Jail::new(&repo).unwrap();
+        assert!(jail.resolve_for_write("").is_err());
+        assert!(jail.resolve_for_write(".").is_err());
+        assert!(jail.resolve_for_write("src").is_err(), "a directory is not a file");
+        assert!(jail.resolve_for_write("src/").is_err());
+    }
+
+    #[test]
+    fn a_prefix_sibling_cannot_be_reached_by_a_write_either() {
+        let (base, repo) = scratch("write-prefix");
+        let jail = Jail::new(&repo).unwrap();
+        std::os::unix::fs::symlink(base.join("repo-evil"), repo.join("evil")).unwrap();
+        assert!(jail.resolve_for_write("evil/owned.txt").is_err());
+        assert!(!base.join("repo-evil/owned.txt").exists());
     }
 }
