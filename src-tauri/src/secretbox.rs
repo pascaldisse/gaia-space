@@ -74,11 +74,11 @@ pub fn open(sealed: &str) -> Result<String, String> {
 mod tests {
     use super::*;
 
-    /// The env key is process-global, so these run under one lock.
+    /// The env key is process-global, so these run under the shared guard that every
+    /// other test touching `SPACE_SECRET_KEY` (or `SPACE_DB`) holds — a lock private
+    /// to this module would race `agent::keys` tests in the same binary.
     fn with_key<T>(key: Option<&str>, body: impl FnOnce() -> T) -> T {
-        use std::sync::{Mutex, OnceLock};
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        let _guard = LOCK.get_or_init(|| Mutex::new(())).lock().unwrap();
+        let _guard = crate::db::test_serial();
         let previous = std::env::var(KEY_ENV).ok();
         match key {
             Some(value) => std::env::set_var(KEY_ENV, value),

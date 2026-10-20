@@ -7,6 +7,8 @@
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod actor;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
+pub mod agent;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod app_consent;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod app_rights;
@@ -466,6 +468,9 @@ pub fn run() {
             buy::list_buy_vendors,
             buy::save_buy_vendor,
             buy::delete_buy_vendor,
+            agent::keys::agent_save_provider_key,
+            agent::keys::agent_list_provider_keys,
+            agent::keys::agent_delete_provider_key,
             vault::vault_invite,
             documents::list_documents,
             documents::get_document,
@@ -750,23 +755,18 @@ mod command_registration_tests {
     /// and `update_project`, so the desktop app could not create a project at all.
     ///
     /// The list is read from the sources rather than from a hand-kept copy: a
-    /// hand-kept copy is the same mistake one level up.
+    /// hand-kept copy is the same mistake one level up. Subdirectories are walked
+    /// too — `agent/keys.rs` is a module whose commands live in a folder, and a
+    /// top-level-only scan would let exactly those escape.
     #[test]
     fn every_desktop_command_is_registered() {
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
         let lib = std::fs::read_to_string(dir.join("lib.rs")).expect("lib.rs");
         let mut missing: Vec<String> = Vec::new();
-        for entry in std::fs::read_dir(&dir).expect("src") {
-            let path = entry.expect("entry").path();
-            let stem = match path.file_stem().and_then(|s| s.to_str()) {
-                Some(stem) if path.extension().and_then(|e| e.to_str()) == Some("rs") => {
-                    stem.to_string()
-                }
-                _ => continue,
-            };
-            if stem == "lib" || stem == "main" {
-                continue;
-            }
+        let mut sources = Vec::new();
+        collect_module_sources(&dir, &mut sources);
+        for path in sources {
+            let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
             let source = std::fs::read_to_string(&path).expect("module source");
             let mut lines = source.lines().peekable();
             while let Some(line) = lines.next() {
@@ -806,5 +806,26 @@ mod command_registration_tests {
             missing.is_empty(),
             "these commands exist but the desktop handler never lists them, so they fail only at runtime: {missing:#?}"
         );
+    }
+
+    /// Every `.rs` module source under `src`, `lib.rs` and `main.rs` aside.
+    fn collect_module_sources(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+        for entry in std::fs::read_dir(dir).expect("src") {
+            let path = entry.expect("entry").path();
+            if path.is_dir() {
+                collect_module_sources(&path, out);
+                continue;
+            }
+            match path.file_stem().and_then(|s| s.to_str()) {
+                Some(stem)
+                    if path.extension().and_then(|e| e.to_str()) == Some("rs")
+                        && stem != "lib"
+                        && stem != "main" =>
+                {
+                    out.push(path)
+                }
+                _ => {}
+            }
+        }
     }
 }

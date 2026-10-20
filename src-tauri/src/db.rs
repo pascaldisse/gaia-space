@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
-pub const SCHEMA_VERSION: i64 = 149;
+pub const SCHEMA_VERSION: i64 = 150;
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -1134,6 +1134,12 @@ BEGIN SELECT RAISE(ABORT, 'document source anchor must be paired'); END;")?;
     if version < 149 {
         tx.execute_batch(SCHEMA_V149)?;
     }
+    // V150: the native coding agent (roadmap.md). Provider keys, sessions, transcript and
+    // tool calls — the agent's only durable state, one row per fact. Guarded on `profiles`
+    // because three of the four tables carry FK columns that reference it.
+    if version < 150 && table_exists(&tx, "profiles")? {
+        tx.execute_batch(SCHEMA_V150)?;
+    }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()
 }
@@ -1427,6 +1433,68 @@ CREATE TABLE IF NOT EXISTS buy_items (
 );
 CREATE INDEX IF NOT EXISTS buy_items_status ON buy_items(status, created_at);
 INSERT OR IGNORE INTO buy_vendors(name,kind,agent_allowed,notes) VALUES('Amazon','manual',0,'blocks agent checkout — human orders via deep link');
+"#;
+/// V150: the native coding agent (roadmap.md). Four tables, and nothing else is durable.
+///
+/// `agent_provider_keys` keeps BYO model keys sealed by `secretbox` — split into the
+/// ciphertext and its nonce, never the plaintext (`agent/keys.rs`). `agent_sessions` is
+/// one run against one project's bound repository: the project scopes it, the agent
+/// principal attributes it, and the step budget caps it. `agent_messages` is the
+/// transcript, ordered by `seq`; `UNIQUE(session_id, seq)` doubles as the index for
+/// reading a transcript back in order. `agent_tool_calls` is the approval ledger: a
+/// write or a command exists as a `proposed` row BEFORE it is applied, and only an
+/// `approved` decision (`decided_by`, never null on approval) lets it run.
+pub(crate) const SCHEMA_V150: &str = r#"
+CREATE TABLE IF NOT EXISTS agent_provider_keys (
+    id TEXT PRIMARY KEY,
+    provider TEXT NOT NULL,
+    label TEXT NOT NULL,
+    base_url TEXT,
+    ciphertext TEXT NOT NULL,
+    nonce TEXT NOT NULL,
+    created_by TEXT REFERENCES profiles(id),
+    created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    UNIQUE(provider, label)
+);
+CREATE TABLE IF NOT EXISTS agent_sessions (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    agent_principal_id TEXT NOT NULL REFERENCES principals(id),
+    provider_key_id TEXT REFERENCES agent_provider_keys(id) ON DELETE SET NULL,
+    model TEXT NOT NULL,
+    title TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'idle'
+        CHECK(status IN ('idle','running','awaiting_approval','done','failed','cancelled')),
+    step_budget INTEGER NOT NULL DEFAULT 24 CHECK(step_budget > 0),
+    created_by TEXT REFERENCES profiles(id),
+    created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+);
+CREATE TABLE IF NOT EXISTS agent_messages (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL REFERENCES agent_sessions(id) ON DELETE CASCADE,
+    seq INTEGER NOT NULL,
+    role TEXT NOT NULL CHECK(role IN ('system','user','assistant','tool')),
+    content TEXT NOT NULL,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    UNIQUE(session_id, seq)
+);
+CREATE TABLE IF NOT EXISTS agent_tool_calls (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL REFERENCES agent_sessions(id) ON DELETE CASCADE,
+    message_id TEXT REFERENCES agent_messages(id) ON DELETE CASCADE,
+    tool TEXT NOT NULL,
+    args_json TEXT NOT NULL DEFAULT '{}',
+    result_json TEXT,
+    status TEXT NOT NULL DEFAULT 'proposed'
+        CHECK(status IN ('proposed','approved','denied','ran','failed')),
+    decided_by TEXT REFERENCES profiles(id),
+    decided_at INTEGER,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch())
+);
+CREATE INDEX IF NOT EXISTS agent_sessions_project ON agent_sessions(project_id, created_at);
+CREATE INDEX IF NOT EXISTS agent_tool_calls_session ON agent_tool_calls(session_id);
+CREATE INDEX IF NOT EXISTS agent_tool_calls_pending ON agent_tool_calls(session_id, status) WHERE status='proposed';
 "#;
 pub(crate) const SCHEMA_V141: &str = r#"
 CREATE TABLE IF NOT EXISTS hosted_repositories (
@@ -3968,5 +4036,97 @@ mod v145_contract_tests {
             .unwrap();
         assert_eq!(old_tables, 2, "the old tables are left in place, unused");
         migrate(&conn).expect("idempotent");
+    }
+
+    /// V150 (roadmap.md): the agent's four tables exist, replay is a no-op, and the
+    /// foreign keys actually took — a session may not reference a principal that does
+    /// not exist, and deleting a session takes its transcript and tool calls with it.
+    #[test]
+    fn v150_creates_the_agent_tables_and_replays_as_a_no_op() {
+        let temp = TempDb::new("gaia-space-v150-agent");
+        let conn = open_at(&temp).expect("database");
+        migrate(&conn).expect("migrate to head");
+        seed(&conn).expect("seed");
+        for table in [
+            "agent_provider_keys",
+            "agent_sessions",
+            "agent_messages",
+            "agent_tool_calls",
+        ] {
+            assert!(
+                table_exists(&conn, table).expect("sqlite_master"),
+                "{table} is missing after the climb"
+            );
+        }
+        // Rewind to the rung below and climb it twice: the rung is idempotent and the
+        // version stamp advances exactly once.
+        conn.pragma_update(None, "user_version", 149).expect("rewind");
+        migrate(&conn).expect("replay V150");
+        migrate(&conn).expect("replay V150 twice");
+        assert_eq!(
+            conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
+                .unwrap(),
+            SCHEMA_VERSION
+        );
+
+        // FK to `principals`: an unknown agent identity is refused, not stored.
+        assert!(
+            conn.execute(
+                "INSERT INTO agent_sessions(id,project_id,agent_principal_id,model,title) \
+                 VALUES('s-ghost','demo-project','principal-does-not-exist','m','t')",
+                [],
+            )
+            .is_err(),
+            "a session must belong to a real principal"
+        );
+
+        conn.execute(
+            "INSERT INTO principals(id,kind,profile_id,label) VALUES('agent:v150','application',NULL,'V150 Agent')",
+            [],
+        )
+        .expect("agent principal");
+        conn.execute(
+            "INSERT INTO agent_sessions(id,project_id,agent_principal_id,model,title,step_budget) \
+             VALUES('s-1','demo-project','agent:v150','gpt-test','Read the repo',8)",
+            [],
+        )
+        .expect("session");
+        conn.execute(
+            "INSERT INTO agent_messages(id,session_id,seq,role,content) \
+             VALUES('m-1','s-1',1,'user','list the files')",
+            [],
+        )
+        .expect("message");
+        // Two messages may not share a slot in one transcript.
+        assert!(
+            conn.execute(
+                "INSERT INTO agent_messages(id,session_id,seq,role,content) \
+                 VALUES('m-2','s-1',1,'assistant','duplicate seq')",
+                [],
+            )
+            .is_err(),
+            "seq is unique per session"
+        );
+        conn.execute(
+            "INSERT INTO agent_tool_calls(id,session_id,message_id,tool,args_json) \
+             VALUES('t-1','s-1','m-1','list_files','{\"path\":\".\"}')",
+            [],
+        )
+        .expect("tool call");
+        conn.execute("DELETE FROM agent_sessions WHERE id='s-1'", [])
+            .expect("delete session");
+        for (table, column, value) in [
+            ("agent_messages", "session_id", "s-1"),
+            ("agent_tool_calls", "session_id", "s-1"),
+        ] {
+            let rows: i64 = conn
+                .query_row(
+                    &format!("SELECT count(*) FROM {table} WHERE {column}=?1"),
+                    [value],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(rows, 0, "{table} must cascade with its session");
+        }
     }
 }

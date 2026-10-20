@@ -26,6 +26,12 @@ Built with [Tauri](https://tauri.app/) + [Solid](https://www.solidjs.com/) + Typ
 
 Feature parity against JetBrains Space is tracked in [`PARITY.md`](PARITY.md) (audited per domain, work ongoing — not everything is done).
 
+## AI coding agent (in progress)
+
+A native agent runtime is being built into the Rust backend (`src-tauri/src/agent/`), so a task can run against a project's bound repository, be reviewed through the existing review UI, and be committed under its own identity. It is staged and not yet user-facing; the plan, the security constraints and the per-stage gates live in [`roadmap.md`](roadmap.md).
+
+What exists today is the foundation: the V150 tables (provider keys, sessions, transcript, tool-call approvals) and provider-key storage sealed with `secretbox` — keys are encrypted at rest and never travel back to the frontend in plaintext.
+
 ## Getting started
 
 ```bash
