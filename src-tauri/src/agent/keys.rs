@@ -208,6 +208,42 @@ pub fn delete_key_in(c: &Connection, id: &str) -> Result<()> {
     Ok(())
 }
 
+/// The plaintext key, and the settings it was stored with. Handed out only for the
+/// duration of one provider call (`provider_for_key_in`), never cached on a session.
+pub struct ResolvedKey {
+    pub provider: String,
+    pub base_url: Option<String>,
+    pub key: String,
+}
+
+/// A `Debug` that cannot leak the key into a log line or a panic message.
+impl std::fmt::Debug for ResolvedKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ResolvedKey")
+            .field("provider", &self.provider)
+            .field("base_url", &self.base_url)
+            .field("key", &"<redacted>")
+            .finish()
+    }
+}
+
+/// Decrypt one stored key. This is the only route from a row to a usable secret; it
+/// runs at call time so the plaintext never lives in session state.
+pub fn resolve_key_in(c: &Connection, id: &str) -> Result<ResolvedKey> {
+    let stored = c
+        .query_row(
+            &format!("SELECT {KEY_COLS} FROM agent_provider_keys WHERE id=?1"),
+            [id],
+            row_key,
+        )
+        .map_err(|_| "provider key not found".to_string())?;
+    Ok(ResolvedKey {
+        provider: stored.provider,
+        base_url: stored.base_url,
+        key: open_split(&stored.ciphertext, &stored.nonce)?,
+    })
+}
+
 // ---- command surface (/api/cmd/<name>; desktop IPC with the same names) ----
 #[cfg_attr(feature = "desktop", tauri::command)]
 pub fn agent_save_provider_key(

@@ -1,9 +1,13 @@
 //! The native coding agent: one repo, one session, end to end (roadmap.md).
 //!
-//! Stage 0 is the foundation only — the V150 tables (`db.rs`) and provider-key
-//! storage (`keys.rs`). The provider client (`provider.rs`), the run loop
-//! (`loop.rs`), the tools (`tools/`), the jail (`jail.rs`) and the session store
-//! (`store.rs`) arrive in the stages that need them; nothing here is a stub.
+//! What exists so far — nothing here is a stub:
+//!
+//! - `keys.rs` (Stage 0): BYO provider keys, sealed in `secretbox`.
+//! - `provider.rs` (Stage 1): the OpenAI-compatible chat-completions client, behind an
+//!   injected transport so tests script every reply.
+//!
+//! Still to come: the run loop (`loop.rs`), the tools (`tools/`), the jail (`jail.rs`)
+//! and the session store (`store.rs`), each in the stage that needs it.
 //!
 //! Everything the agent does is **project-scoped, never path-taking**: a command
 //! resolves its repository from `projects.repo_path` through
@@ -11,6 +15,7 @@
 //! repository they cannot see.
 
 pub mod keys;
+pub mod provider;
 
 use std::sync::atomic::{AtomicU64, Ordering};
 

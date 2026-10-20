@@ -3,7 +3,7 @@
 ## Steps
 
 - [x] Stage 0 — Foundation: DB rung 150, `agent` module skeleton, encrypted provider keys
-- [ ] Stage 1 — Provider: OpenAI-compatible client behind a mockable transport
+- [x] Stage 1 — Provider: OpenAI-compatible client behind a mockable transport
 - [ ] Stage 2 — Read-only loop: session, transcript, read/list/grep tools, step budget
 - [ ] Stage 3 — Write + jail: containment tests written *before* the write tool exists
 - [ ] Stage 4 — Execute: `run_command` with classification, approval, scrubbed env
